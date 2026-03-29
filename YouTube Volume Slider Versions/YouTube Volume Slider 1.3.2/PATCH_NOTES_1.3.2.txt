@@ -1,0 +1,19 @@
+📋 Patch Notes - Version 1.3.2
+
+### 🎨 NEW FEATURE
+
+- **Overlay Toggle Button**: Added a new speaker-style toggle button near the Like controls so you can quickly enable or disable the volume overlay.
+
+### ⚡ PERFORMANCE IMPROVEMENT
+
+- **Overlay Teardown When Disabled**: Disabling the toggle now removes the overlay and its listeners instead of only hiding it, reducing unnecessary UI work.
+
+### 🛠️ CONFIGURATION UPDATE
+
+- **Toggle Visibility Setting**: Added `showToggleButton` in `USER_SETTINGS` so the toggle button itself can be enabled or disabled.
+- **Persistent Overlay State**: The overlay enabled/disabled state now saves between page loads, so your preference is remembered automatically.
+
+### 🐛 BUG FIXES
+
+- **Visual State Feedback**: Improved active/inactive button visuals so it is clear when the overlay is enabled versus disabled.
+- **State Sync Reliability**: Button icon/state updates now stay in sync with the real overlay state during toggles and navigation changes.

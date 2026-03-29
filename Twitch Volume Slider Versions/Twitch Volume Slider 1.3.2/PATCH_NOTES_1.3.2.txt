@@ -1,0 +1,19 @@
+📋 Patch Notes - Version 1.3.2
+
+### 🎨 NEW FEATURE
+
+- **Overlay Toggle Button**: Added a new speaker-style toggle button beside channel action controls so you can quickly enable or disable the volume overlay.
+
+### ⚡ PERFORMANCE IMPROVEMENT
+
+- **Overlay Teardown When Disabled**: Disabling the toggle now removes the overlay and cleanup handlers instead of only hiding it, improving efficiency.
+
+### 🛠️ CONFIGURATION UPDATE
+
+- **Toggle Visibility Setting**: Added `showToggleButton` in `USER_SETTINGS` so the toggle button can be shown or hidden.
+- **Persistent Overlay State**: The overlay enabled/disabled preference is now saved and restored automatically.
+
+### 🐛 BUG FIXES
+
+- **Follow/Unfollow Placement**: Improved insertion behavior so the toggle is reliably injected next to channel controls.
+- **State & Icon Sync**: Updated active/inactive visuals and icon switching so toggle feedback stays consistent.

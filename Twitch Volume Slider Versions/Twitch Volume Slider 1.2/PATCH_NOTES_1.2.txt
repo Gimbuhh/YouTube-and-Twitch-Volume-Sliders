@@ -1,0 +1,20 @@
+📋 Patch Notes - Version 1.2
+
+### ⚡ PERFORMANCE IMPROVEMENTS
+
+- **Video Element Caching**: Added caching for video element to reduce repeated DOM queries.
+- **API Caching**: Implemented caching for Twitch player API to minimize React fiber traversal overhead.
+- **Debounced Storage Writes**: Volume saves now debounced to 150ms during slider drag, reducing localStorage write frequency.
+- **Optimized Mutation Observer**: Observer now filters for only relevant mutations (added nodes) and uses requestAnimationFrame throttling.
+
+### 🐛 BUG FIXES
+
+- **Event Listener Cleanup**: Added proper cleanup for volumechange event listener to prevent memory leaks.
+- **Navigation Handler Guard**: Prevented duplicate history patching with global flag check.
+- **Storage Timer Cleanup**: Timer properly cleared when overlay is removed to prevent orphaned timeouts.
+- **Change Event Optimization**: Immediate save on slider change event after clearing any pending debounced writes.
+
+### 🛠️ CONFIGURATION UPDATES
+
+- **Accessibility Labels**: Added aria-label attributes to mute button and volume slider for screen reader support.
+- **Debounce Constant**: Introduced STORAGE_WRITE_DEBOUNCE_MS constant (150ms) for configurable write delay.

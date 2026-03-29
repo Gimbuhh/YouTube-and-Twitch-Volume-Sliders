@@ -1,0 +1,1079 @@
+// ==UserScript==
+// @name         Twitch Volume Slider 1.4.1
+// @namespace    http://tampermonkey.net/
+// @version      1.4.1
+// @description  Large centered volume slider overlay for Twitch
+// @author       isagie (Made using AI)
+// @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
+// @match        https://www.twitch.tv/*
+// @run-at       document-idle
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const OVERLAY_ID = 'tm-volume-slider-overlay';
+    const SLIDER_ID = 'tm-volume-slider-range';
+    const VALUE_LABEL_ID = 'tm-volume-slider-value';
+    const MUTE_BTN_ID = 'tm-volume-slider-mute';
+    const TOGGLE_BTN_ID = 'tm-volume-slider-toggle';
+    const STORAGE_KEY = 'tm-twitch-volume';
+    const MUTE_STORAGE_KEY = 'tm-twitch-muted';
+    const OVERLAY_ENABLED_KEY = 'tm-twitch-overlay-enabled';
+    const STORAGE_WRITE_DEBOUNCE_MS = 150;
+    const TOGGLE_STYLE_ID = 'tm-toggle-button-style';
+    const USER_SETTINGS = {
+        // Set to 'small' or 'big'
+        sliderSize: 'small',
+        // Set to false to hide the toggle button
+        showToggleButton: true
+    };
+
+    let cachedVideo = null;
+    let cachedApi = null;
+    let cachedApiFromElement = null;
+    let saveVolumeTimer = 0;
+    let startupLockUntil = 0;
+    let cachedToggleButton = null;
+
+    // -------------------------------
+    // Toggle Button + Overlay State
+    // -------------------------------
+
+    /**
+     * Check if overlay is enabled from localStorage (default: true).
+     */
+    function isOverlayEnabled() {
+        try {
+            const saved = localStorage.getItem(OVERLAY_ENABLED_KEY);
+            if (saved === null) return true; // default enabled
+            return saved === 'true';
+        } catch (e) {
+            return true;
+        }
+    }
+
+    /**
+     * Set overlay enabled state and save to localStorage.
+     */
+    function setOverlayEnabled(enabled) {
+        try {
+            localStorage.setItem(OVERLAY_ENABLED_KEY, enabled ? 'true' : 'false');
+        } catch (e) { /* ignore storage errors */ }
+        
+        if (enabled) {
+            showOverlay();
+        } else {
+            hideOverlay();
+        }
+        updateToggleButtonState();
+    }
+
+    /**
+     * Show the overlay slider.
+     */
+    function showOverlay() {
+        attachSliderIfPossible();
+    }
+
+    /**
+     * Hide the overlay slider.
+     */
+    function hideOverlay() {
+        removeOverlay();
+    }
+
+    function applyToggleButtonVisualState(button, enabled) {
+        if (!button) return;
+        button.classList.toggle('tm-toggle-active', enabled);
+        button.title = enabled ? 'Disable Slider' : 'Enable Slider';
+        button.setAttribute('aria-label', enabled ? 'Disable Slider' : 'Enable Slider');
+        // Enforce visual state inline so site CSS cannot override it.
+        button.style.background = enabled ? 'rgba(255, 255, 255, 0.16)' : 'rgba(255, 255, 255, 0.05)';
+        button.style.border = enabled ? '1px solid rgba(255, 255, 255, 0.38)' : '1px solid rgba(255, 255, 255, 0.16)';
+        button.style.opacity = enabled ? '1' : '0.65';
+
+        const iconOn = button.querySelector('.tm-toggle-icon-on');
+        const iconOff = button.querySelector('.tm-toggle-icon-off');
+        if (iconOn) iconOn.style.display = enabled ? '' : 'none';
+        if (iconOff) iconOff.style.display = enabled ? 'none' : '';
+    }
+
+    /**
+     * Update toggle button appearance based on overlay state.
+     */
+    function updateToggleButtonState() {
+        if (!cachedToggleButton) return;
+        applyToggleButtonVisualState(cachedToggleButton, isOverlayEnabled());
+    }
+
+    /**
+     * Ensure we always get the active HTMLVideoElement.
+     */
+    function getVideoElement() {
+        if (cachedVideo && cachedVideo.isConnected) {
+            return cachedVideo;
+        }
+        const videos = document.querySelectorAll('video');
+        if (!videos || videos.length === 0) {
+            cachedVideo = null;
+            return null;
+        }
+        // Prefer the largest video element (usually the main player)
+        let best = videos[0];
+        let bestArea = best.clientWidth * best.clientHeight;
+        videos.forEach((v) => {
+            const area = v.clientWidth * v.clientHeight;
+            if (area > bestArea) {
+                best = v;
+                bestArea = area;
+            }
+        });
+        cachedVideo = best;
+        return cachedVideo;
+    }
+
+    /**
+     * Find a suitable container to host the overlay.
+     */
+    function getPlayerContainer(video = getVideoElement()) {
+        if (!video) {
+            return null;
+        }
+
+        return (
+            video.closest('.video-player, .video-player__container, [data-a-target="video-player"]') ||
+            video.parentElement
+        );
+    }
+
+    function ensurePlayerPositioning(player) {
+        const style = window.getComputedStyle(player);
+        if (style.position === 'static') {
+            player.style.position = 'relative';
+        }
+    }
+
+    function getSliderSize() {
+        return USER_SETTINGS.sliderSize === 'big' ? 'big' : 'small';
+    }
+
+    function getSliderSizeConfig(size) {
+        if (size === 'big') {
+            // Match old 1.2.2 feel: tall, easy-to-press bar area.
+            return { track: '30px', hover: '30px', thumb: '22px', thumbOffset: '4px', ticks: '30px', hitbox: '38px' };
+        }
+        // Keep the thin visual track, but enlarge the interaction area.
+        return { track: '9px', hover: '11px', thumb: '22px', thumbOffset: '-7px', ticks: '9px', hitbox: '42px' };
+    }
+
+    function applySizeToOverlay(overlay) {
+        const size = getSliderSize();
+        const cfg = getSliderSizeConfig(size);
+        overlay.dataset.tmSize = size;
+        overlay.style.setProperty('--tm-track-h', cfg.track);
+        overlay.style.setProperty('--tm-track-h-hover', cfg.hover);
+        overlay.style.setProperty('--tm-thumb-size', cfg.thumb);
+        overlay.style.setProperty('--tm-thumb-offset', cfg.thumbOffset);
+        overlay.style.setProperty('--tm-tick-h', cfg.ticks);
+        overlay.style.setProperty('--tm-hitbox-h', cfg.hitbox);
+    }
+
+    function createStylesIfNeeded() {
+        let style = document.getElementById('tm-volume-slider-style');
+        if (!style) {
+            style = document.createElement('style');
+            style.id = 'tm-volume-slider-style';
+            style.type = 'text/css';
+            document.head.appendChild(style);
+        }
+        const css = `
+#${OVERLAY_ID} input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(to right, #a970ff 0%, #9146ff 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 100%);
+  --tm-active-track-h: var(--tm-track-h, 9px);
+  height: var(--tm-hitbox-h, 38px);
+  border-radius: 12px;
+  outline: none;
+  position: relative;
+  background-size: 100% var(--tm-active-track-h, 9px);
+  background-position: center;
+  background-repeat: no-repeat;
+  transition: all 0.2s ease;
+  overflow: visible;
+}
+
+#${OVERLAY_ID} input[type=range]:hover {
+  --tm-active-track-h: var(--tm-track-h-hover, 11px);
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-runnable-track {
+  border: none;
+  background: transparent;
+  height: var(--tm-active-track-h, 9px);
+  border-radius: 12px;
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--tm-thumb-size, 22px);
+  height: var(--tm-thumb-size, 22px);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+  margin-top: var(--tm-thumb-offset, -7px);
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb {
+  width: var(--tm-thumb-size, 22px);
+  height: var(--tm-thumb-size, 22px);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-track {
+  background: transparent;
+  height: var(--tm-active-track-h, 9px);
+  border-radius: 12px;
+  border: none;
+  outline: none;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-progress {
+  background: transparent;
+  border: none;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-focus-outer {
+  border: none;
+  outline: none;
+}
+
+#${OVERLAY_ID} .tm-slider-ticks {
+  position: absolute;
+  left: 11px;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: var(--tm-tick-h, 9px);
+  pointer-events: none;
+  background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
+  background-size: 100% 100%;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+#${OVERLAY_ID}:hover .tm-slider-ticks {
+  opacity: 1;
+}
+
+#${OVERLAY_ID} #${MUTE_BTN_ID} {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease;
+}
+#${OVERLAY_ID} #${MUTE_BTN_ID}:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+#${OVERLAY_ID} #${MUTE_BTN_ID}.muted {
+  color: #ff6b6b;
+}
+
+        `;
+        style.textContent = css;
+    }
+
+    function updateSliderBar(slider) {
+        const value = Number(slider.value) || 0;
+        const pct = Math.min(Math.max(value, 0), 100);
+        const fadeStart = Math.max(0, pct - 1);
+        const fadeEnd = Math.min(100, pct + 1);
+        slider.style.background = `linear-gradient(to right,
+            #a970ff 0%,
+            #9146ff ${fadeStart}%,
+            #b38cff ${pct}%,
+            rgba(255, 255, 255, 0.15) ${fadeEnd}%,
+            rgba(255, 255, 255, 0.15) 100%)`;
+        slider.style.backgroundSize = '100% var(--tm-active-track-h, 9px)';
+        slider.style.backgroundPosition = 'center';
+        slider.style.backgroundRepeat = 'no-repeat';
+    }
+
+    /**
+     * Get Twitch's internal player API (mediaPlayerInstance) via React fiber.
+     * Returns object with getVolume(), setVolume(), isMuted(), setMuted() or null.
+     */
+    function getTwitchPlayerApi() {
+        try {
+            const playerSel = 'div[data-a-target="player-overlay-click-handler"], .video-player';
+            const el = document.querySelector(playerSel);
+            if (!el) return null;
+            if (cachedApi && cachedApiFromElement === el) {
+                return cachedApi;
+            }
+
+            let instance;
+            for (const key in el) {
+                if (key.startsWith('__reactInternalInstance$') || key.startsWith('__reactFiber$')) {
+                    instance = el[key];
+                    break;
+                }
+            }
+            if (!instance) return null;
+
+            let parent = instance.return;
+            for (let i = 0; i < 50; i++) {
+                if (!parent || !parent.memoizedProps) break;
+                const player = parent.memoizedProps.mediaPlayerInstance;
+                if (player) {
+                    const api = player.core ?? player.playerInstance?.core ?? player;
+                    if (typeof api?.getVolume === 'function' && typeof api?.setVolume === 'function') {
+                        cachedApi = api;
+                        cachedApiFromElement = el;
+                        return api;
+                    }
+                }
+                parent = parent.return;
+            }
+        } catch (e) { /* React structure may change */ }
+        cachedApi = null;
+        cachedApiFromElement = null;
+        return null;
+    }
+
+    /**
+     * Get effective volume (0 when muted, else 0-100). Use for display when unmuted.
+     */
+    function getVolume(video) {
+        try {
+            const api = getTwitchPlayerApi();
+            if (api) {
+                if (api.isMuted && api.isMuted()) return 0;
+                const vol = api.getVolume();
+                return Math.round((typeof vol === 'number' ? vol : 0) * 100);
+            }
+        } catch (e) { /* fall through */ }
+        const vol = (video.muted ? 0 : video.volume) || 0;
+        return Math.round(vol * 100);
+    }
+
+    /**
+     * Set volume via Twitch API (preferred) or video element from percentage (0-100).
+     */
+    function setVolume(video, value) {
+        try {
+            const api = getTwitchPlayerApi();
+            if (api) {
+                if (api.isMuted && api.isMuted()) api.setMuted(false);
+                api.setVolume(Math.min(1, Math.max(0, value / 100)));
+                return;
+            }
+        } catch (e) { /* fall through */ }
+        video.volume = value / 100;
+        video.muted = false;
+    }
+
+    /**
+     * Check if muted via Twitch API or video element.
+     */
+    function isMuted(video) {
+        try {
+            const api = getTwitchPlayerApi();
+            if (api && api.isMuted) return api.isMuted();
+        } catch (e) { /* fall through */ }
+        return !!video.muted;
+    }
+
+    /**
+     * Set mute state via Twitch API or video element.
+     */
+    function setMuted(video, muted) {
+        try {
+            const api = getTwitchPlayerApi();
+            if (api && api.setMuted) {
+                api.setMuted(!!muted);
+                return;
+            }
+        } catch (e) { /* fall through */ }
+        video.muted = !!muted;
+    }
+
+    /**
+     * Restore volume and mute from localStorage. Call before syncing slider.
+     */
+    function restoreSavedVolume(video) {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved !== null) {
+                const value = Math.min(100, Math.max(0, parseInt(saved, 10)));
+                if (!isNaN(value)) {
+                    setVolume(video, value);
+                }
+            }
+            const savedMute = localStorage.getItem(MUTE_STORAGE_KEY);
+            if (savedMute === 'true') {
+                try { setMuted(video, true); } catch (e) { /* ignore */ }
+            }
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+    /**
+     * Snap value to nearest 5% (5, 10, 15, ... 100).
+     */
+    function snapTo5(value) {
+        return Math.round((Math.min(100, Math.max(0, value)) / 5)) * 5;
+    }
+
+    /**
+     * Save volume to localStorage for persistence across page reloads.
+     */
+    function saveVolume(value) {
+        try {
+            localStorage.setItem(STORAGE_KEY, String(Math.round(value)));
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+    function scheduleSaveVolume(value) {
+        if (saveVolumeTimer) {
+            clearTimeout(saveVolumeTimer);
+        }
+        saveVolumeTimer = window.setTimeout(() => {
+            saveVolume(value);
+            saveVolumeTimer = 0;
+        }, STORAGE_WRITE_DEBOUNCE_MS);
+    }
+
+    /**
+     * Save mute state to localStorage.
+     */
+    function saveMute(muted) {
+        try {
+            localStorage.setItem(MUTE_STORAGE_KEY, muted ? 'true' : 'false');
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+    function setSliderFromPlayer(slider, label, muteBtn, video) {
+        try {
+            const muted = isMuted(video);
+            const displayValue = getVolume(video);
+            slider.value = String(displayValue);
+            if (label) {
+                label.textContent = muted ? 'Muted' : `${displayValue}%`;
+            }
+            syncMuteButton(muteBtn, muted);
+            updateSliderBar(slider);
+        } catch (e) { /* prevent crash */ }
+    }
+
+    function syncMuteButton(muteBtn, muted) {
+        if (!muteBtn) return;
+        const iconOn = muteBtn.querySelector('.tm-icon-on');
+        const iconOff = muteBtn.querySelector('.tm-icon-off');
+        if (iconOn) iconOn.style.display = muted ? 'none' : '';
+        if (iconOff) iconOff.style.display = muted ? '' : 'none';
+        muteBtn.classList.toggle('muted', muted);
+        muteBtn.title = muted ? 'Unmute' : 'Mute';
+    }
+
+    function makeSvg(paths) {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('width', '20');
+        svg.setAttribute('height', '20');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+        paths.forEach((d) => {
+            const p = document.createElementNS(ns, 'path');
+            p.setAttribute('fill', 'currentColor');
+            p.setAttribute('d', d);
+            svg.appendChild(p);
+        });
+        return svg;
+    }
+
+    function makeToggleIcon(className, paths, isVisible) {
+        const icon = document.createElement('span');
+        icon.className = className;
+        icon.style.display = isVisible ? '' : 'none';
+        icon.appendChild(makeSvg(paths));
+        return icon;
+    }
+
+    function ensureToggleButtonStyles() {
+        let style = document.getElementById(TOGGLE_STYLE_ID);
+        if (!style) {
+            style = document.createElement('style');
+            style.id = TOGGLE_STYLE_ID;
+            document.head.appendChild(style);
+        }
+        style.textContent = `
+                #${TOGGLE_BTN_ID} {
+                    width: 40px;
+                    min-width: 40px;
+                    height: 36px;
+                    padding: 0;
+                    border-radius: 18px;
+                    box-sizing: border-box;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: all 0.2s ease;
+                    cursor: pointer;
+                    color: rgba(255, 255, 255, 0.92);
+                }
+                #${TOGGLE_BTN_ID} svg {
+                    width: 20px;
+                    height: 20px;
+                }
+                #${TOGGLE_BTN_ID} .tm-toggle-icon-on svg,
+                #${TOGGLE_BTN_ID} .tm-toggle-icon-off svg {
+                    width: 27px;
+                    height: 27px;
+                    transform: translateY(2px);
+                }
+                #${TOGGLE_BTN_ID}.tm-toggle-active {
+                    background: rgba(255, 255, 255, 0.16);
+                    border: 1px solid rgba(255, 255, 255, 0.38);
+                    opacity: 1;
+                }
+                #${TOGGLE_BTN_ID}:not(.tm-toggle-active) {
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.16);
+                    opacity: 0.65;
+                }
+                #${TOGGLE_BTN_ID}:hover {
+                    opacity: 0.9;
+                }
+            `;
+    }
+
+    /**
+     * Create toggle button for showing/hiding overlay slider.
+     */
+    function createToggleButton() {
+        const button = document.createElement('button');
+        button.id = TOGGLE_BTN_ID;
+        button.type = 'button';
+
+        const enabled = isOverlayEnabled();
+
+        const iconWrap = document.createElement('span');
+        iconWrap.style.display = 'inline-flex';
+        iconWrap.style.alignItems = 'center';
+        iconWrap.style.justifyContent = 'center';
+        iconWrap.style.lineHeight = '0';
+        iconWrap.style.width = '100%';
+
+        const iconOn = makeToggleIcon('tm-toggle-icon-on', [
+            'M17 5H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zm0 8c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z'
+        ], enabled);
+
+        const iconOff = makeToggleIcon('tm-toggle-icon-off', [
+            'M17 5H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zM7 13c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z'
+        ], !enabled);
+
+        iconWrap.appendChild(iconOn);
+        iconWrap.appendChild(iconOff);
+        button.appendChild(iconWrap);
+
+        ensureToggleButtonStyles();
+        
+        // Handle click
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const newState = !isOverlayEnabled();
+            applyToggleButtonVisualState(button, newState);
+            setOverlayEnabled(newState);
+        });
+        
+        cachedToggleButton = button;
+        updateToggleButtonState();
+        return button;
+    }
+
+    /**
+     * Position overlay at bottom of video player.
+     */
+    function positionOverlayAtBottom(overlay, player) {
+        overlay.style.bottom = '12px';
+    }
+
+    function createOverlay(player, video) {
+        // Prevent duplicates
+        const existing = document.getElementById(OVERLAY_ID);
+        if (existing) {
+            return existing;
+        }
+
+        ensurePlayerPositioning(player);
+        createStylesIfNeeded();
+
+        const overlay = document.createElement('div');
+        overlay.id = OVERLAY_ID;
+
+        Object.assign(overlay.style, {
+            position: 'absolute',
+            left: '50%',
+            bottom: '12px',
+            transform: 'translateX(-50%)',
+            width: '45%',
+            maxWidth: '675px',
+            padding: '10px 14px',
+            background: 'rgba(0, 0, 0, 0.35)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            borderRadius: '14px',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: '6px',
+            zIndex: '10000',
+            pointerEvents: 'auto',
+            boxSizing: 'border-box',
+            opacity: '0.45',
+            transition: 'opacity 0.25s ease, transform 0.25s ease',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+        });
+        overlay.addEventListener('mouseenter', () => {
+            overlay.style.opacity = '0.95';
+            overlay.style.transform = 'translateX(-50%) translateY(-2px)';
+        });
+        overlay.addEventListener('mouseleave', () => {
+            overlay.style.opacity = '0.45';
+            overlay.style.transform = 'translateX(-50%) translateY(0)';
+        });
+
+        applySizeToOverlay(overlay);
+
+        const topRow = document.createElement('div');
+        topRow.style.display = 'flex';
+        topRow.style.alignItems = 'center';
+        topRow.style.gap = '10px';
+
+        const muteBtn = document.createElement('button');
+        muteBtn.id = MUTE_BTN_ID;
+        muteBtn.type = 'button';
+        muteBtn.title = 'Mute';
+        muteBtn.setAttribute('aria-label', 'Toggle mute');
+
+        const iconOn = document.createElement('span');
+        iconOn.className = 'tm-icon-on';
+        iconOn.style.lineHeight = '0';
+        iconOn.appendChild(makeSvg([
+            'M3 9v6h4l5 5V4L7 9H3z',
+            'M16.5 12c0-1.77-.77-3.35-2-4.44v8.88c1.23-1.09 2-2.67 2-4.44z',
+            'M19 12c0 2.97-1.65 5.54-4 6.71v2.06c3.45-1.28 6-4.58 6-8.77s-2.55-7.49-6-8.77v2.06c2.35 1.17 4 3.74 4 6.71z'
+        ]));
+
+        const iconOff = document.createElement('span');
+        iconOff.className = 'tm-icon-off';
+        iconOff.style.display = 'none';
+        iconOff.style.lineHeight = '0';
+        iconOff.appendChild(makeSvg([
+            'M16.5 12c0-1.77-.77-3.35-2-4.44v2.77l2 2c0-.11 0-.22 0-.33zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z'
+        ]));
+
+        muteBtn.appendChild(iconOn);
+        muteBtn.appendChild(iconOff);
+
+        const label = document.createElement('div');
+        label.id = VALUE_LABEL_ID;
+        Object.assign(label.style, {
+            fontSize: '18px',
+            fontWeight: '500',
+            color: 'rgba(255, 255, 255, 0.95)',
+            textAlign: 'center',
+            userSelect: 'none',
+            letterSpacing: '0.5px',
+            flex: '1'
+        });
+        label.textContent = '100%';
+
+        const rightSpacer = document.createElement('div');
+        rightSpacer.style.width = '36px';
+        rightSpacer.style.flexShrink = '0';
+
+        topRow.appendChild(muteBtn);
+        topRow.appendChild(label);
+        topRow.appendChild(rightSpacer);
+
+        const sliderWrap = document.createElement('div');
+        const sliderCfg = getSliderSizeConfig(getSliderSize());
+        sliderWrap.style.position = 'relative';
+        sliderWrap.style.width = '100%';
+        sliderWrap.style.height = sliderCfg.hitbox;
+        sliderWrap.style.display = 'flex';
+        sliderWrap.style.alignItems = 'center';
+
+        const tickOverlay = document.createElement('div');
+        tickOverlay.className = 'tm-slider-ticks';
+
+        const slider = document.createElement('input');
+        slider.id = SLIDER_ID;
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '1';
+        slider.style.width = '100%';
+        slider.style.display = 'block';
+        slider.style.margin = '0';
+        slider.style.cursor = 'pointer';
+        slider.style.backgroundSize = '100% 100%';
+        slider.setAttribute('aria-label', 'Volume');
+
+        // Initialize from localStorage to avoid the 100% → actual jump on stream load
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved !== null) {
+                const val = Math.min(100, Math.max(0, parseInt(saved, 10)));
+                if (!isNaN(val)) {
+                    slider.value = String(val);
+                    label.textContent = `${val}%`;
+                }
+            }
+        } catch (e) { /* fall through to player sync */ }
+        updateSliderBar(slider);
+
+        let dragStartTime = 0;
+        let isDragging = false;
+        slider.addEventListener('pointerdown', () => { 
+            dragStartTime = Date.now();
+            isDragging = false;
+        });
+
+        muteBtn.addEventListener('click', () => {
+            try {
+                const muted = isMuted(video);
+                setMuted(video, !muted);
+                saveMute(!muted);
+                setSliderFromPlayer(slider, label, muteBtn, video);
+            } catch (e) { /* prevent freeze */ }
+        });
+
+        slider.addEventListener('input', () => {
+            const rawValue = Number(slider.value) || 0;
+            const timeSinceStart = Date.now() - dragStartTime;
+            
+            // Snap immediately for quick clicks, otherwise smooth drag
+            let value = rawValue;
+            if (timeSinceStart < 300 && !isDragging) {
+                value = snapTo5(rawValue);
+                slider.value = String(value);
+            } else {
+                isDragging = true;
+            }
+            
+            setVolume(video, value);
+            saveMute(false);
+            label.textContent = `${value}%`;
+            updateSliderBar(slider);
+            scheduleSaveVolume(value);
+        });
+
+        slider.addEventListener('change', () => {
+            const value = Number(slider.value) || 0;
+            const snap = isDragging ? value : snapTo5(value);
+            if (snap !== value) {
+                slider.value = String(snap);
+                setVolume(video, snap);
+                label.textContent = `${snap}%`;
+                updateSliderBar(slider);
+            }
+            if (saveVolumeTimer) {
+                clearTimeout(saveVolumeTimer);
+                saveVolumeTimer = 0;
+            }
+            saveVolume(Number(slider.value) || 0);
+            isDragging = false;
+        });
+
+        // Sync slider UI and persist volume on any external/native change
+        // During startup lock, skip UI sync too so the saved value stays visible
+        const onVideoVolumeChange = () => {
+            if (Date.now() <= startupLockUntil) return;
+            try {
+                setSliderFromPlayer(slider, label, muteBtn, video);
+                if (!isMuted(video)) {
+                    scheduleSaveVolume(getVolume(video));
+                }
+            } catch (e) { /* prevent crash */ }
+        };
+        video.addEventListener('volumechange', onVideoVolumeChange);
+
+        sliderWrap.appendChild(slider);
+        sliderWrap.appendChild(tickOverlay);
+        overlay.appendChild(topRow);
+        overlay.appendChild(sliderWrap);
+        player.appendChild(overlay);
+
+        positionOverlayAtBottom(overlay, player);
+
+        const onResize = () => positionOverlayAtBottom(overlay, player);
+        window.addEventListener('resize', onResize);
+        overlay._resizeCleanup = () => window.removeEventListener('resize', onResize);
+        overlay._volumeCleanup = () => video.removeEventListener('volumechange', onVideoVolumeChange);
+
+        return overlay;
+    }
+
+    function removeOverlay() {
+        if (saveVolumeTimer) {
+            clearTimeout(saveVolumeTimer);
+            saveVolumeTimer = 0;
+        }
+        const existing = document.getElementById(OVERLAY_ID);
+        if (existing && existing.parentElement) {
+            if (typeof existing._resizeCleanup === 'function') {
+                existing._resizeCleanup();
+            }
+            if (typeof existing._volumeCleanup === 'function') {
+                existing._volumeCleanup();
+            }
+            existing.parentElement.removeChild(existing);
+        }
+    }
+
+    /**
+     * Inject toggle button into Twitch's video controls (to the left of Follow button).
+     */
+    function injectToggleButton() {
+        if (!USER_SETTINGS.showToggleButton) return false;
+
+        const existing = document.getElementById(TOGGLE_BTN_ID);
+        if (existing && existing.isConnected) return true;
+
+        const followButton = document.querySelector('[data-a-target="follow-button"], [data-a-target="unfollow-button"]');
+        if (!followButton) return false;
+
+        const followWrapper = followButton.closest('div[class*="iglnKI"]');
+        if (!followWrapper || !followWrapper.parentElement) return false;
+
+        const wrapperClone = document.createElement('div');
+        wrapperClone.className = followWrapper.className;
+        wrapperClone.style.marginRight = '1rem';
+        wrapperClone.style.display = 'flex';
+        wrapperClone.style.alignItems = 'center';
+
+        const innerClass = followWrapper.firstElementChild && followWrapper.firstElementChild.className
+            ? followWrapper.firstElementChild.className
+            : 'Layout-sc-1xcs6mc-0 dCFkna';
+        const innerWrapper = document.createElement('div');
+        innerWrapper.className = innerClass;
+        innerWrapper.style.display = 'flex';
+        innerWrapper.style.alignItems = 'center';
+
+        const toggleBtn = createToggleButton();
+        // Match Follow/Unfollow button height for consistent vertical alignment.
+        const followRect = followButton.getBoundingClientRect();
+        if (followRect && followRect.height > 0) {
+            const h = Math.round(followRect.height);
+            toggleBtn.style.height = `${h}px`;
+            toggleBtn.style.minWidth = `${h}px`;
+            toggleBtn.style.width = `${h}px`;
+            toggleBtn.style.borderRadius = `${Math.round(h / 2)}px`;
+        }
+        innerWrapper.appendChild(toggleBtn);
+        wrapperClone.appendChild(innerWrapper);
+
+        // The immediate follow wrapper parent can be block-layout on some Twitch layouts.
+        // Force horizontal flow so our toggle sits to the LEFT instead of above.
+        const followGroup = followWrapper.parentElement;
+        followGroup.style.display = 'flex';
+        followGroup.style.alignItems = 'center';
+        followGroup.style.flexWrap = 'nowrap';
+
+        followGroup.insertBefore(wrapperClone, followWrapper);
+        return true;
+    }
+
+    /**
+     * Setup observer to re-inject toggle button when UI changes.
+     * Only attempts injection when Follow button is present.
+     */
+    function setupToggleButtonObserver() {
+        if (!USER_SETTINGS.showToggleButton) return;
+        
+        let lastInject = 0;
+        const INJECT_COOLDOWN_MS = 500;
+        let injectQueued = false;
+        
+        const observer = new MutationObserver(() => {
+            const existing = document.getElementById(TOGGLE_BTN_ID);
+            if (existing && existing.isConnected) return;
+            
+            // Only attempt injection if Follow/Unfollow button exists
+            const followButton = document.querySelector('[data-a-target="follow-button"], [data-a-target="unfollow-button"]');
+            if (!followButton) return;
+            
+            if (injectQueued) return;
+            injectQueued = true;
+            
+            requestAnimationFrame(() => {
+                injectQueued = false;
+                const now = Date.now();
+                if (now - lastInject < INJECT_COOLDOWN_MS) return;
+                
+                if (injectToggleButton()) {
+                    lastInject = now;
+                }
+            });
+        });
+        
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    function attachSliderIfPossible() {
+        // Always try to inject toggle button if enabled
+        if (USER_SETTINGS.showToggleButton) {
+            injectToggleButton();
+        }
+        
+        // Only create overlay if enabled
+        if (!isOverlayEnabled()) {
+            return false;
+        }
+        
+        const video = getVideoElement();
+        const player = getPlayerContainer(video);
+        if (!video || !player) {
+            return false;
+        }
+        // Only restore volume and schedule fade-in on first attach
+        if (!document.getElementById(OVERLAY_ID)) {
+            startupLockUntil = Date.now() + 2000;
+            restoreSavedVolume(video);
+            createOverlay(player, video);
+            setTimeout(() => {
+                restoreSavedVolume(video);
+                const el = document.getElementById(OVERLAY_ID);
+                if (el) el.style.opacity = '0.45';
+            }, 1500);
+        }
+        return true;
+    }
+
+    function setupInitialAttempts() {
+        let attempts = 0;
+        const maxAttempts = 40; // ~20 seconds with 500ms interval
+        const interval = setInterval(() => {
+            attempts++;
+            if (attachSliderIfPossible() || attempts >= maxAttempts) {
+                clearInterval(interval);
+            }
+        }, 500);
+    }
+
+    function setupMutationObserver() {
+        if (!window.MutationObserver) return;
+
+        let lastAttach = 0;
+        const ATTACH_COOLDOWN_MS = 1000;
+        let attachQueued = false;
+
+        const observer = new MutationObserver((mutations) => {
+            if (!mutations.some((mutation) => mutation.addedNodes && mutation.addedNodes.length > 0)) {
+                return;
+            }
+            if (attachQueued) return;
+            attachQueued = true;
+            requestAnimationFrame(() => {
+                attachQueued = false;
+            const now = Date.now();
+            if (now - lastAttach < ATTACH_COOLDOWN_MS) return;
+            if (attachSliderIfPossible()) {
+                lastAttach = now;
+            }
+            });
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    function setupNavigationHandler() {
+        if (window.__tmTwitchVolumeNavPatched) return;
+        window.__tmTwitchVolumeNavPatched = true;
+        const scheduleReattach = () => {
+            setTimeout(() => {
+                removeOverlay();
+                cachedToggleButton = null;
+                attachSliderIfPossible();
+            }, 700);
+        };
+
+        const originalPushState = history.pushState;
+        history.pushState = function () {
+            const result = originalPushState.apply(this, arguments);
+            scheduleReattach();
+            return result;
+        };
+
+        const originalReplaceState = history.replaceState;
+        history.replaceState = function () {
+            const result = originalReplaceState.apply(this, arguments);
+            scheduleReattach();
+            return result;
+        };
+
+        window.addEventListener('popstate', scheduleReattach, true);
+    }
+
+    function init() {
+        setupInitialAttempts();
+        setupMutationObserver();
+        setupNavigationHandler();
+        setupToggleButtonObserver();
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        init();
+    } else {
+        window.addEventListener('DOMContentLoaded', init, { once: true });
+    }
+})();

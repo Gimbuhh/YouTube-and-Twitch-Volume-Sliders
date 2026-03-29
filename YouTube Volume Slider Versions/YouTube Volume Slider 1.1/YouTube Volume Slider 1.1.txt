@@ -1,0 +1,453 @@
+// ==UserScript==
+// @name         YouTube Volume Slider 1.1
+// @namespace    http://tampermonkey.net/
+// @version      1.1
+// @description  Large centered volume slider overlay for YouTube, optimized for remote VNC control.
+// @author       You
+// @icon         https://www.youtube.com/favicon.ico
+// @match        https://www.youtube.com/*
+// @run-at       document-idle
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const OVERLAY_ID = 'tm-volume-slider-overlay';
+    const SLIDER_ID = 'tm-volume-slider-range';
+    const VALUE_LABEL_ID = 'tm-volume-slider-value';
+    const STORAGE_KEY = 'tm-yt-volume';
+
+    /**
+     * Ensure we always get the active HTMLVideoElement.
+     */
+    function getVideoElement() {
+        const videos = document.querySelectorAll('video');
+        if (!videos || videos.length === 0) {
+            return null;
+        }
+        // Prefer the largest video element (usually the main player)
+        let best = videos[0];
+        let bestArea = best.clientWidth * best.clientHeight;
+        videos.forEach((v) => {
+            const area = v.clientWidth * v.clientHeight;
+            if (area > bestArea) {
+                best = v;
+                bestArea = area;
+            }
+        });
+        return best;
+    }
+
+    /**
+     * Find a suitable container to host the overlay.
+     */
+    function getPlayerContainer() {
+        const moviePlayer = document.getElementById('movie_player');
+        if (moviePlayer) {
+            return moviePlayer;
+        }
+        const video = getVideoElement();
+        return video ? video.parentElement : null;
+    }
+
+    function ensurePlayerPositioning(player) {
+        const style = window.getComputedStyle(player);
+        if (style.position === 'static') {
+            player.style.position = 'relative';
+        }
+    }
+
+    function createStylesIfNeeded() {
+        if (document.getElementById('tm-volume-slider-style')) return;
+
+        const style = document.createElement('style');
+        style.id = 'tm-volume-slider-style';
+        style.type = 'text/css';
+        style.textContent = `
+#${OVERLAY_ID} input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(to right, #ff2222 0%, #ff0000 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 100%);
+  height: 8px;
+  border-radius: 12px;
+  outline: none;
+  position: relative;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+#${OVERLAY_ID} input[type=range]:hover {
+  height: 10px;
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-runnable-track {
+  border: none;
+  background: transparent;
+  height: 8px;
+  border-radius: 12px;
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+  margin-top: -7px;
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-track {
+  background: transparent;
+  height: 8px;
+  border-radius: 12px;
+  border: none;
+  outline: none;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-progress {
+  background: transparent;
+  border: none;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-focus-outer {
+  border: none;
+  outline: none;
+}
+        `;
+        document.head.appendChild(style);
+    }
+
+    function updateSliderBar(slider) {
+        const value = Number(slider.value) || 0;
+        const pct = Math.min(Math.max(value, 0), 100);
+        const fadeStart = Math.max(0, pct - 1);
+        const fadeEnd = Math.min(100, pct + 1);
+        slider.style.background = `linear-gradient(to right,
+            #ff2222 0%,
+            #ff0000 ${fadeStart}%,
+            #ff3333 ${pct}%,
+            rgba(255, 255, 255, 0.15) ${fadeEnd}%,
+            rgba(255, 255, 255, 0.15) 100%)`;
+    }
+
+    /**
+     * Get the YouTube player API object if available.
+     */
+    function getYouTubePlayer() {
+        const player = document.getElementById('movie_player');
+        if (player && typeof player.getVolume === 'function') {
+            return player;
+        }
+        return null;
+    }
+
+    /**
+     * Get volume from YouTube's player API (0-100), falling back to video element.
+     */
+    function getVolume(video) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) {
+            const isMuted = ytPlayer.isMuted();
+            if (isMuted) {
+                return 0;
+            }
+            return ytPlayer.getVolume();
+        }
+        // Fallback to video element
+        const vol = (video.muted ? 0 : video.volume) || 0;
+        return Math.round(vol * 100);
+    }
+
+    /**
+     * Set volume using YouTube's player API (0-100), falling back to video element.
+     */
+    function setVolume(video, value) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) {
+            if (ytPlayer.isMuted()) {
+                ytPlayer.unMute();
+            }
+            ytPlayer.setVolume(value);
+        } else {
+            // Fallback to video element
+            video.volume = value / 100;
+            video.muted = false;
+        }
+    }
+
+    /**
+     * Restore volume from localStorage and apply to player. Call before syncing slider.
+     */
+    function restoreSavedVolume(video) {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved !== null) {
+                const value = Math.min(100, Math.max(0, parseInt(saved, 10)));
+                if (!isNaN(value)) {
+                    setVolume(video, value);
+                }
+            }
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+    /**
+     * Save volume to localStorage for persistence across page reloads.
+     */
+    function saveVolume(value) {
+        try {
+            localStorage.setItem(STORAGE_KEY, String(Math.round(value)));
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+    function setSliderFromPlayer(slider, label, video) {
+        const value = getVolume(video);
+        slider.value = String(value);
+        if (label) {
+            label.textContent = `${value}%`;
+        }
+        updateSliderBar(slider);
+    }
+
+    /**
+     * Position overlay just above the video scrubber bar. Adapts to any resolution.
+     */
+    function positionOverlayAboveScrubber(overlay, player) {
+        const progressBar = document.querySelector('.ytp-progress-bar-padding');
+        const barEl = progressBar ? (progressBar.closest('.ytp-progress-bar') || progressBar.parentElement) : null;
+        const ref = barEl || progressBar;
+        if (ref) {
+            const playerRect = player.getBoundingClientRect();
+            const barRect = ref.getBoundingClientRect();
+            const gap = 8;
+            const bottomPx = playerRect.bottom - barRect.top + gap;
+            overlay.style.bottom = `${Math.max(20, bottomPx)}px`;
+        } else {
+            overlay.style.bottom = '15%';
+        }
+    }
+
+    function createOverlay(player, video) {
+        // Prevent duplicates
+        const existing = document.getElementById(OVERLAY_ID);
+        if (existing) {
+            return existing;
+        }
+
+        ensurePlayerPositioning(player);
+        createStylesIfNeeded();
+
+        const overlay = document.createElement('div');
+        overlay.id = OVERLAY_ID;
+
+        Object.assign(overlay.style, {
+            position: 'absolute',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '45%',
+            maxWidth: '675px',
+            padding: '10px 14px',
+            background: 'rgba(0, 0, 0, 0.35)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            borderRadius: '14px',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: '6px',
+            zIndex: '10000',
+            pointerEvents: 'auto',
+            boxSizing: 'border-box',
+            opacity: '0.45',
+            transition: 'opacity 0.25s ease, transform 0.25s ease',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+        });
+
+        overlay.addEventListener('mouseenter', () => {
+            overlay.style.opacity = '0.95';
+            overlay.style.transform = 'translateX(-50%) translateY(-2px)';
+        });
+        overlay.addEventListener('mouseleave', () => {
+            overlay.style.opacity = '0.45';
+            overlay.style.transform = 'translateX(-50%) translateY(0)';
+        });
+
+        const label = document.createElement('div');
+        label.id = VALUE_LABEL_ID;
+        Object.assign(label.style, {
+            fontSize: '18px',
+            fontWeight: '500',
+            color: 'rgba(255, 255, 255, 0.95)',
+            textAlign: 'center',
+            userSelect: 'none',
+            letterSpacing: '0.5px'
+        });
+        label.textContent = '100%';
+
+        const slider = document.createElement('input');
+        slider.id = SLIDER_ID;
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '1';
+        slider.style.width = '100%';
+        slider.style.height = '30px';
+        slider.style.cursor = 'pointer';
+        slider.style.backgroundSize = '100% 100%';
+
+        setSliderFromPlayer(slider, label, video);
+        // Initialize bar fill
+        updateSliderBar(slider);
+
+        slider.addEventListener('input', () => {
+            const value = Number(slider.value) || 0;
+            setVolume(video, value);
+            label.textContent = `${value}%`;
+            updateSliderBar(slider);
+            saveVolume(value);
+        });
+
+        slider.addEventListener('change', () => {
+            saveVolume(Number(slider.value) || 0);
+        });
+
+        video.addEventListener('volumechange', () => {
+            const value = getVolume(video);
+            setSliderFromPlayer(slider, label, video);
+            saveVolume(value);
+        });
+
+        overlay.appendChild(label);
+        overlay.appendChild(slider);
+        player.appendChild(overlay);
+
+        positionOverlayAboveScrubber(overlay, player);
+        setTimeout(() => positionOverlayAboveScrubber(overlay, player), 500);
+
+        const onResize = () => positionOverlayAboveScrubber(overlay, player);
+        window.addEventListener('resize', onResize);
+        overlay._resizeCleanup = () => window.removeEventListener('resize', onResize);
+
+        return overlay;
+    }
+
+    function removeOverlay() {
+        const existing = document.getElementById(OVERLAY_ID);
+        if (existing && existing.parentElement) {
+            if (typeof existing._resizeCleanup === 'function') {
+                existing._resizeCleanup();
+            }
+            existing.parentElement.removeChild(existing);
+        }
+    }
+
+    function attachSliderIfPossible() {
+        const video = getVideoElement();
+        const player = getPlayerContainer();
+        if (!video || !player) {
+            return false;
+        }
+        restoreSavedVolume(video);
+        createOverlay(player, video);
+        setTimeout(() => restoreSavedVolume(video), 1500);
+        return true;
+    }
+
+    function setupInitialAttempts() {
+        let attempts = 0;
+        const maxAttempts = 40; // ~20 seconds with 500ms interval
+        const interval = setInterval(() => {
+            attempts++;
+            if (attachSliderIfPossible() || attempts >= maxAttempts) {
+                clearInterval(interval);
+            }
+        }, 500);
+    }
+
+    function setupMutationObserver() {
+        if (!window.MutationObserver) return;
+
+        let lastAttach = 0;
+        const ATTACH_COOLDOWN_MS = 1000;
+
+        const observer = new MutationObserver(() => {
+            const now = Date.now();
+            if (now - lastAttach < ATTACH_COOLDOWN_MS) return;
+            if (document.location.pathname !== '/watch') return;
+            if (attachSliderIfPossible()) {
+                lastAttach = now;
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    function setupYtNavigationHandler() {
+        const handler = () => {
+            // After navigation finishes, reattach the slider
+            setTimeout(() => {
+                removeOverlay();
+                attachSliderIfPossible();
+            }, 700);
+        };
+
+        window.addEventListener('yt-navigate-finish', handler, true);
+        window.addEventListener('yt-page-data-updated', handler, true);
+    }
+
+    function init() {
+        // Only care about watch pages
+        if (document.location.pathname !== '/watch') {
+            // However, YouTube can change path after load; still prepare observers.
+        }
+        setupInitialAttempts();
+        setupMutationObserver();
+        setupYtNavigationHandler();
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        init();
+    } else {
+        window.addEventListener('DOMContentLoaded', init, { once: true });
+    }
+})();

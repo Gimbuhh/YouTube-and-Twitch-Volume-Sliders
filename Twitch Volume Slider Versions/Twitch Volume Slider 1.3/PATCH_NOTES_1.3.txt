@@ -1,0 +1,20 @@
+📋 Patch Notes - Version 1.3
+
+### 🎨 NEW FEATURE
+
+- **Small Slider Size Option**: Added a new configurable small slider mode with a thin 9px visual track and large 42px interaction area for easier clicking while maintaining a subtle appearance (set `sliderSize: 'small'` in USER_SETTINGS; default is 'small', previous behavior available with 'big').
+
+### ⚡ PERFORMANCE IMPROVEMENTS
+
+- **Reduced Observer Overhead**: The MutationObserver now skips unnecessary checks when the overlay is already correctly attached, reducing CPU usage on pages with frequent DOM updates.
+- **Optimized Volume Bar Updates**: Background gradient rendering is now more efficient with centered positioning, reducing browser repaints.
+- **Reduced DOM Manipulation**: Mute button icons are now pre-built and toggled via visibility instead of rebuilding SVG markup on every update, improving responsiveness.
+
+### 🐛 BUG FIXES
+
+- **Initial Mute State Display**: The mute button icon and label now correctly reflect the restored mute state when the overlay first appears, instead of briefly showing incorrect state.
+- **Safer Navigation Detection**: Replaced direct history API patching with URL change monitoring to prevent conflicts with other userscripts and browser extensions.
+
+### 🔧 CODE OPTIMIZATION
+
+- **Removed Dead Code**: Eliminated unused `getVolumeLevel()` function for cleaner codebase and reduced script size.

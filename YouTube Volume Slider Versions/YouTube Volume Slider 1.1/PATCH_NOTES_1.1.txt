@@ -1,0 +1,19 @@
+📋 Patch Notes - Version 1.1
+
+### 🎨 NEW FEATURES
+
+- **Volume Persistence**: Added localStorage support to remember volume settings across page reloads and navigation.
+- **Smart Positioning**: Overlay now dynamically positions itself just above the video scrubber bar instead of fixed percentage.
+- **Modern Slider Design**: Redesigned slider with thinner track (8px), modern thumb design, and smooth gradient fill effect.
+- **Enhanced Hover Effects**: Added scale transform and improved shadow effects on slider thumb hover and active states.
+
+### ⚡ PERFORMANCE IMPROVEMENTS
+
+- **Improved Visual Transitions**: Upgraded overlay transitions with blur backdrop filter and smooth opacity/transform effects.
+- **Adaptive Positioning**: Overlay automatically adjusts position based on scrubber bar location with 500ms delayed recheck.
+
+### 🛠️ CONFIGURATION UPDATES
+
+- **Updated Color Scheme**: Refined gradient from harsh red to smoother red tones (#ff2222 to #ff0000 to #ff3333).
+- **Enhanced Overlay Styling**: Darker background (0.35 opacity), glass-morphism effect with 12px blur, and subtle white border.
+- **Resize Handler**: Added window resize listener to maintain correct positioning across viewport changes.

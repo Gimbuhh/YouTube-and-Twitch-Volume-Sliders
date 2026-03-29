@@ -1,0 +1,5 @@
+📋 Patch Notes - Version 1.3.1
+
+### 🐛 BUG FIX
+
+- **Instant Mute Visual Update**: Fixed delay when using native YouTube mute button or volume controls - the overlay now updates instantly instead of waiting 400ms.

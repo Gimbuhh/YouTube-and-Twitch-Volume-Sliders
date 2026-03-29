@@ -1,0 +1,19 @@
+📋 Patch Notes - Version 1.1
+
+### 🎨 NEW FEATURES
+
+- **Visual Tick Marks**: Added 5% interval tick marks that appear on hover for precise volume adjustment.
+- **Snap-to-Grid**: Quick clicks (under 300ms) now snap volume to the nearest 5% increment for easier control.
+- **Mute Button**: Added dedicated mute/unmute button with visual icons for quick audio toggling.
+
+### ⚡ PERFORMANCE IMPROVEMENTS
+
+- **Optimized Sync Logic**: Removed polling interval and switched to event-driven volume sync for better performance.
+- **Smooth Initial Load**: Overlay now fades in from opacity 0 instead of jumping to 0.45 on first load.
+- **Storage Read Optimization**: Slider initializes from localStorage on creation to prevent visual jump from 100% to actual volume.
+
+### 🔧 CODE OPTIMIZATION
+
+- **Enhanced Error Handling**: Wrapped all API interactions in try-catch blocks to prevent script crashes when React structure changes.
+- **Removed Slider Disabled State**: Simplified mute behavior by removing disabled state when muted.
+- **Improved Volume Sync**: Changed volumechange listener to only update UI without saving, preventing feedback loops.

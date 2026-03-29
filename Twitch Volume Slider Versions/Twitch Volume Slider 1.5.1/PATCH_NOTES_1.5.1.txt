@@ -1,0 +1,5 @@
+📋 Patch Notes - Version 1.5.1
+
+### 🛠️ CONFIGURATION UPDATE
+
+- **Overlay Transparency Setting**: Added `overlayOpacityUnfocused` and `overlayOpacityFocused` to USER_SETTINGS as whole-number percentages (0–100), defaulting to 45 and 95. Change these two values to control how transparent the overlay appears at rest and when hovered.

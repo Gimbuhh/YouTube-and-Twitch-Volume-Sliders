@@ -1,0 +1,12 @@
+📋 Patch Notes - Version 1.4
+
+### 🐛 BUG FIXES
+
+- **Action-Bar Alignment**: Improved toggle alignment so it stays correctly positioned to the left of Follow/Unfollow without increasing bar height.
+- **Immediate Overlay Return**: Re-enabling the toggle now restores the overlay immediately without needing an extra hover interaction.
+- **Consistent Toggle States**: Updated state visuals and icon switching to match expected enabled/disabled behavior more reliably.
+
+### 💡 DEVELOPER IMPROVEMENTS
+
+- **Injection Logic Cleanup**: Simplified Twitch insertion flow around Follow/Unfollow wrappers to make placement behavior easier to maintain.
+- **Refactored Toggle Helpers**: Organized toggle styling and icon construction into cleaner helper-based structure for easier future changes.

@@ -1,0 +1,27 @@
+📋 Patch Notes - Version 1.5
+
+### 🐛 BUG FIXES
+
+- **User Intent Protection**: Manual volume or mute changes are now protected for 5 seconds — the late-recovery restore will not override a volume you just intentionally set.
+
+- **Single Startup Correction**: The startup volume re-apply now fires only once per attach cycle, preventing volume flicker on fast machines.
+
+- **Navigation Reattach Guard**: Reattach now only triggers when the URL path actually changes, preventing unnecessary reattach cycles from Twitch's internal navigation calls that don't change the page.
+
+- **Timer Stacking Prevention**: Navigation timers are now cancelled before new ones are scheduled, preventing overlapping timer chains on rapid channel switching.
+
+### 🔧 CODE OPTIMIZATIONS
+
+- **`getSavedVolume()` Helper**: Extracted the repeated localStorage read/parse/clamp logic — which appeared in 4 separate places — into a single reusable function.
+
+- **Simplified Late Recovery Restore**: The late-restore block now delegates to `restoreSavedVolume()` and `setSliderFromPlayer()` instead of reimplementing their logic inline.
+
+- **Removed Dead Positioning Code**: Removed `positionOverlayAtBottom`, its resize listener, and its cleanup — the overlay already sets `bottom: 12px` at creation, making these no-ops.
+
+- **Fixed Redundant Style Injection**: `createStylesIfNeeded` and `ensureToggleButtonStyles` now early-return if the style element already exists, instead of rewriting it on every call.
+
+- **Merged MutationObservers**: Combined the slider reattach observer and toggle button re-injection observer into a single observer to reduce DOM mutation overhead.
+
+- **Inlined `showOverlay` / `hideOverlay`**: Removed two redundant one-liner wrapper functions by inlining their calls directly into `setOverlayEnabled()`.
+
+- **Reduced Startup Polling**: Startup polling cut from 40 attempts (~20s) to 20 attempts (~10s), since the MutationObserver handles ongoing reattachment.

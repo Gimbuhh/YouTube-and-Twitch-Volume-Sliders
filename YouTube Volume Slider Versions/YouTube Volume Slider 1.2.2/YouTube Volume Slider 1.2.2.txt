@@ -1,0 +1,712 @@
+// ==UserScript==
+// @name         YouTube Volume Slider 1.2.2
+// @namespace    http://tampermonkey.net/
+// @version      1.2.2
+// @description  Large centered volume slider overlay for YouTube, optimized for remote VNC control.
+// @author       You
+// @icon         https://www.youtube.com/favicon.ico
+// @match        https://www.youtube.com/*
+// @run-at       document-idle
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const OVERLAY_ID = 'tm-volume-slider-overlay';
+    const SLIDER_ID = 'tm-volume-slider-range';
+    const VALUE_LABEL_ID = 'tm-volume-slider-value';
+    const MUTE_BTN_ID = 'tm-volume-slider-mute';
+    const STORAGE_KEY = 'tm-yt-volume';
+    const STORAGE_WRITE_DEBOUNCE_MS = 150;
+
+    let cachedVideo = null;
+    let cachedYtPlayer = null;
+    let saveVolumeTimer = 0;
+
+    /**
+     * Ensure we always get the active HTMLVideoElement.
+     */
+    function getVideoElement() {
+        if (cachedVideo && cachedVideo.isConnected) {
+            return cachedVideo;
+        }
+        const videos = document.querySelectorAll('video');
+        if (!videos || videos.length === 0) {
+            cachedVideo = null;
+            return null;
+        }
+        // Prefer the largest video element (usually the main player)
+        let best = videos[0];
+        let bestArea = best.clientWidth * best.clientHeight;
+        videos.forEach((v) => {
+            const area = v.clientWidth * v.clientHeight;
+            if (area > bestArea) {
+                best = v;
+                bestArea = area;
+            }
+        });
+        cachedVideo = best;
+        return cachedVideo;
+    }
+
+    /**
+     * Find a suitable container to host the overlay.
+     */
+    function getPlayerContainer(video = getVideoElement()) {
+        const moviePlayer = document.getElementById('movie_player');
+        if (moviePlayer) {
+            return moviePlayer;
+        }
+        return video ? video.parentElement : null;
+    }
+
+    function ensurePlayerPositioning(player) {
+        const style = window.getComputedStyle(player);
+        if (style.position === 'static') {
+            player.style.position = 'relative';
+        }
+    }
+
+    function createStylesIfNeeded() {
+        if (document.getElementById('tm-volume-slider-style')) return;
+
+        const style = document.createElement('style');
+        style.id = 'tm-volume-slider-style';
+        style.type = 'text/css';
+        style.textContent = `
+#${OVERLAY_ID} input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(to right, #cc4444 0%, #bb3333 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 100%);
+  height: 8px;
+  border-radius: 12px;
+  outline: none;
+  position: relative;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+#${OVERLAY_ID} input[type=range]:hover {
+  height: 10px;
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-runnable-track {
+  border: none;
+  background: transparent;
+  height: 8px;
+  border-radius: 12px;
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+  margin-top: -7px;
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-track {
+  background: transparent;
+  height: 8px;
+  border-radius: 12px;
+  border: none;
+  outline: none;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-progress {
+  background: transparent;
+  border: none;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-focus-outer {
+  border: none;
+  outline: none;
+}
+
+#${OVERLAY_ID} .tm-slider-ticks {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 11px;
+  right: 11px;
+  pointer-events: none;
+  background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
+  background-size: 100% 100%;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+#${OVERLAY_ID}:hover .tm-slider-ticks {
+  opacity: 1;
+}
+
+#${OVERLAY_ID} #${MUTE_BTN_ID} {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  transition: background 0.2s ease;
+}
+#${OVERLAY_ID} #${MUTE_BTN_ID}:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+#${OVERLAY_ID} #${MUTE_BTN_ID}.muted {
+  color: #ff6b6b;
+}
+        `;
+        document.head.appendChild(style);
+    }
+
+    function updateSliderBar(slider) {
+        const value = Number(slider.value) || 0;
+        const pct = Math.min(Math.max(value, 0), 100);
+        const fadeStart = Math.max(0, pct - 1);
+        const fadeEnd = Math.min(100, pct + 1);
+        slider.style.background = `linear-gradient(to right,
+            #cc4444 0%,
+            #bb3333 ${fadeStart}%,
+            #cc5555 ${pct}%,
+            rgba(255, 255, 255, 0.15) ${fadeEnd}%,
+            rgba(255, 255, 255, 0.15) 100%)`;
+    }
+
+    /**
+     * Get the YouTube player API object if available.
+     */
+    function getYouTubePlayer() {
+        if (cachedYtPlayer && cachedYtPlayer.isConnected && typeof cachedYtPlayer.getVolume === 'function') {
+            return cachedYtPlayer;
+        }
+        const player = document.getElementById('movie_player');
+        if (player && typeof player.getVolume === 'function') {
+            cachedYtPlayer = player;
+            return player;
+        }
+        cachedYtPlayer = null;
+        return null;
+    }
+
+    /**
+     * Get volume from YouTube's player API (0-100), falling back to video element.
+     */
+    function getVolume(video) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) {
+            const isMuted = ytPlayer.isMuted();
+            if (isMuted) {
+                return 0;
+            }
+            return ytPlayer.getVolume();
+        }
+        // Fallback to video element
+        const vol = (video.muted ? 0 : video.volume) || 0;
+        return Math.round(vol * 100);
+    }
+
+    function getVolumeLevel(video) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer && typeof ytPlayer.getVolume === 'function') {
+            return Math.round(ytPlayer.getVolume());
+        }
+        return Math.round((video.volume || 0) * 100);
+    }
+
+    /**
+     * Check muted state via YouTube API or video element.
+     */
+    function isMuted(video) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer && typeof ytPlayer.isMuted === 'function') {
+            return ytPlayer.isMuted();
+        }
+        return !!video.muted;
+    }
+
+    /**
+     * Toggle mute via YouTube API or video element.
+     */
+    function toggleMute(video) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) {
+            if (ytPlayer.isMuted()) {
+                ytPlayer.unMute();
+            } else {
+                ytPlayer.mute();
+            }
+        } else {
+            video.muted = !video.muted;
+        }
+    }
+
+    /**
+     * Set volume using YouTube's player API (0-100), falling back to video element.
+     */
+    function setVolume(video, value) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) {
+            if (ytPlayer.isMuted()) {
+                ytPlayer.unMute();
+            }
+            ytPlayer.setVolume(value);
+        } else {
+            // Fallback to video element
+            video.volume = value / 100;
+            video.muted = false;
+        }
+    }
+
+    /**
+     * Restore volume from localStorage and apply to player. Call before syncing slider.
+     */
+    function restoreSavedVolume(video) {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved !== null) {
+                const value = Math.min(100, Math.max(0, parseInt(saved, 10)));
+                if (!isNaN(value)) {
+                    setVolume(video, value);
+                }
+            }
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+    /**
+     * Snap value to nearest 5% (5, 10, 15, ... 100).
+     */
+    function snapTo5(value) {
+        return Math.round((Math.min(100, Math.max(0, value)) / 5)) * 5;
+    }
+
+    /**
+     * Save volume to localStorage for persistence across page reloads.
+     */
+    function saveVolume(value) {
+        try {
+            localStorage.setItem(STORAGE_KEY, String(Math.round(value)));
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+    function scheduleSaveVolume(value) {
+        if (saveVolumeTimer) {
+            clearTimeout(saveVolumeTimer);
+        }
+        saveVolumeTimer = window.setTimeout(() => {
+            saveVolume(value);
+            saveVolumeTimer = 0;
+        }, STORAGE_WRITE_DEBOUNCE_MS);
+    }
+
+    /**
+     * Sync mute button icon + slider disabled state (style toggles only, no DOM mutation).
+     */
+    function syncMuteButton(muteBtn, slider, video) {
+        if (!muteBtn) return;
+        const muted = isMuted(video);
+        const iconOn = muteBtn.querySelector('.tm-icon-on');
+        const iconOff = muteBtn.querySelector('.tm-icon-off');
+        if (iconOn) iconOn.style.display = muted ? 'none' : '';
+        if (iconOff) iconOff.style.display = muted ? '' : 'none';
+        muteBtn.classList.toggle('muted', muted);
+        muteBtn.title = muted ? 'Unmute' : 'Mute';
+    }
+
+    function setSliderFromPlayer(slider, label, muteBtn, video) {
+        const muted = isMuted(video);
+        const displayValue = getVolume(video);
+        slider.value = String(displayValue);
+        if (label) {
+            label.textContent = muted ? 'Muted' : `${displayValue}%`;
+        }
+        updateSliderBar(slider);
+        syncMuteButton(muteBtn, slider, video);
+    }
+
+    /**
+     * Position overlay just above the video scrubber bar. Adapts to any resolution.
+     */
+    function positionOverlayAboveScrubber(overlay, player) {
+        const progressBar = document.querySelector('.ytp-progress-bar-padding');
+        const barEl = progressBar ? (progressBar.closest('.ytp-progress-bar') || progressBar.parentElement) : null;
+        const ref = barEl || progressBar;
+        if (ref) {
+            const playerRect = player.getBoundingClientRect();
+            const barRect = ref.getBoundingClientRect();
+            const gap = 8;
+            const bottomPx = playerRect.bottom - barRect.top + gap;
+            overlay.style.bottom = `${Math.max(20, bottomPx)}px`;
+        } else {
+            overlay.style.bottom = '15%';
+        }
+    }
+
+    /**
+     * Build an SVG element (no innerHTML, safe from MutationObserver feedback).
+     */
+    function makeSvg(paths) {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('width', '20');
+        svg.setAttribute('height', '20');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+        paths.forEach((d) => {
+            const p = document.createElementNS(ns, 'path');
+            p.setAttribute('fill', 'currentColor');
+            p.setAttribute('d', d);
+            svg.appendChild(p);
+        });
+        return svg;
+    }
+
+    function createOverlay(player, video) {
+        // Prevent duplicates
+        const existing = document.getElementById(OVERLAY_ID);
+        if (existing) {
+            return existing;
+        }
+
+        ensurePlayerPositioning(player);
+        createStylesIfNeeded();
+
+        const overlay = document.createElement('div');
+        overlay.id = OVERLAY_ID;
+
+        Object.assign(overlay.style, {
+            position: 'absolute',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '45%',
+            maxWidth: '675px',
+            padding: '10px 14px',
+            background: 'rgba(0, 0, 0, 0.35)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            borderRadius: '14px',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: '6px',
+            zIndex: '10000',
+            pointerEvents: 'auto',
+            boxSizing: 'border-box',
+            opacity: '0.45',
+            transition: 'opacity 0.25s ease, transform 0.25s ease',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)'
+        });
+
+        overlay.addEventListener('mouseenter', () => {
+            overlay.style.opacity = '0.95';
+            overlay.style.transform = 'translateX(-50%) translateY(-2px)';
+        });
+        overlay.addEventListener('mouseleave', () => {
+            overlay.style.opacity = '0.45';
+            overlay.style.transform = 'translateX(-50%) translateY(0)';
+        });
+
+        // --- Top row: [mute button] [label] ---
+        const topRow = document.createElement('div');
+        topRow.style.display = 'flex';
+        topRow.style.alignItems = 'center';
+        topRow.style.gap = '10px';
+
+        // Mute button (icons pre-built, toggled via display style only)
+        const muteBtn = document.createElement('button');
+        muteBtn.id = MUTE_BTN_ID;
+        muteBtn.type = 'button';
+        muteBtn.title = 'Mute';
+        muteBtn.setAttribute('aria-label', 'Toggle mute');
+
+        const iconOn = document.createElement('span');
+        iconOn.className = 'tm-icon-on';
+        iconOn.style.lineHeight = '0';
+        iconOn.appendChild(makeSvg([
+            'M3 9v6h4l5 5V4L7 9H3z',
+            'M16.5 12c0-1.77-.77-3.35-2-4.44v8.88c1.23-1.09 2-2.67 2-4.44z',
+            'M19 12c0 2.97-1.65 5.54-4 6.71v2.06c3.45-1.28 6-4.58 6-8.77s-2.55-7.49-6-8.77v2.06c2.35 1.17 4 3.74 4 6.71z'
+        ]));
+
+        const iconOff = document.createElement('span');
+        iconOff.className = 'tm-icon-off';
+        iconOff.style.display = 'none';
+        iconOff.style.lineHeight = '0';
+        iconOff.appendChild(makeSvg([
+            'M16.5 12c0-1.77-.77-3.35-2-4.44v2.77l2 2c0-.11 0-.22 0-.33zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z'
+        ]));
+
+        muteBtn.appendChild(iconOn);
+        muteBtn.appendChild(iconOff);
+
+        muteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            toggleMute(video);
+            setSliderFromPlayer(slider, label, muteBtn, video);
+        });
+
+        const label = document.createElement('div');
+        label.id = VALUE_LABEL_ID;
+        Object.assign(label.style, {
+            fontSize: '18px',
+            fontWeight: '500',
+            color: 'rgba(255, 255, 255, 0.95)',
+            textAlign: 'center',
+            userSelect: 'none',
+            letterSpacing: '0.5px',
+            flex: '1'
+        });
+        label.textContent = '100%';
+
+        topRow.appendChild(muteBtn);
+        topRow.appendChild(label);
+
+        // --- Slider ---
+        const sliderWrap = document.createElement('div');
+        sliderWrap.style.position = 'relative';
+        sliderWrap.style.width = '100%';
+        sliderWrap.style.height = '30px';
+
+        const tickOverlay = document.createElement('div');
+        tickOverlay.className = 'tm-slider-ticks';
+
+        const slider = document.createElement('input');
+        slider.id = SLIDER_ID;
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '1';
+        slider.style.width = '100%';
+        slider.style.height = '30px';
+        slider.style.display = 'block';
+        slider.style.margin = '0';
+        slider.style.cursor = 'pointer';
+        slider.style.backgroundSize = '100% 100%';
+        slider.setAttribute('aria-label', 'Volume');
+
+        setSliderFromPlayer(slider, label, muteBtn, video);
+        updateSliderBar(slider);
+
+        let dragStartTime = 0;
+        let isDragging = false;
+        slider.addEventListener('pointerdown', () => { 
+            dragStartTime = Date.now();
+            isDragging = false;
+        });
+
+        slider.addEventListener('input', () => {
+            const rawValue = Number(slider.value) || 0;
+            const timeSinceStart = Date.now() - dragStartTime;
+            
+            // Snap immediately for quick clicks, otherwise smooth drag
+            let value = rawValue;
+            if (timeSinceStart < 300 && !isDragging) {
+                value = snapTo5(rawValue);
+                slider.value = String(value);
+            } else {
+                isDragging = true;
+            }
+            
+            setVolume(video, value); // also unmutes if muted
+            label.textContent = `${value}%`;
+            updateSliderBar(slider);
+            scheduleSaveVolume(value);
+            syncMuteButton(muteBtn, slider, video);
+        });
+
+        slider.addEventListener('change', () => {
+            const value = Number(slider.value) || 0;
+            const snap = isDragging ? value : snapTo5(value);
+            if (snap !== value) {
+                slider.value = String(snap);
+                setVolume(video, snap);
+                label.textContent = `${snap}%`;
+                updateSliderBar(slider);
+            }
+            if (saveVolumeTimer) {
+                clearTimeout(saveVolumeTimer);
+                saveVolumeTimer = 0;
+            }
+            saveVolume(Number(slider.value) || 0);
+            isDragging = false;
+        });
+
+        const onVideoVolumeChange = () => {
+            setSliderFromPlayer(slider, label, muteBtn, video);
+            if (!isMuted(video)) {
+                scheduleSaveVolume(getVolume(video));
+            }
+        };
+        video.addEventListener('volumechange', onVideoVolumeChange);
+
+        sliderWrap.appendChild(slider);
+        sliderWrap.appendChild(tickOverlay);
+        overlay.appendChild(topRow);
+        overlay.appendChild(sliderWrap);
+        player.appendChild(overlay);
+
+        positionOverlayAboveScrubber(overlay, player);
+        setTimeout(() => {
+            if (!document.querySelector('.ytp-progress-bar-padding')) return;
+            positionOverlayAboveScrubber(overlay, player);
+        }, 500);
+
+        const onResize = () => positionOverlayAboveScrubber(overlay, player);
+        window.addEventListener('resize', onResize);
+        overlay._resizeCleanup = () => window.removeEventListener('resize', onResize);
+        overlay._volumeCleanup = () => video.removeEventListener('volumechange', onVideoVolumeChange);
+
+        return overlay;
+    }
+
+    function removeOverlay() {
+        if (saveVolumeTimer) {
+            clearTimeout(saveVolumeTimer);
+            saveVolumeTimer = 0;
+        }
+        const existing = document.getElementById(OVERLAY_ID);
+        if (existing && existing.parentElement) {
+            if (typeof existing._resizeCleanup === 'function') {
+                existing._resizeCleanup();
+            }
+            if (typeof existing._volumeCleanup === 'function') {
+                existing._volumeCleanup();
+            }
+            existing.parentElement.removeChild(existing);
+        }
+    }
+
+    function attachSliderIfPossible() {
+        const video = getVideoElement();
+        const player = getPlayerContainer(video);
+        if (!video || !player) {
+            return false;
+        }
+        // Only restore volume on first attach; skip if overlay already exists
+        if (!document.getElementById(OVERLAY_ID)) {
+            restoreSavedVolume(video);
+            createOverlay(player, video);
+            setTimeout(() => { if (!isMuted(video)) restoreSavedVolume(video); }, 1500);
+        }
+        return true;
+    }
+
+    function setupInitialAttempts() {
+        let attempts = 0;
+        const maxAttempts = 40; // ~20 seconds with 500ms interval
+        const interval = setInterval(() => {
+            attempts++;
+            if (attachSliderIfPossible() || attempts >= maxAttempts) {
+                clearInterval(interval);
+            }
+        }, 500);
+    }
+
+    function setupMutationObserver() {
+        if (!window.MutationObserver) return;
+
+        let lastAttach = 0;
+        const ATTACH_COOLDOWN_MS = 1000;
+        let attachQueued = false;
+
+        const observer = new MutationObserver((mutations) => {
+            if (!mutations.some((mutation) => mutation.addedNodes && mutation.addedNodes.length > 0)) {
+                return;
+            }
+            if (attachQueued) return;
+            attachQueued = true;
+            requestAnimationFrame(() => {
+                attachQueued = false;
+            const now = Date.now();
+            if (now - lastAttach < ATTACH_COOLDOWN_MS) return;
+            if (document.location.pathname !== '/watch') return;
+            if (attachSliderIfPossible()) {
+                lastAttach = now;
+            }
+            });
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    function setupYtNavigationHandler() {
+        if (window.__tmYtVolumeNavBound) return;
+        window.__tmYtVolumeNavBound = true;
+        const handler = () => {
+            // After navigation finishes, reattach the slider
+            setTimeout(() => {
+                removeOverlay();
+                attachSliderIfPossible();
+            }, 700);
+        };
+
+        window.addEventListener('yt-navigate-finish', handler, true);
+        window.addEventListener('yt-page-data-updated', handler, true);
+    }
+
+    function init() {
+        // Only care about watch pages
+        if (document.location.pathname !== '/watch') {
+            // However, YouTube can change path after load; still prepare observers.
+        }
+        setupInitialAttempts();
+        setupMutationObserver();
+        setupYtNavigationHandler();
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        init();
+    } else {
+        window.addEventListener('DOMContentLoaded', init, { once: true });
+    }
+})();

@@ -1,0 +1,9 @@
+📋 Patch Notes - Version 1.2.1
+
+### 🎨 NEW FEATURES
+
+- **Softer Slider Colors**: Reduced slider color intensity with more muted red tones for a less visually aggressive appearance, especially when overlay is not in focus.
+
+### 🛠️ CONFIGURATION UPDATES
+
+- **Color Palette Adjustment**: Updated gradient from bright reds (#ff2222, #ff0000, #ff3333) to subdued tones (#cc4444, #bb3333, #cc5555) for improved visual comfort.

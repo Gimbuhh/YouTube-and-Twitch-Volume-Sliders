@@ -1,0 +1,5 @@
+📋 Patch Notes - Version 1.2.2
+
+### 🐛 BUG FIX
+
+- **Magnetic Snapping**: Fixed volume slider snapping behavior where clicking at a value (e.g., 57%) would briefly show that value before jumping to the nearest 5% increment (55%), now snaps directly to the target value for a smoother, more intuitive experience.

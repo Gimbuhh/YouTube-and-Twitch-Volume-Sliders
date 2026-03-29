@@ -1,0 +1,23 @@
+📋 Patch Notes - Version 1.5
+
+### 🎨 NEW FEATURE
+
+- **Adaptive Overlay Positioning**: The volume slider now sits at the bottom of the video when YouTube controls are hidden, and moves above the progress bar when controls reappear on hover. Toggle with the `adaptivePosition` setting (default: `true`).
+
+### 🔧 CODE OPTIMIZATIONS
+
+- **`getSavedVolume()` Helper**: Extracted the repeated localStorage read/parse/clamp logic into a single reusable function shared across the script.
+
+- **Slider Initializes from Saved Volume**: The slider now reads from localStorage on creation instead of the live player, preventing a brief jump from 100% to the actual volume on load.
+
+- **Fixed Redundant Style Injection**: `createStylesIfNeeded` and `ensureToggleButtonStyles` now early-return if the style element already exists, instead of rewriting it on every call.
+
+- **Merged MutationObservers**: Combined the slider reattach observer and toggle button re-injection observer into a single observer to reduce DOM mutation overhead.
+
+- **Navigation Debouncing**: Reattach on YouTube page navigation is now debounced by 180ms and stale player/video caches are cleared on navigation, preventing stacked reattach cycles.
+
+- **Cleaned `syncMuteButton` Signature**: Removed an unused parameter that was passed to the function but never referenced.
+
+- **Inlined `showOverlay` / `hideOverlay`**: Removed two redundant one-liner wrapper functions by inlining their calls directly into `setOverlayEnabled()`.
+
+- **Reduced Startup Polling**: Startup polling cut from 40 attempts (~20s) to 20 attempts (~10s), since the MutationObserver handles ongoing reattachment.
