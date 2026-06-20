@@ -4,3 +4,6 @@
 *.md text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+
+# Historical releases are immutable byte-for-byte snapshots.
+archive/legacy/** -text
