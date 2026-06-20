@@ -1,0 +1,2139 @@
+// ==UserScript==
+// @name         YouTube Volume Slider 2.2
+// @namespace    http://tampermonkey.net/
+// @version      2.2
+// @description  Compact in-bar volume indicator that expands into a wide YouTube volume slider.
+// @author       isagie (Made using AI)
+// @icon         https://www.youtube.com/favicon.ico
+// @match        https://www.youtube.com/*
+// @run-at       document-idle
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const OVERLAY_ID = 'tm-volume-slider-overlay';
+    const SLIDER_ID = 'tm-volume-slider-range';
+    const VALUE_LABEL_ID = 'tm-volume-slider-value';
+    const OPTIONS_STYLE_ID = 'tm-volume-options-style';
+    const OPTIONS_BUTTON_ID = 'tm-volume-options-button';
+    const OPTIONS_POPUP_ID = 'tm-volume-options-popup';
+    const STORAGE_KEY = 'tm-yt-volume';
+    const VOLUME_MODE_KEY = 'tm-yt-volume-slider-mode';
+    const SLIDER_LOCATION_KEY = 'tm-yt-volume-slider-location';
+    const REPLACE_NATIVE_PLACEMENT_KEY = 'tm-yt-volume-slider-replace-placement';
+    const SNAP_TO_5_KEY = 'tm-yt-volume-slider-snap-to-5';
+    const ALWAYS_EXPANDED_KEY = 'tm-yt-volume-slider-always-expanded';
+    const OVERLAY_OPACITY_IDLE_KEY = 'tm-yt-volume-slider-opacity-idle';
+    const OVERLAY_OPACITY_ACTIVE_KEY = 'tm-yt-volume-slider-opacity-active';
+    const DEFAULT_OVERLAY_OPACITY_IDLE = 45;
+    const DEFAULT_OVERLAY_OPACITY_ACTIVE = 95;
+    const STORAGE_WRITE_DEBOUNCE_MS = 150;
+    const NAV_REATTACH_DELAY_MS = 700;
+    const NAV_DEBOUNCE_MS = 180;
+    const USER_SETTINGS = {
+        // Volume slider mode: 'saved', 'off', 'on', or 'replace-native'. Default: 'saved'
+        volumeSliderMode: 'saved',
+        // Slider location: 'saved', 'controls', or 'video'. Default: 'saved'
+        sliderLocation: 'saved',
+        // Replace-native placement: 'saved', 'native', or 'custom'. Default: 'saved'
+        replaceNativePlacement: 'saved',
+        // Snap slider movement to 5% steps: 'saved', true, or false. Default: 'saved'
+        snapToFive: 'saved',
+        // Keep the volume pill expanded: 'saved', true, or false. Default: 'saved'
+        alwaysExpanded: 'saved',
+        // On-video slider opacity when unfocused: 'saved' or 0-100 as a percentage. Default: 45
+        overlayOpacityUnfocused: 'saved',
+        // On-video slider opacity when focused/hovered: 'saved' or 0-100 as a percentage. Default: 95
+        overlayOpacityFocused: 'saved'
+    };
+
+    let cachedVideo = null;
+    let cachedYtPlayer = null;
+    let saveVolumeTimer = 0;
+    let navReattachTimer = 0;
+    let navDebounceTimer = 0;
+
+    // -------------------------------
+    // Overlay + Options State
+    // -------------------------------
+
+    function normalizeVolumeSliderMode(mode) {
+        return ['off', 'on', 'replace-native'].includes(mode) ? mode : null;
+    }
+
+    function normalizeReplaceNativePlacement(placement) {
+        return ['native', 'custom'].includes(placement) ? placement : null;
+    }
+
+    function normalizeSliderLocation(location) {
+        return ['controls', 'video'].includes(location) ? location : null;
+    }
+
+    function normalizeBooleanSetting(value) {
+        if (value === true || value === 'true') return true;
+        if (value === false || value === 'false') return false;
+        return null;
+    }
+
+    function getSavedVolumeSliderMode() {
+        try {
+            const savedMode = normalizeVolumeSliderMode(localStorage.getItem(VOLUME_MODE_KEY));
+            if (savedMode) return savedMode;
+        } catch (e) { /* ignore storage errors */ }
+        return 'on';
+    }
+
+    function getVolumeSliderMode() {
+        const overrideMode = normalizeVolumeSliderMode(USER_SETTINGS.volumeSliderMode);
+        return overrideMode || getSavedVolumeSliderMode();
+    }
+
+    function getReplaceNativePlacement() {
+        const overridePlacement = normalizeReplaceNativePlacement(USER_SETTINGS.replaceNativePlacement);
+        if (overridePlacement) return overridePlacement;
+        try {
+            return normalizeReplaceNativePlacement(localStorage.getItem(REPLACE_NATIVE_PLACEMENT_KEY)) || 'native';
+        } catch (e) {
+            return 'native';
+        }
+    }
+
+    function getSliderLocation() {
+        const overrideLocation = normalizeSliderLocation(USER_SETTINGS.sliderLocation);
+        if (overrideLocation) return overrideLocation;
+        try {
+            return normalizeSliderLocation(localStorage.getItem(SLIDER_LOCATION_KEY)) || 'controls';
+        } catch (e) {
+            return 'controls';
+        }
+    }
+
+    function isSliderOnVideo() {
+        return getSliderLocation() === 'video';
+    }
+
+    function setSliderLocation(location) {
+        const normalizedLocation = normalizeSliderLocation(location) || 'controls';
+        try {
+            localStorage.setItem(SLIDER_LOCATION_KEY, normalizedLocation);
+        } catch (e) { /* ignore storage errors */ }
+        attachSliderIfPossible();
+        applyNativeVolumeVisibility();
+    }
+
+    function setReplaceNativePlacement(placement) {
+        const normalizedPlacement = normalizeReplaceNativePlacement(placement) || 'native';
+        try {
+            localStorage.setItem(REPLACE_NATIVE_PLACEMENT_KEY, normalizedPlacement);
+        } catch (e) { /* ignore storage errors */ }
+        attachSliderIfPossible();
+        applyNativeVolumeVisibility();
+    }
+
+    function isSnapTo5Enabled() {
+        const override = normalizeBooleanSetting(USER_SETTINGS.snapToFive);
+        if (override !== null) return override;
+        try {
+            return localStorage.getItem(SNAP_TO_5_KEY) === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function setSnapTo5Enabled(enabled) {
+        try {
+            localStorage.setItem(SNAP_TO_5_KEY, enabled ? 'true' : 'false');
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+    function isAlwaysExpandedEnabled() {
+        const override = normalizeBooleanSetting(USER_SETTINGS.alwaysExpanded);
+        if (override !== null) return override;
+        try {
+            return localStorage.getItem(ALWAYS_EXPANDED_KEY) === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function setAlwaysExpandedEnabled(enabled) {
+        try {
+            localStorage.setItem(ALWAYS_EXPANDED_KEY, enabled ? 'true' : 'false');
+        } catch (e) { /* ignore storage errors */ }
+
+        const overlay = document.getElementById(OVERLAY_ID);
+        if (!overlay) return;
+        if (enabled) {
+            clearExpandedHold(overlay);
+            setOverlayExpanded(overlay, true);
+            return;
+        }
+        clearExpandedHold(overlay);
+        collapseOverlayIfIdle(overlay, true);
+    }
+
+    function normalizeOpacityPercent(value, fallback) {
+        if (value === null || value === undefined || value === '') return fallback;
+        const num = Number(value);
+        if (!Number.isFinite(num)) return fallback;
+        return Math.min(100, Math.max(0, num));
+    }
+
+    function getSavedOverlayOpacityPercent(focused) {
+        const fallback = focused ? DEFAULT_OVERLAY_OPACITY_ACTIVE : DEFAULT_OVERLAY_OPACITY_IDLE;
+        const setting = focused ? USER_SETTINGS.overlayOpacityFocused : USER_SETTINGS.overlayOpacityUnfocused;
+        if (setting !== 'saved') {
+            return normalizeOpacityPercent(setting, fallback);
+        }
+        try {
+            const key = focused ? OVERLAY_OPACITY_ACTIVE_KEY : OVERLAY_OPACITY_IDLE_KEY;
+            return normalizeOpacityPercent(localStorage.getItem(key), fallback);
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function setSavedOverlayOpacityPercent(focused, value) {
+        const fallback = focused ? DEFAULT_OVERLAY_OPACITY_ACTIVE : DEFAULT_OVERLAY_OPACITY_IDLE;
+        const normalizedValue = normalizeOpacityPercent(value, fallback);
+        try {
+            const key = focused ? OVERLAY_OPACITY_ACTIVE_KEY : OVERLAY_OPACITY_IDLE_KEY;
+            localStorage.setItem(key, String(normalizedValue));
+        } catch (e) { /* ignore storage errors */ }
+        updateOverlayOpacity(document.getElementById(OVERLAY_ID));
+    }
+
+    function resetSavedOverlayOpacityPercent(focused) {
+        try {
+            const key = focused ? OVERLAY_OPACITY_ACTIVE_KEY : OVERLAY_OPACITY_IDLE_KEY;
+            localStorage.removeItem(key);
+        } catch (e) { /* ignore storage errors */ }
+        updateOverlayOpacity(document.getElementById(OVERLAY_ID));
+    }
+
+    function getOverlayOpacityValue(focused) {
+        if (!isSliderOnVideo()) return '1';
+        return String(getSavedOverlayOpacityPercent(focused) / 100);
+    }
+
+    function isOverlayInteractionFocused(overlay) {
+        return overlay?.dataset.tmDragging === 'true' ||
+            overlay?.matches?.(':hover') ||
+            overlay?.contains?.(document.activeElement);
+    }
+
+    function updateOverlayOpacity(overlay) {
+        if (!overlay) return;
+        overlay.style.opacity = getOverlayOpacityValue(isOverlayInteractionFocused(overlay));
+    }
+
+    function setVolumeSliderMode(mode) {
+        const normalizedMode = normalizeVolumeSliderMode(mode) || 'on';
+        try {
+            localStorage.setItem(VOLUME_MODE_KEY, normalizedMode);
+        } catch (e) { /* ignore storage errors */ }
+
+        if (normalizedMode === 'off') {
+            removeOverlay();
+        } else {
+            attachSliderIfPossible();
+        }
+        applyNativeVolumeVisibility();
+        injectVolumeOptionsButton();
+        refreshOptionsPopupState();
+        updateOptionsButtonState();
+    }
+
+    /**
+     * Check if the volume slider is enabled (not in Off mode).
+     */
+    function isOverlayEnabled() {
+        return getVolumeSliderMode() !== 'off';
+    }
+
+    function isNativeVolumeReplacementEnabled() {
+        return getVolumeSliderMode() === 'replace-native';
+    }
+
+    function shouldUseNativeReplacementSlot() {
+        return isNativeVolumeReplacementEnabled() && getReplaceNativePlacement() === 'native';
+    }
+
+    function applyNativeVolumeVisibility() {
+        const shouldHideNative = isOverlayEnabled() && isNativeVolumeReplacementEnabled();
+        document.querySelectorAll('.ytp-volume-area').forEach((area) => {
+            const nextDisplay = shouldHideNative ? 'none' : '';
+            if (area.style.display !== nextDisplay) {
+                area.style.display = nextDisplay;
+            }
+        });
+
+        if (shouldHideNative) {
+            const overlay = document.getElementById(OVERLAY_ID);
+            const player = getPlayerContainer();
+            const controlsHost = getYouTubeControlsHost(player);
+            if (overlay && player) {
+                placeOverlay(overlay, player, controlsHost);
+            }
+        }
+    }
+
+    /**
+     * Ensure we always get the active HTMLVideoElement.
+     */
+    function getVideoElement() {
+        if (cachedVideo && cachedVideo.isConnected) {
+            return cachedVideo;
+        }
+        const videos = document.querySelectorAll('video');
+        if (!videos || videos.length === 0) {
+            cachedVideo = null;
+            return null;
+        }
+        // Prefer the largest video element (usually the main player)
+        let best = videos[0];
+        let bestArea = best.clientWidth * best.clientHeight;
+        videos.forEach((v) => {
+            const area = v.clientWidth * v.clientHeight;
+            if (area > bestArea) {
+                best = v;
+                bestArea = area;
+            }
+        });
+        cachedVideo = best;
+        return cachedVideo;
+    }
+
+    /**
+     * Find a suitable container to host the overlay.
+     */
+    function getPlayerContainer(video = getVideoElement()) {
+        const moviePlayer = document.getElementById('movie_player');
+        if (moviePlayer) {
+            return moviePlayer;
+        }
+        return video ? video.parentElement : null;
+    }
+
+    function getYouTubeControlsHost(player) {
+        if (!player) return null;
+        return player.querySelector('.ytp-left-controls') || document.querySelector('.ytp-left-controls');
+    }
+
+    function getNativeVolumeArea(controlsHost) {
+        return controlsHost?.querySelector?.('.ytp-volume-area') || document.querySelector('.ytp-volume-area');
+    }
+
+    function ensurePlayerPositioning(player) {
+        if (!player) return;
+        const style = window.getComputedStyle(player);
+        if (style.position === 'static') {
+            player.style.position = 'relative';
+        }
+    }
+
+    function positionOverlayAboveScrubber(overlay, player) {
+        const progressBar = document.querySelector('.ytp-progress-bar-padding');
+        const barEl = progressBar ? (progressBar.closest('.ytp-progress-bar') || progressBar.parentElement) : null;
+        const ref = barEl || progressBar;
+        if (!overlay || !player || !ref) {
+            if (overlay) overlay.style.bottom = '12px';
+            return;
+        }
+
+        const playerRect = player.getBoundingClientRect();
+        const barRect = ref.getBoundingClientRect();
+        const bottomPx = playerRect.bottom - barRect.top + 8;
+        overlay.style.bottom = `${Math.max(20, bottomPx)}px`;
+    }
+
+    function updateVideoOverlayPosition(overlay, player) {
+        if (!overlay || !player || !isSliderOnVideo()) return;
+        if (player.classList.contains('ytp-autohide')) {
+            overlay.style.bottom = '12px';
+            return;
+        }
+        positionOverlayAboveScrubber(overlay, player);
+    }
+
+    function placeOverlayInControls(overlay, controlsHost) {
+        if (!overlay || !controlsHost) return;
+        const nativeVolumeArea = getNativeVolumeArea(controlsHost);
+        if (shouldUseNativeReplacementSlot() && nativeVolumeArea && nativeVolumeArea.parentElement === controlsHost) {
+            if (overlay.parentElement !== controlsHost || overlay.nextElementSibling !== nativeVolumeArea) {
+                controlsHost.insertBefore(overlay, nativeVolumeArea);
+            }
+        } else if (overlay.parentElement !== controlsHost || overlay.nextElementSibling) {
+            controlsHost.appendChild(overlay);
+        }
+    }
+
+    function placeOverlay(overlay, player, controlsHost) {
+        if (!overlay || !player) return;
+
+        if (isSliderOnVideo()) {
+            ensurePlayerPositioning(player);
+            if (overlay.parentElement !== player) {
+                player.appendChild(overlay);
+            }
+            updateVideoOverlayPosition(overlay, player);
+        } else if (controlsHost) {
+            placeOverlayInControls(overlay, controlsHost);
+            overlay.style.bottom = '';
+        }
+
+        const expanded = overlay.classList.contains('tm-expanded') || isAlwaysExpandedEnabled();
+        setOverlayExpanded(overlay, expanded, true);
+        updateOverlayOpacity(overlay);
+    }
+
+    function createStylesIfNeeded() {
+        if (document.getElementById('tm-volume-slider-style')) return;
+        const style = document.createElement('style');
+        style.id = 'tm-volume-slider-style';
+        document.head.appendChild(style);
+        const css = `
+#${OVERLAY_ID} input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(to right, #cc4444 0%, #bb3333 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 100%);
+  --tm-active-track-h: 9px;
+  --tm-thumb-size: 22px;
+  height: 42px;
+  border-radius: 12px;
+  outline: none;
+  position: relative;
+  background-size: calc(100% - var(--tm-thumb-size, 22px)) var(--tm-active-track-h, 9px);
+  background-position: center;
+  background-repeat: no-repeat;
+  transition: all 0.2s ease;
+  overflow: visible;
+}
+
+#${OVERLAY_ID} input[type=range]:hover {
+  --tm-active-track-h: 11px;
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-runnable-track {
+  border: none;
+  background: transparent;
+  height: var(--tm-active-track-h, 9px);
+  border-radius: 12px;
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--tm-thumb-size);
+  height: var(--tm-thumb-size);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+  margin-top: calc((var(--tm-active-track-h, 9px) - var(--tm-thumb-size, 22px)) / 2);
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb {
+  width: var(--tm-thumb-size);
+  height: var(--tm-thumb-size);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-track {
+  background: transparent;
+  height: var(--tm-active-track-h, 9px);
+  border-radius: 12px;
+  border: none;
+  outline: none;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-range-progress {
+  background: transparent;
+  border: none;
+}
+
+#${OVERLAY_ID} input[type=range]::-moz-focus-outer {
+  border: none;
+  outline: none;
+}
+
+#${OVERLAY_ID} .tm-volume-panel-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  border: none;
+  background: rgba(8, 13, 15, 0.48);
+  box-sizing: border-box;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  opacity: 1;
+  pointer-events: none;
+  transform: none;
+  transition: none;
+}
+
+#${OVERLAY_ID} .tm-volume-icon-cell {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 40px;
+  height: 40px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  opacity: 1;
+  transition: opacity 0.1s ease;
+}
+
+#${OVERLAY_ID} .tm-volume-indicator {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  opacity: 1;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#${OVERLAY_ID} .tm-volume-indicator svg {
+  display: block;
+  width: 40px;
+  height: 40px;
+  shape-rendering: geometricPrecision;
+}
+
+#${OVERLAY_ID} .tm-volume-arc {
+  transition: stroke-dasharray 0.08s linear;
+}
+
+#${OVERLAY_ID} .tm-volume-speaker-icon {
+  color: rgba(255, 255, 255, 0.94);
+}
+
+#${OVERLAY_ID} .tm-volume-speaker-muted,
+#${OVERLAY_ID} .tm-volume-speaker-low,
+#${OVERLAY_ID} .tm-volume-speaker-high {
+  display: none;
+}
+
+#${OVERLAY_ID} .tm-volume-indicator[data-volume-icon="muted"] .tm-volume-speaker-muted,
+#${OVERLAY_ID} .tm-volume-indicator[data-volume-icon="low"] .tm-volume-speaker-low,
+#${OVERLAY_ID} .tm-volume-indicator[data-volume-icon="high"] .tm-volume-speaker-high {
+  display: block;
+}
+
+#${OVERLAY_ID} .tm-volume-indicator.muted {
+  filter: saturate(0.45);
+  opacity: 0.78;
+}
+
+#${OVERLAY_ID} .tm-volume-controls {
+  position: relative;
+  z-index: 2;
+  transition: opacity 0.12s ease 0.04s;
+}
+
+#${OVERLAY_ID}.tm-collapsed .tm-volume-controls {
+  opacity: 0;
+  pointer-events: none;
+  transition-delay: 0s;
+}
+
+#${OVERLAY_ID}.tm-expanded .tm-volume-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#${OVERLAY_ID} .tm-volume-top-row {
+  flex: 0 0 auto;
+  position: relative;
+  width: 106px;
+  height: 40px;
+  box-sizing: border-box;
+  pointer-events: none !important;
+}
+
+#${OVERLAY_ID} #${VALUE_LABEL_ID} {
+  position: absolute;
+  left: 46px;
+  top: 50%;
+  width: 54px;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: 18px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+  text-align: center;
+  user-select: none;
+  letter-spacing: 0;
+}
+
+#${OVERLAY_ID} .tm-volume-slider-row {
+  flex: 1 1 auto;
+  min-width: 180px;
+  height: 40px;
+}
+
+#${OVERLAY_ID} .tm-slider-ticks {
+  position: absolute;
+  left: calc(var(--tm-thumb-size, 22px) / 2);
+  right: calc(var(--tm-thumb-size, 22px) / 2);
+  top: 50%;
+  transform: translateY(-50%);
+  height: 9px;
+  pointer-events: none;
+  background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
+  background-size: 100% 100%;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+#${OVERLAY_ID}.tm-expanded .tm-slider-ticks,
+#${OVERLAY_ID}:hover .tm-slider-ticks {
+  opacity: 1;
+}
+
+        `;
+        style.textContent = css;
+    }
+
+    function updateSliderBar(slider) {
+        const value = Number(slider.value) || 0;
+        const pct = Math.min(Math.max(value, 0), 100);
+        const fadeStart = Math.max(0, pct - 1);
+        const fadeEnd = Math.min(100, pct + 1);
+        slider.style.background = `linear-gradient(to right,
+            #cc4444 0%,
+            #bb3333 ${fadeStart}%,
+            #cc5555 ${pct}%,
+            rgba(255, 255, 255, 0.15) ${fadeEnd}%,
+            rgba(255, 255, 255, 0.15) 100%)`;
+        slider.style.backgroundSize = 'calc(100% - var(--tm-thumb-size, 22px)) var(--tm-active-track-h, 9px)';
+        slider.style.backgroundPosition = 'center';
+        slider.style.backgroundRepeat = 'no-repeat';
+    }
+
+    function updateVolumeIndicator(overlay, value, muted) {
+        if (!overlay) return;
+        const pct = muted ? 0 : Math.min(Math.max(Number(value) || 0, 0), 100);
+        overlay.title = muted ? 'Muted' : `Volume ${Math.round(pct)}%`;
+        overlay.setAttribute('aria-label', overlay.title);
+
+        const indicator = overlay.querySelector('.tm-volume-indicator');
+        if (indicator) {
+            indicator.classList.toggle('muted', muted);
+            indicator.dataset.volumeIcon = getSpeakerIconMode(pct, muted);
+        }
+        const arc = overlay.querySelector('.tm-volume-arc');
+        if (arc) {
+            arc.style.strokeDasharray = `${pct} 100`;
+        }
+    }
+
+    function setOverlayExpanded(overlay, expanded, force = false) {
+        if (!overlay) return;
+        if (!expanded && isAlwaysExpandedEnabled()) {
+            expanded = true;
+        }
+        if (!force && (
+            (expanded && overlay.classList.contains('tm-expanded')) ||
+            (!expanded && overlay.classList.contains('tm-collapsed'))
+        )) {
+            return;
+        }
+        const onVideo = isSliderOnVideo();
+        const baseStyle = onVideo ? {
+            position: 'absolute',
+            left: '50%',
+            zIndex: '10000',
+            margin: '0',
+            alignSelf: 'auto',
+            flex: '0 0 auto',
+            transition: 'opacity 0.18s ease, width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease'
+        } : {
+            position: 'relative',
+            left: 'auto',
+            bottom: '',
+            zIndex: '2',
+            margin: '0 4px',
+            alignSelf: 'center',
+            flex: '0 0 auto',
+            transition: 'width 0.22s cubic-bezier(0.16, 1, 0.3, 1)'
+        };
+        const pillStyle = {
+            ...baseStyle,
+            minWidth: '0',
+            maxWidth: 'none',
+            height: '40px',
+            minHeight: '40px',
+            borderRadius: '20px',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'flex-start',
+            gap: '0',
+            background: 'transparent',
+            transform: onVideo ? 'translateX(-50%)' : 'translateY(0)'
+        };
+
+        if (expanded) {
+            overlay.classList.remove('tm-collapsed');
+            overlay.classList.add('tm-expanded');
+            Object.assign(overlay.style, pillStyle, {
+                width: 'clamp(320px, 34vw, 460px)',
+                padding: '0 12px 0 0'
+            });
+            updateOverlayOpacity(overlay);
+            return;
+        }
+
+        overlay.classList.remove('tm-expanded');
+        overlay.classList.add('tm-collapsed');
+        Object.assign(overlay.style, pillStyle, {
+            width: '40px',
+            padding: '0 12px 0 0'
+        });
+        updateOverlayOpacity(overlay);
+    }
+
+    function shouldKeepOverlayExpanded(overlay) {
+        return isAlwaysExpandedEnabled() ||
+            overlay.matches(':hover') ||
+            overlay.contains(document.activeElement) ||
+            overlay.dataset.tmDragging === 'true';
+    }
+
+    function areYouTubeControlsHidden() {
+        const player = getPlayerContainer();
+        return !!player?.classList?.contains('ytp-autohide') ||
+            !!player?.classList?.contains('ytp-hide-controls');
+    }
+
+    function clearExpandedHold(overlay) {
+        overlay.dataset.tmKeepExpanded = 'false';
+        if (overlay._expandedHoldTimer) {
+            clearInterval(overlay._expandedHoldTimer);
+            overlay._expandedHoldTimer = 0;
+        }
+    }
+
+    function markVolumeChangedWhileExpanded(overlay) {
+        if (!overlay) return;
+        if (isAlwaysExpandedEnabled()) {
+            setOverlayExpanded(overlay, true);
+            return;
+        }
+        overlay.dataset.tmKeepExpanded = 'true';
+        setOverlayExpanded(overlay, true);
+        if (overlay._expandedHoldTimer) return;
+
+        overlay._expandedHoldTimer = window.setInterval(() => {
+            if (!overlay.isConnected || areYouTubeControlsHidden()) {
+                clearExpandedHold(overlay);
+                setOverlayExpanded(overlay, false);
+            }
+        }, 250);
+    }
+
+    function collapseOverlayIfIdle(overlay, force = false) {
+        window.setTimeout(() => {
+            if (isAlwaysExpandedEnabled()) {
+                setOverlayExpanded(overlay, true);
+                return;
+            }
+            if (overlay.dataset.tmKeepExpanded === 'true' && !areYouTubeControlsHidden()) {
+                return;
+            }
+            if (overlay.dataset.tmKeepExpanded === 'true') {
+                clearExpandedHold(overlay);
+            }
+            if (force || !shouldKeepOverlayExpanded(overlay)) {
+                setOverlayExpanded(overlay, false);
+            }
+        }, 0);
+    }
+
+    /**
+     * Get the YouTube player API object if available.
+     */
+    function getYouTubePlayer() {
+        if (cachedYtPlayer && cachedYtPlayer.isConnected && typeof cachedYtPlayer.getVolume === 'function') {
+            return cachedYtPlayer;
+        }
+        const player = document.getElementById('movie_player');
+        if (player && typeof player.getVolume === 'function') {
+            cachedYtPlayer = player;
+            return player;
+        }
+        cachedYtPlayer = null;
+        return null;
+    }
+
+    /**
+     * Get volume from YouTube's player API (0-100), falling back to video element.
+     */
+    function getVolume(video) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) {
+            const isMuted = ytPlayer.isMuted();
+            if (isMuted) {
+                return 0;
+            }
+            return ytPlayer.getVolume();
+        }
+        // Fallback to video element
+        const vol = (video.muted ? 0 : video.volume) || 0;
+        return Math.round(vol * 100);
+    }
+
+    /**
+     * Check muted state via YouTube API or video element.
+     */
+    function isMuted(video) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer && typeof ytPlayer.isMuted === 'function') {
+            return ytPlayer.isMuted();
+        }
+        return !!video.muted;
+    }
+
+    /**
+     * Toggle mute via YouTube API or video element.
+     */
+    function toggleMute(video) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) {
+            if (ytPlayer.isMuted()) {
+                ytPlayer.unMute();
+            } else {
+                ytPlayer.mute();
+            }
+        } else {
+            video.muted = !video.muted;
+        }
+    }
+
+    /**
+     * Set volume using YouTube's player API (0-100), falling back to video element.
+     */
+    function setVolume(video, value) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) {
+            if (ytPlayer.isMuted()) {
+                ytPlayer.unMute();
+            }
+            ytPlayer.setVolume(value);
+        } else {
+            // Fallback to video element
+            video.volume = value / 100;
+            video.muted = false;
+        }
+    }
+
+    /**
+     * Read saved volume from localStorage. Returns 0-100 or null.
+     */
+    function getSavedVolume() {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved === null) return null;
+            const value = Math.min(100, Math.max(0, parseInt(saved, 10)));
+            return isNaN(value) ? null : value;
+        } catch (e) { return null; }
+    }
+
+    /**
+     * Restore volume from localStorage and apply to player. Call before syncing slider.
+     */
+    function restoreSavedVolume(video) {
+        const value = getSavedVolume();
+        if (value !== null) {
+            setVolume(video, value);
+        }
+    }
+
+    /**
+     * Snap value to nearest 5% (5, 10, 15, ... 100).
+     */
+    function snapTo5(value) {
+        return Math.round((Math.min(100, Math.max(0, value)) / 5)) * 5;
+    }
+
+    function readSnappedSliderValue(slider) {
+        let value = Number(slider.value) || 0;
+        if (isSnapTo5Enabled()) {
+            value = snapTo5(value);
+            slider.value = String(value);
+        }
+        return value;
+    }
+
+    /**
+     * Save volume to localStorage for persistence across page reloads.
+     */
+    function saveVolume(value) {
+        try {
+            localStorage.setItem(STORAGE_KEY, String(Math.round(value)));
+        } catch (e) { /* ignore storage errors */ }
+    }
+
+    function scheduleSaveVolume(value) {
+        if (saveVolumeTimer) {
+            clearTimeout(saveVolumeTimer);
+        }
+        saveVolumeTimer = window.setTimeout(() => {
+            saveVolume(value);
+            saveVolumeTimer = 0;
+        }, STORAGE_WRITE_DEBOUNCE_MS);
+    }
+
+    /**
+     * Sync mute button icon (style toggles only, no DOM mutation).
+     */
+    function getSpeakerIconMode(value, muted) {
+        const pct = Math.min(Math.max(Number(value) || 0, 0), 100);
+        if (muted || pct === 0) return 'muted';
+        return pct <= 50 ? 'low' : 'high';
+    }
+
+    function setSliderFromPlayer(slider, label, video) {
+        const muted = isMuted(video);
+        const displayValue = getVolume(video);
+        slider.value = String(displayValue);
+        if (label) {
+            label.textContent = muted ? 'Muted' : `${displayValue}%`;
+        }
+        updateSliderBar(slider);
+        updateVolumeIndicator(document.getElementById(OVERLAY_ID), displayValue, muted);
+    }
+
+    function makeSpeakerIconGroup(ns, mode) {
+        const group = document.createElementNS(ns, 'g');
+        const addPath = (d) => {
+            const path = document.createElementNS(ns, 'path');
+            path.setAttribute('fill', 'currentColor');
+            path.setAttribute('d', d);
+            group.appendChild(path);
+        };
+
+        if (mode === 'muted') {
+            addPath('M11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16C1 13.20 1.26 14.22 1.77 15.12C2.28 16.02 3.02 16.78 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.25 22 12.51 21.90 12.70 21.71C12.89 21.52 13 21.26 13 21V3C13 2.73 12.89 2.48 12.70 2.29C12.51 2.10 12.25 2 11.98 2C11.80 2 11.63 2.05 11.48 2.14ZM4.94 8.40L11 4.76V19.22L4.94 15.59C4.35 15.23 3.85 14.73 3.51 14.13C3.17 13.53 3 12.85 3 12.16V11.83C3 11.14 3.18 10.46 3.52 9.86C3.86 9.26 4.35 8.76 4.94 8.40Z');
+            addPath('M16.05 7.65L18.75 10.35L21.45 7.65L22.85 9.05L20.15 11.75L22.85 14.45L21.45 15.85L18.75 13.15L16.05 15.85L14.65 14.45L17.35 11.75L14.65 9.05L16.05 7.65Z');
+            return group;
+        }
+
+        addPath('M11.60 2.08L11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16L1.01 12.56C1.07 13.52 1.37 14.46 1.87 15.29C2.38 16.12 3.08 16.81 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.16 22 12.33 21.95 12.49 21.87C12.64 21.78 12.77 21.65 12.86 21.50C12.95 21.35 13 21.17 13 21V3C12.99 2.83 12.95 2.67 12.87 2.52C12.80 2.37 12.68 2.25 12.54 2.16C12.41 2.07 12.25 2.01 12.08 2C11.92 1.98 11.75 2.01 11.60 2.08Z');
+        addPath('M15.53 7.05C15.35 7.22 15.25 7.45 15.24 7.70C15.23 7.95 15.31 8.19 15.46 8.38L15.53 8.46L15.70 8.64C16.09 9.06 16.39 9.55 16.61 10.08L16.70 10.31C16.90 10.85 17 11.42 17 12L16.99 12.24C16.96 12.73 16.87 13.22 16.70 13.68L16.61 13.91C16.36 14.51 15.99 15.07 15.53 15.53C15.35 15.72 15.25 15.97 15.26 16.23C15.26 16.49 15.37 16.74 15.55 16.92C15.73 17.11 15.98 17.21 16.24 17.22C16.50 17.22 16.76 17.12 16.95 16.95C17.60 16.29 18.11 15.52 18.46 14.67L18.59 14.35C18.82 13.71 18.95 13.03 18.99 12.34L19 12C18.99 11.19 18.86 10.39 18.59 9.64L18.46 9.32C18.15 8.57 17.72 7.89 17.18 7.30L16.95 7.05L16.87 6.98C16.68 6.82 16.43 6.74 16.19 6.75C15.94 6.77 15.71 6.87 15.53 7.05Z');
+
+        if (mode === 'high') {
+            addPath('M18.36 4.22C18.18 4.39 18.08 4.62 18.07 4.87C18.05 5.12 18.13 5.36 18.29 5.56L18.36 5.63L18.66 5.95C19.36 6.72 19.91 7.60 20.31 8.55L20.47 8.96C20.82 9.94 21 10.96 21 11.99L20.98 12.44C20.94 13.32 20.77 14.19 20.47 15.03L20.31 15.44C19.86 16.53 19.19 17.52 18.36 18.36C18.17 18.55 18.07 18.80 18.07 19.07C18.07 19.33 18.17 19.59 18.36 19.77C18.55 19.96 18.80 20.07 19.07 20.07C19.33 20.07 19.59 19.96 19.77 19.77C20.79 18.75 21.61 17.54 22.16 16.20L22.35 15.70C22.72 14.68 22.93 13.62 22.98 12.54L23 12C22.99 10.73 22.78 9.48 22.35 8.29L22.16 7.79C21.67 6.62 20.99 5.54 20.15 4.61L19.77 4.22L19.70 4.15C19.51 3.99 19.26 3.91 19.02 3.93C18.77 3.94 18.53 4.04 18.36 4.22Z');
+        }
+
+        return group;
+    }
+
+    function makeVolumeIndicatorSvg() {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('width', '40');
+        svg.setAttribute('height', '40');
+        svg.setAttribute('viewBox', '0 0 40 40');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+
+        const makeCircle = (className, attrs) => {
+            const circle = document.createElementNS(ns, 'circle');
+            if (className) circle.setAttribute('class', className);
+            Object.entries(attrs).forEach(([key, value]) => {
+                circle.setAttribute(key, value);
+            });
+            svg.appendChild(circle);
+            return circle;
+        };
+
+        const appendSpeakerIcon = (className, mode, transform) => {
+            const group = makeSpeakerIconGroup(ns, mode);
+            group.setAttribute('class', `${className} tm-volume-speaker-icon`);
+            group.setAttribute('transform', transform);
+            svg.appendChild(group);
+        };
+
+        makeCircle('', {
+            cx: '20',
+            cy: '20',
+            r: '13',
+            fill: 'none',
+            stroke: '#938997',
+            'stroke-opacity': '0.72',
+            'stroke-width': '4',
+            'stroke-dasharray': '100 100',
+            'pathLength': '100',
+            transform: 'rotate(-90 20 20)'
+        });
+        makeCircle('tm-volume-arc', {
+            cx: '20',
+            cy: '20',
+            r: '13',
+            fill: 'none',
+            stroke: '#cc4444',
+            'stroke-width': '4',
+            'stroke-dasharray': '0 100',
+            'pathLength': '100',
+            transform: 'rotate(-90 20 20)'
+        });
+        appendSpeakerIcon('tm-volume-speaker-muted', 'muted', 'translate(8 8)');
+        appendSpeakerIcon('tm-volume-speaker-low', 'low', 'translate(8 8)');
+        appendSpeakerIcon('tm-volume-speaker-high', 'high', 'translate(8 8)');
+
+        return svg;
+    }
+
+    function ensureOptionsStyles() {
+        if (document.getElementById(OPTIONS_STYLE_ID)) return;
+        const style = document.createElement('style');
+        style.id = OPTIONS_STYLE_ID;
+        document.head.appendChild(style);
+        style.textContent = `
+            #${OPTIONS_BUTTON_ID} {
+                opacity: 0.94;
+            }
+            #${OPTIONS_BUTTON_ID}:hover,
+            #${OPTIONS_BUTTON_ID}:focus-visible,
+            #${OPTIONS_BUTTON_ID}[aria-expanded="true"] {
+                opacity: 1;
+            }
+            #${OPTIONS_BUTTON_ID}[data-tm-volume-mode="off"] svg {
+                opacity: 0.58;
+            }
+            #${OPTIONS_BUTTON_ID} svg {
+                display: block;
+                height: 24px;
+                width: 24px;
+            }
+            #${OPTIONS_POPUP_ID} {
+                background: rgba(18, 18, 18, 0.97);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.48);
+                color: #fff;
+                font-family: 'YouTube Sans', Roboto, Arial, sans-serif;
+                font-size: 14px;
+                max-width: 340px;
+                min-width: 304px;
+                overflow: hidden;
+                position: absolute;
+                user-select: none;
+                z-index: 10001;
+            }
+            #${OPTIONS_POPUP_ID}[hidden] {
+                display: none;
+            }
+            .tm-volume-options-open .ytp-tooltip {
+                display: none !important;
+            }
+            .tm-volume-options-header {
+                align-items: center;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                display: flex;
+                min-height: 40px;
+                padding: 0 16px;
+            }
+            .tm-volume-options-title {
+                color: #fff;
+                font-size: 14px;
+                font-weight: 500;
+                line-height: 20px;
+            }
+            .tm-volume-options-body {
+                max-height: 70vh;
+                overflow-y: auto;
+                padding: 6px 0 12px;
+            }
+            .tm-volume-options-section {
+                padding: 10px 16px;
+            }
+            .tm-volume-options-section + .tm-volume-options-section {
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            .tm-volume-options-section-label {
+                color: rgba(255, 255, 255, 0.6);
+                font-size: 11px;
+                letter-spacing: 0;
+                margin-bottom: 6px;
+                text-transform: uppercase;
+            }
+            .tm-volume-options-row {
+                align-items: center;
+                background: transparent;
+                border: 0;
+                border-radius: 6px;
+                color: #fff;
+                cursor: pointer;
+                display: flex;
+                font: inherit;
+                font-size: 13px;
+                justify-content: space-between;
+                margin: 0 -8px;
+                padding: 7px 8px;
+                text-align: left;
+                transition: background 0.12s ease;
+                width: calc(100% + 16px);
+            }
+            .tm-volume-options-row:hover,
+            .tm-volume-options-row:focus-visible {
+                background: rgba(255, 255, 255, 0.08);
+                outline: none;
+            }
+            .tm-volume-options-row:disabled {
+                cursor: not-allowed;
+                opacity: 0.45;
+            }
+            .tm-volume-options-checkbox {
+                background: transparent;
+                border: 1.5px solid rgba(255, 255, 255, 0.45);
+                border-radius: 3px;
+                display: grid;
+                flex-shrink: 0;
+                height: 18px;
+                place-items: center;
+                transition: all 0.12s ease;
+                width: 18px;
+            }
+            .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox {
+                background: #cc4444;
+                border-color: #cc4444;
+            }
+            .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox::after {
+                border: solid #fff;
+                border-width: 0 0 3px 3px;
+                box-sizing: border-box;
+                content: '';
+                height: 6px;
+                transform: translateY(-1px) rotate(-45deg);
+                width: 10px;
+            }
+            .tm-volume-options-radio-group {
+                display: flex;
+                gap: 6px;
+            }
+            .tm-volume-options-mode {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+            .tm-volume-options-mode .tm-volume-options-radio {
+                font-size: 11px;
+                padding-left: 4px;
+                padding-right: 4px;
+            }
+            .tm-volume-options-radio {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 6px;
+                color: rgba(255, 255, 255, 0.85);
+                cursor: pointer;
+                flex: 1;
+                font: inherit;
+                font-size: 12px;
+                min-width: 0;
+                padding: 7px 8px;
+                text-align: center;
+                transition: all 0.12s ease;
+            }
+            .tm-volume-options-radio:hover,
+            .tm-volume-options-radio:focus-visible {
+                background: rgba(255, 255, 255, 0.16);
+                outline: none;
+            }
+            .tm-volume-options-radio[aria-checked="true"] {
+                background: rgba(204, 68, 68, 0.9);
+                border-color: #cc4444;
+                color: #fff;
+            }
+            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio {
+                cursor: not-allowed;
+                opacity: 0.4;
+            }
+            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio:hover {
+                background: rgba(255, 255, 255, 0.08);
+            }
+            .tm-volume-options-opacity-row {
+                margin-top: 10px;
+            }
+            .tm-volume-options-opacity-row:first-of-type {
+                margin-top: 0;
+            }
+            .tm-volume-options-opacity-top {
+                align-items: center;
+                display: flex;
+                gap: 8px;
+                margin-bottom: 4px;
+            }
+            .tm-volume-options-opacity-name {
+                color: #fff;
+                flex: 1 1 auto;
+                font-size: 13px;
+            }
+            .tm-volume-options-opacity-value {
+                color: rgba(255, 255, 255, 0.72);
+                font-size: 12px;
+                min-width: 36px;
+                text-align: right;
+            }
+            .tm-volume-options-opacity-reset {
+                background: rgba(255, 255, 255, 0.16);
+                border: 0;
+                border-radius: 8px;
+                color: rgba(255, 255, 255, 0.92);
+                cursor: pointer;
+                font: inherit;
+                font-size: 11px;
+                padding: 2px 8px;
+            }
+            .tm-volume-options-opacity-reset:hover,
+            .tm-volume-options-opacity-reset:focus-visible {
+                background: rgba(255, 255, 255, 0.26);
+            }
+            .tm-volume-options-opacity-slider {
+                -webkit-appearance: none;
+                appearance: none;
+                background: linear-gradient(to right,
+                    rgba(255, 255, 255, 0.92) 0%,
+                    rgba(255, 255, 255, 0.92) var(--tm-opacity-fill, 0%),
+                    rgba(255, 255, 255, 0.22) var(--tm-opacity-fill, 0%),
+                    rgba(255, 255, 255, 0.22) 100%);
+                border-radius: 3px;
+                cursor: pointer;
+                display: block;
+                height: 4px;
+                margin: 0;
+                outline: none;
+                width: 100%;
+            }
+            .tm-volume-options-opacity-slider::-webkit-slider-runnable-track {
+                background: transparent;
+                border: none;
+                height: 4px;
+            }
+            .tm-volume-options-opacity-slider::-moz-range-track {
+                background: transparent;
+                border: none;
+                height: 4px;
+            }
+            .tm-volume-options-opacity-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                background: #fff;
+                border: 0;
+                border-radius: 50%;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+                cursor: pointer;
+                height: 14px;
+                margin-top: -5px;
+                width: 14px;
+            }
+            .tm-volume-options-opacity-slider::-moz-range-thumb {
+                background: #fff;
+                border: 0;
+                border-radius: 50%;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+                cursor: pointer;
+                height: 14px;
+                width: 14px;
+            }
+        `;
+    }
+
+    function closeYouTubeSettingsPopupIfOpen() {
+        const isOpen = Array.from(document.querySelectorAll('.ytp-settings-menu'))
+            .some((popup) => popup.style.display !== 'none' && popup.offsetParent !== null);
+        if (isOpen) {
+            document.querySelector('.ytp-settings-button')?.click();
+        }
+    }
+
+    function getVolumeModeLabel(mode = getVolumeSliderMode()) {
+        if (mode === 'off') return 'Off';
+        return mode === 'replace-native' ? 'Replace native' : 'On';
+    }
+
+    function updateOptionsButtonState(btn = document.getElementById(OPTIONS_BUTTON_ID)) {
+        if (!btn) return;
+        const mode = getVolumeSliderMode();
+        const label = `Volume Slider Options (${getVolumeModeLabel(mode)})`;
+        btn.dataset.tmVolumeMode = mode;
+        btn.setAttribute('aria-label', label);
+        btn.setAttribute('title', label);
+    }
+
+    // -------------------------------------
+    // Volume Options icon button (right of YouTube settings gear)
+    // -------------------------------------
+
+    function getRightControlsHost(player) {
+        if (!player) return null;
+        return player.querySelector('.ytp-right-controls-left') ||
+            player.querySelector('.ytp-right-controls');
+    }
+
+    function createOptionsButtonIconSvg() {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('height', '24');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '24');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+        const path = document.createElementNS(ns, 'path');
+        path.setAttribute('fill', '#fff');
+        path.setAttribute('d', 'M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6h2z');
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function injectVolumeOptionsButton() {
+        ensureOptionsStyles();
+        const player = getPlayerContainer();
+        const host = getRightControlsHost(player);
+        const settingsBtn = host?.querySelector?.('.ytp-settings-button');
+        if (!host || !settingsBtn) return;
+
+        let btn = document.getElementById(OPTIONS_BUTTON_ID);
+        if (btn && btn.parentElement === host && btn.nextElementSibling === settingsBtn) {
+            updateOptionsButtonState();
+            return;
+        }
+        btn?.remove();
+
+        btn = document.createElement('button');
+        btn.id = OPTIONS_BUTTON_ID;
+        btn.type = 'button';
+        btn.className = 'ytp-button';
+        btn.dataset.priority = '6';
+        btn.setAttribute('aria-haspopup', 'true');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.appendChild(createOptionsButtonIconSvg());
+        updateOptionsButtonState(btn);
+
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleVolumeOptionsPopup();
+        });
+
+        host.insertBefore(btn, settingsBtn);
+        ensureOptionsPopupAutohide();
+    }
+
+    function removeVolumeOptionsButton() {
+        document.getElementById(OPTIONS_BUTTON_ID)?.remove();
+        closeVolumeOptionsPopup();
+    }
+
+    // -------------------------------------
+    // Volume Options popup (advanced settings)
+    // -------------------------------------
+
+    let optionsPopupOutsideHandler = null;
+    let optionsPopupKeyHandler = null;
+    let optionsPopupRepositionHandler = null;
+
+    function getOptionsPopup() {
+        return document.getElementById(OPTIONS_POPUP_ID);
+    }
+
+    function isOptionsPopupOpen() {
+        const popup = getOptionsPopup();
+        return !!popup && !popup.hasAttribute('hidden');
+    }
+
+    function createOptionsCheckboxRow(id, label, isChecked, onToggle) {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.id = id;
+        row.className = 'tm-volume-options-row';
+        row.setAttribute('role', 'checkbox');
+        row.setAttribute('aria-checked', isChecked ? 'true' : 'false');
+
+        const text = document.createElement('span');
+        text.textContent = label;
+
+        const box = document.createElement('span');
+        box.className = 'tm-volume-options-checkbox';
+        box.setAttribute('aria-hidden', 'true');
+
+        row.appendChild(text);
+        row.appendChild(box);
+
+        row.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const next = row.getAttribute('aria-checked') !== 'true';
+            row.setAttribute('aria-checked', next ? 'true' : 'false');
+            onToggle(next);
+            refreshOptionsPopupState();
+        });
+        return row;
+    }
+
+    function createOptionsRadio(id, label, isChecked, onSelect) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = id;
+        btn.className = 'tm-volume-options-radio';
+        btn.setAttribute('role', 'radio');
+        btn.setAttribute('aria-checked', isChecked ? 'true' : 'false');
+        btn.textContent = label;
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onSelect();
+            refreshOptionsPopupState();
+        });
+        return btn;
+    }
+
+    function createModeSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+
+        const label = document.createElement('div');
+        label.className = 'tm-volume-options-section-label';
+        label.textContent = 'Mode';
+        section.appendChild(label);
+
+        const group = document.createElement('div');
+        group.className = 'tm-volume-options-radio-group tm-volume-options-mode';
+        group.setAttribute('role', 'radiogroup');
+        [
+            ['on', 'On'],
+            ['off', 'Off'],
+            ['replace-native', 'Replace native']
+        ].forEach(([mode, text]) => {
+            group.appendChild(createOptionsRadio(
+                `tm-volume-options-mode-${mode}`,
+                text,
+                getVolumeSliderMode() === mode,
+                () => setVolumeSliderMode(mode)
+            ));
+        });
+        section.appendChild(group);
+        return section;
+    }
+
+    function createPlacementSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+        section.id = 'tm-volume-options-placement-section';
+
+        const label = document.createElement('div');
+        label.className = 'tm-volume-options-section-label';
+        label.textContent = 'Position when replacing native';
+        section.appendChild(label);
+
+        const group = document.createElement('div');
+        group.className = 'tm-volume-options-radio-group';
+        group.setAttribute('role', 'radiogroup');
+        group.appendChild(createOptionsRadio(
+            'tm-volume-options-placement-native',
+            'Native spot',
+            getReplaceNativePlacement() === 'native',
+            () => setReplaceNativePlacement('native')
+        ));
+        group.appendChild(createOptionsRadio(
+            'tm-volume-options-placement-custom',
+            'Custom spot',
+            getReplaceNativePlacement() === 'custom',
+            () => setReplaceNativePlacement('custom')
+        ));
+        section.appendChild(group);
+        return section;
+    }
+
+    function createBehaviorSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+
+        const label = document.createElement('div');
+        label.className = 'tm-volume-options-section-label';
+        label.textContent = 'Slider behavior';
+        section.appendChild(label);
+
+        section.appendChild(createOptionsCheckboxRow(
+            'tm-volume-options-snap',
+            'Snap to 5%',
+            isSnapTo5Enabled(),
+            (next) => setSnapTo5Enabled(next)
+        ));
+        section.appendChild(createOptionsCheckboxRow(
+            'tm-volume-options-always-expanded',
+            'Always expanded',
+            isAlwaysExpandedEnabled(),
+            (next) => setAlwaysExpandedEnabled(next)
+        ));
+        section.appendChild(createOptionsCheckboxRow(
+            'tm-volume-options-location-video',
+            'Show on video',
+            isSliderOnVideo(),
+            (next) => setSliderLocation(next ? 'video' : 'controls')
+        ));
+        return section;
+    }
+
+    function createOpacityRow(label, focused) {
+        const row = document.createElement('div');
+        row.className = 'tm-volume-options-opacity-row';
+
+        const top = document.createElement('div');
+        top.className = 'tm-volume-options-opacity-top';
+
+        const name = document.createElement('span');
+        name.className = 'tm-volume-options-opacity-name';
+        name.textContent = label;
+
+        const valueEl = document.createElement('span');
+        valueEl.className = 'tm-volume-options-opacity-value';
+
+        const resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.className = 'tm-volume-options-opacity-reset';
+        resetBtn.textContent = 'Reset';
+        resetBtn.setAttribute('aria-label', `Reset ${label} opacity`);
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '1';
+        slider.className = 'tm-volume-options-opacity-slider';
+        slider.setAttribute('aria-label', `${label} opacity`);
+
+        const refresh = () => {
+            const pct = getSavedOverlayOpacityPercent(focused);
+            slider.value = String(pct);
+            slider.style.setProperty('--tm-opacity-fill', `${pct}%`);
+            valueEl.textContent = `${Math.round(pct)}%`;
+        };
+        refresh();
+
+        const stop = (event) => event.stopPropagation();
+        slider.addEventListener('click', stop);
+        slider.addEventListener('mousedown', stop);
+        slider.addEventListener('pointerdown', stop);
+        slider.addEventListener('keydown', stop);
+        slider.addEventListener('input', () => {
+            const pct = Number(slider.value) || 0;
+            slider.style.setProperty('--tm-opacity-fill', `${pct}%`);
+            valueEl.textContent = `${Math.round(pct)}%`;
+            setSavedOverlayOpacityPercent(focused, pct);
+        });
+        resetBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            resetSavedOverlayOpacityPercent(focused);
+            refresh();
+        });
+
+        top.appendChild(name);
+        top.appendChild(valueEl);
+        top.appendChild(resetBtn);
+        row.appendChild(top);
+        row.appendChild(slider);
+        return row;
+    }
+
+    function createOpacitySection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+        section.id = 'tm-volume-options-opacity-section';
+
+        const label = document.createElement('div');
+        label.className = 'tm-volume-options-section-label';
+        label.textContent = 'On-video opacity';
+        section.appendChild(label);
+        section.appendChild(createOpacityRow('Idle', false));
+        section.appendChild(createOpacityRow('Active', true));
+        return section;
+    }
+
+    function buildOptionsPopup() {
+        const popup = document.createElement('div');
+        popup.id = OPTIONS_POPUP_ID;
+        popup.setAttribute('role', 'dialog');
+        popup.setAttribute('aria-label', 'Volume Slider Options');
+        popup.toggleAttribute('hidden', true);
+
+        const header = document.createElement('div');
+        header.className = 'tm-volume-options-header';
+        const title = document.createElement('div');
+        title.className = 'tm-volume-options-title';
+        title.textContent = 'Volume Slider Options';
+        header.appendChild(title);
+
+        const body = document.createElement('div');
+        body.className = 'tm-volume-options-body';
+        body.appendChild(createModeSection());
+        body.appendChild(createPlacementSection());
+        body.appendChild(createBehaviorSection());
+        body.appendChild(createOpacitySection());
+
+        popup.appendChild(header);
+        popup.appendChild(body);
+        popup.addEventListener('click', (event) => event.stopPropagation());
+        return popup;
+    }
+
+    function refreshOptionsPopupState() {
+        const popup = getOptionsPopup();
+        if (!popup) return;
+
+        ['on', 'off', 'replace-native'].forEach((mode) => {
+            popup.querySelector(`#tm-volume-options-mode-${mode}`)
+                ?.setAttribute('aria-checked', getVolumeSliderMode() === mode ? 'true' : 'false');
+        });
+
+        const placementSection = popup.querySelector('#tm-volume-options-placement-section');
+        const placementEnabled = isNativeVolumeReplacementEnabled();
+        if (placementSection) {
+            placementSection.dataset.disabled = placementEnabled ? 'false' : 'true';
+        }
+        ['native', 'custom'].forEach((p) => {
+            const el = popup.querySelector(`#tm-volume-options-placement-${p}`);
+            if (!el) return;
+            el.setAttribute('aria-checked', getReplaceNativePlacement() === p ? 'true' : 'false');
+            el.disabled = !placementEnabled;
+        });
+
+        popup.querySelector('#tm-volume-options-snap')
+            ?.setAttribute('aria-checked', isSnapTo5Enabled() ? 'true' : 'false');
+        popup.querySelector('#tm-volume-options-always-expanded')
+            ?.setAttribute('aria-checked', isAlwaysExpandedEnabled() ? 'true' : 'false');
+        popup.querySelector('#tm-volume-options-location-video')
+            ?.setAttribute('aria-checked', isSliderOnVideo() ? 'true' : 'false');
+
+        const opacitySection = popup.querySelector('#tm-volume-options-opacity-section');
+        if (opacitySection) {
+            opacitySection.style.display = isSliderOnVideo() ? '' : 'none';
+        }
+    }
+
+    function ensureOptionsPopup() {
+        const player = getPlayerContainer();
+        if (!player) return null;
+
+        let popup = getOptionsPopup();
+        if (!popup || !popup.isConnected) {
+            popup?.remove();
+            popup = buildOptionsPopup();
+            ensurePlayerPositioning(player);
+            player.appendChild(popup);
+        }
+        return popup;
+    }
+
+    function positionOptionsPopup(popup) {
+        const btn = document.getElementById(OPTIONS_BUTTON_ID);
+        const player = getPlayerContainer();
+        if (!btn || !player || !popup) return;
+        const playerRect = player.getBoundingClientRect();
+        const btnRect = btn.getBoundingClientRect();
+        const progressBar = document.querySelector('.ytp-progress-bar-padding');
+        const barEl = progressBar ? (progressBar.closest('.ytp-progress-bar') || progressBar.parentElement) : null;
+        const barRect = barEl?.getBoundingClientRect?.();
+        const bottomPx = barRect
+            ? playerRect.bottom - barRect.top + 8
+            : playerRect.bottom - btnRect.top + 8;
+
+        popup.style.right = `${Math.max(8, playerRect.right - btnRect.right)}px`;
+        popup.style.bottom = `${Math.max(8, bottomPx)}px`;
+        popup.style.left = 'auto';
+        popup.style.top = 'auto';
+    }
+
+    function openVolumeOptionsPopup() {
+        ensureOptionsStyles();
+        const popup = ensureOptionsPopup();
+        if (!popup) return;
+
+        closeYouTubeSettingsPopupIfOpen();
+
+        refreshOptionsPopupState();
+        popup.removeAttribute('hidden');
+        positionOptionsPopup(popup);
+        getPlayerContainer()?.classList?.add('tm-volume-options-open');
+        document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute('aria-expanded', 'true');
+
+        if (!optionsPopupOutsideHandler) {
+            optionsPopupOutsideHandler = (event) => {
+                const btn = document.getElementById(OPTIONS_BUTTON_ID);
+                if (popup.contains(event.target) || btn?.contains(event.target)) return;
+                closeVolumeOptionsPopup();
+            };
+            document.addEventListener('click', optionsPopupOutsideHandler, true);
+        }
+        if (!optionsPopupKeyHandler) {
+            optionsPopupKeyHandler = (event) => {
+                if (event.key === 'Escape') closeVolumeOptionsPopup();
+            };
+            document.addEventListener('keydown', optionsPopupKeyHandler, true);
+        }
+        if (!optionsPopupRepositionHandler) {
+            optionsPopupRepositionHandler = () => positionOptionsPopup(popup);
+            window.addEventListener('resize', optionsPopupRepositionHandler, true);
+        }
+    }
+
+    function closeVolumeOptionsPopup() {
+        const popup = getOptionsPopup();
+        if (popup) popup.setAttribute('hidden', '');
+        getPlayerContainer()?.classList?.remove('tm-volume-options-open');
+        document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute('aria-expanded', 'false');
+
+        if (optionsPopupOutsideHandler) {
+            document.removeEventListener('click', optionsPopupOutsideHandler, true);
+            optionsPopupOutsideHandler = null;
+        }
+        if (optionsPopupKeyHandler) {
+            document.removeEventListener('keydown', optionsPopupKeyHandler, true);
+            optionsPopupKeyHandler = null;
+        }
+        if (optionsPopupRepositionHandler) {
+            window.removeEventListener('resize', optionsPopupRepositionHandler, true);
+            optionsPopupRepositionHandler = null;
+        }
+    }
+
+    function setupNativeSettingsCloseHandler() {
+        if (window.__tmYtVolumeNativeSettingsCloseBound) return;
+        window.__tmYtVolumeNativeSettingsCloseBound = true;
+        document.addEventListener('click', (event) => {
+            if (event.target?.closest?.('.ytp-settings-button')) {
+                closeVolumeOptionsPopup();
+            }
+        }, false);
+    }
+
+    function toggleVolumeOptionsPopup() {
+        if (isOptionsPopupOpen()) {
+            closeVolumeOptionsPopup();
+        } else {
+            openVolumeOptionsPopup();
+        }
+    }
+
+    function ensureOptionsPopupAutohide() {
+        if (window.__tmYtVolumeOptionsAutohideBound) return;
+        const player = getPlayerContainer();
+        if (!player) return;
+        window.__tmYtVolumeOptionsAutohideBound = true;
+        const observer = new MutationObserver(() => {
+            if (areYouTubeControlsHidden() && isOptionsPopupOpen()) {
+                closeVolumeOptionsPopup();
+            }
+        });
+        observer.observe(player, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    function createOverlay(video, player, controlsHost) {
+        // Prevent duplicates
+        const existing = document.getElementById(OVERLAY_ID);
+        if (existing) {
+            return existing;
+        }
+
+        createStylesIfNeeded();
+
+        const overlay = document.createElement('div');
+        overlay.id = OVERLAY_ID;
+        overlay.className = 'tm-collapsed';
+        overlay.tabIndex = 0;
+
+        Object.assign(overlay.style, {
+            position: 'relative',
+            transform: 'translateY(0)',
+            width: '40px',
+            minWidth: '0',
+            maxWidth: 'none',
+            height: '40px',
+            minHeight: '40px',
+            padding: '0',
+            background: 'transparent',
+            backdropFilter: 'none',
+            WebkitBackdropFilter: 'none',
+            borderRadius: '20px',
+            border: 'none',
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'flex-start',
+            gap: '0',
+            zIndex: '2',
+            pointerEvents: 'auto',
+            boxSizing: 'border-box',
+            overflow: 'hidden',
+            opacity: '1',
+            flex: '0 0 auto',
+            margin: '0 4px',
+            alignSelf: 'center',
+            transition: 'width 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+            boxShadow: 'none'
+        });
+
+        overlay.addEventListener('mouseenter', () => {
+            setOverlayExpanded(overlay, true);
+            updateOverlayOpacity(overlay);
+        });
+        overlay.addEventListener('mouseleave', () => {
+            overlay.dataset.tmDragging = 'false';
+            updateOverlayOpacity(overlay);
+            collapseOverlayIfIdle(overlay, true);
+        });
+        overlay.addEventListener('focusin', () => {
+            setOverlayExpanded(overlay, true);
+            updateOverlayOpacity(overlay);
+        });
+        overlay.addEventListener('focusout', () => {
+            updateOverlayOpacity(overlay);
+            collapseOverlayIfIdle(overlay);
+        });
+
+        const iconCell = document.createElement('div');
+        iconCell.className = 'tm-volume-icon-cell';
+        const indicator = document.createElement('div');
+        indicator.className = 'tm-volume-indicator';
+        indicator.appendChild(makeVolumeIndicatorSvg());
+        iconCell.appendChild(indicator);
+        iconCell.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            toggleMute(video);
+            setSliderFromPlayer(slider, label, video);
+            markVolumeChangedWhileExpanded(overlay);
+        });
+        const panelBg = document.createElement('div');
+        panelBg.className = 'tm-volume-panel-bg';
+
+        const topRow = document.createElement('div');
+        topRow.className = 'tm-volume-controls tm-volume-top-row';
+
+        const label = document.createElement('div');
+        label.id = VALUE_LABEL_ID;
+        label.textContent = '100%';
+
+        topRow.appendChild(label);
+
+        const sliderWrap = document.createElement('div');
+        sliderWrap.className = 'tm-volume-controls tm-volume-slider-row';
+        sliderWrap.style.position = 'relative';
+        sliderWrap.style.width = 'auto';
+        sliderWrap.style.flex = '1 1 auto';
+        sliderWrap.style.height = '40px';
+        sliderWrap.style.display = 'flex';
+        sliderWrap.style.alignItems = 'center';
+
+        const tickOverlay = document.createElement('div');
+        tickOverlay.className = 'tm-slider-ticks';
+
+        const slider = document.createElement('input');
+        slider.id = SLIDER_ID;
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '1';
+        slider.style.width = '100%';
+        slider.style.display = 'block';
+        slider.style.margin = '0';
+        slider.style.cursor = 'pointer';
+        slider.style.backgroundSize = 'calc(100% - var(--tm-thumb-size, 22px)) 100%';
+        slider.setAttribute('aria-label', 'Volume');
+
+        // Initialize from localStorage to avoid the 100% to actual jump on video load
+        const initVol = getSavedVolume();
+        if (initVol !== null) {
+            slider.value = String(initVol);
+            label.textContent = `${initVol}%`;
+        } else {
+            setSliderFromPlayer(slider, label, video);
+        }
+        updateSliderBar(slider);
+
+        let pointerStartX = 0;
+        let pointerStartY = 0;
+        let pointerStartValue = 0;
+        let pointerMoved = false;
+        let clickSnapHandled = false;
+
+        const applySliderValue = (value) => {
+            setVolume(video, value);
+            label.textContent = `${value}%`;
+            updateSliderBar(slider);
+            updateVolumeIndicator(overlay, value, isMuted(video));
+            scheduleSaveVolume(value);
+            markVolumeChangedWhileExpanded(overlay);
+        };
+
+        const snapDirectClickIfNeeded = () => {
+            const currentValue = Number(slider.value) || 0;
+            if (clickSnapHandled || pointerMoved || currentValue === pointerStartValue) return;
+            const snappedValue = snapTo5(currentValue);
+            slider.value = String(snappedValue);
+            applySliderValue(snappedValue);
+            clickSnapHandled = true;
+        };
+
+        const finishSliderInteraction = (event) => {
+            if (event?.type === 'pointerup') {
+                snapDirectClickIfNeeded();
+            }
+            overlay.dataset.tmDragging = 'false';
+            updateOverlayOpacity(overlay);
+            collapseOverlayIfIdle(overlay, !overlay.matches(':hover'));
+        };
+        slider.addEventListener('pointerdown', (event) => {
+            pointerStartX = event.clientX;
+            pointerStartY = event.clientY;
+            pointerStartValue = Number(slider.value) || 0;
+            pointerMoved = false;
+            clickSnapHandled = false;
+            overlay.dataset.tmDragging = 'true';
+            setOverlayExpanded(overlay, true);
+            updateOverlayOpacity(overlay);
+        });
+        slider.addEventListener('pointermove', (event) => {
+            if (Math.abs(event.clientX - pointerStartX) > 3 || Math.abs(event.clientY - pointerStartY) > 3) {
+                pointerMoved = true;
+            }
+        });
+        slider.addEventListener('pointerup', finishSliderInteraction);
+        slider.addEventListener('click', snapDirectClickIfNeeded);
+        slider.addEventListener('pointercancel', finishSliderInteraction);
+        window.addEventListener('pointerup', finishSliderInteraction, true);
+        window.addEventListener('pointercancel', finishSliderInteraction, true);
+        window.addEventListener('blur', finishSliderInteraction);
+
+        slider.addEventListener('input', () => {
+            applySliderValue(readSnappedSliderValue(slider));
+        });
+
+        slider.addEventListener('change', () => {
+            applySliderValue(readSnappedSliderValue(slider));
+            if (saveVolumeTimer) {
+                clearTimeout(saveVolumeTimer);
+                saveVolumeTimer = 0;
+            }
+            saveVolume(Number(slider.value) || 0);
+        });
+
+        const onVideoVolumeChange = () => {
+            if (!document.getElementById(OVERLAY_ID)) return;
+            setSliderFromPlayer(slider, label, video);
+            if (!isMuted(video)) scheduleSaveVolume(getVolume(video));
+        };
+        video.addEventListener('volumechange', onVideoVolumeChange);
+
+        sliderWrap.appendChild(slider);
+        sliderWrap.appendChild(tickOverlay);
+        overlay.appendChild(panelBg);
+        overlay.appendChild(iconCell);
+        overlay.appendChild(topRow);
+        overlay.appendChild(sliderWrap);
+
+        placeOverlay(overlay, player, controlsHost);
+        setSliderFromPlayer(slider, label, video);
+        setOverlayExpanded(overlay, false, true);
+        updateVideoOverlayPosition(overlay, player);
+        const onLayoutChange = () => placeOverlay(overlay, player, controlsHost);
+        window.addEventListener('resize', onLayoutChange);
+        const controlsObserver = new MutationObserver(onLayoutChange);
+        controlsObserver.observe(player, { attributes: true, attributeFilter: ['class'] });
+        overlay._volumeCleanup = () => {
+            video.removeEventListener('volumechange', onVideoVolumeChange);
+            window.removeEventListener('pointerup', finishSliderInteraction, true);
+            window.removeEventListener('pointercancel', finishSliderInteraction, true);
+            window.removeEventListener('blur', finishSliderInteraction);
+            window.removeEventListener('resize', onLayoutChange);
+            controlsObserver.disconnect();
+            clearExpandedHold(overlay);
+        };
+
+        return overlay;
+    }
+
+    function removeOverlay() {
+        if (saveVolumeTimer) {
+            clearTimeout(saveVolumeTimer);
+            saveVolumeTimer = 0;
+        }
+        const existing = document.getElementById(OVERLAY_ID);
+        if (existing && existing.parentElement) {
+            if (typeof existing._volumeCleanup === 'function') {
+                existing._volumeCleanup();
+            }
+            existing.parentElement.removeChild(existing);
+        }
+        applyNativeVolumeVisibility();
+    }
+
+    function attachSliderIfPossible() {
+        const video = getVideoElement();
+        const player = getPlayerContainer(video);
+        const controlsHost = getYouTubeControlsHost(player);
+
+        if (!player) {
+            return false;
+        }
+
+        // Keep the options button available even when the slider is off.
+        if (!isOverlayEnabled()) {
+            removeOverlay();
+            applyNativeVolumeVisibility();
+            injectVolumeOptionsButton();
+            return !!document.getElementById(OPTIONS_BUTTON_ID);
+        }
+
+        if (!video || !player || (!controlsHost && !isSliderOnVideo())) {
+            injectVolumeOptionsButton();
+            return false;
+        }
+        const existingOverlay = document.getElementById(OVERLAY_ID);
+        if (existingOverlay) {
+            placeOverlay(existingOverlay, player, controlsHost);
+        } else {
+            restoreSavedVolume(video);
+            createOverlay(video, player, controlsHost);
+        }
+        applyNativeVolumeVisibility();
+        injectVolumeOptionsButton();
+        return true;
+    }
+
+    function setupInitialAttempts() {
+        let attempts = 0;
+        const maxAttempts = 20; // ~10 seconds with 500ms interval
+        const interval = setInterval(() => {
+            attempts++;
+            if (attachSliderIfPossible() || attempts >= maxAttempts) {
+                clearInterval(interval);
+            }
+        }, 500);
+    }
+
+    function setupMutationObserver() {
+        if (!window.MutationObserver) return;
+
+        let lastAttach = 0;
+        const ATTACH_COOLDOWN_MS = 1000;
+        let attachQueued = false;
+
+        const observer = new MutationObserver((mutations) => {
+            if (document.location.pathname !== '/watch') return;
+            const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
+
+            // Slider/button reattach (only when new nodes appear)
+            if (hasAddedNodes && !attachQueued) {
+                const overlay = document.getElementById(OVERLAY_ID);
+                const button = document.getElementById(OPTIONS_BUTTON_ID);
+                const overlayMissing = isOverlayEnabled() && (!overlay || !overlay.isConnected);
+                const buttonMissing = !button || !button.isConnected;
+                if (overlayMissing || buttonMissing) {
+                    attachQueued = true;
+                    requestAnimationFrame(() => {
+                        attachQueued = false;
+                        const now = Date.now();
+                        if (now - lastAttach < ATTACH_COOLDOWN_MS) return;
+                        if (document.location.pathname !== '/watch') return;
+                        if (attachSliderIfPossible()) {
+                            lastAttach = now;
+                        }
+                    });
+                }
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    function setupYtNavigationHandler() {
+        if (window.__tmYtVolumeNavBound) return;
+        window.__tmYtVolumeNavBound = true;
+
+        const runReattach = () => {
+            if (navReattachTimer) {
+                clearTimeout(navReattachTimer);
+                navReattachTimer = 0;
+            }
+
+            cachedVideo = null;
+            cachedYtPlayer = null;
+            closeVolumeOptionsPopup();
+
+            navReattachTimer = window.setTimeout(() => {
+                navReattachTimer = 0;
+                removeOverlay();
+                removeVolumeOptionsButton();
+                attachSliderIfPossible();
+            }, NAV_REATTACH_DELAY_MS);
+        };
+
+        const scheduleReattach = () => {
+            if (navDebounceTimer) {
+                clearTimeout(navDebounceTimer);
+                navDebounceTimer = 0;
+            }
+            navDebounceTimer = window.setTimeout(() => {
+                navDebounceTimer = 0;
+                runReattach();
+            }, NAV_DEBOUNCE_MS);
+        };
+
+        window.addEventListener('yt-navigate-finish', scheduleReattach, true);
+        window.addEventListener('yt-page-data-updated', scheduleReattach, true);
+    }
+
+    function init() {
+        setupInitialAttempts();
+        setupMutationObserver();
+        setupYtNavigationHandler();
+        setupNativeSettingsCloseHandler();
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        init();
+    } else {
+        window.addEventListener('DOMContentLoaded', init, { once: true });
+    }
+})();

@@ -1,0 +1,24 @@
+📋 Patch Notes - Version 2.1
+
+### ✨ NEW FEATURE
+
+- **On-Video Opacity Controls**: Added Idle and Active opacity sliders with reset buttons for the `Show on video` placement.
+
+### 🛠️ CONFIGURATION UPDATES
+
+- **Saved Opacity Preferences**: Added `tm-yt-volume-slider-opacity-idle` and `tm-yt-volume-slider-opacity-active` storage keys so on-video opacity settings persist.
+- **Opacity USER_SETTINGS**: Added `overlayOpacityUnfocused` and `overlayOpacityFocused` overrides for users who prefer code-level defaults.
+
+### 🐛 BUG FIXES
+
+- **Settings Close Recovery**: Closing YouTube's settings menu now backs out of the Volume Slider submenu so stale submenu state does not remain behind.
+- **Zoom-Safe Submenu Layout**: The Volume Slider submenu now stays aligned during browser zoom changes instead of losing its top rows or growing repeatedly.
+- **High-Zoom Scroll Support**: The Volume Slider submenu now scrolls only when high browser zoom prevents the full menu from fitting.
+- **Main Settings Fit**: Adjusted settings menu sizing so the last native row is not clipped and extra bottom space stays close to YouTube's native menu.
+- **Collapse Animation Stability**: Reduced the right-side length jump when the compact in-bar slider collapses.
+- **Native Back Arrow Size**: Matched the custom submenu back arrow more closely to YouTube's native submenu arrow.
+
+### 🔧 CODE OPTIMIZATIONS
+
+- **Shared Menu Sizing Helpers**: Consolidated submenu height, width, and layout measurement helpers after the zoom and clipping fixes.
+- **Removed Debug Iteration Leftovers**: Trimmed unused submenu metadata and redundant sizing code from the 2.1 development pass.

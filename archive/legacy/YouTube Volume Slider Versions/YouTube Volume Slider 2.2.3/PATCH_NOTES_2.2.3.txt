@@ -1,0 +1,18 @@
+📋 Patch Notes - Version 2.2.3
+
+### 🐛 BUG FIX
+
+- **Instant Press Snap**: Pressing the volume bar in free-drag mode now snaps immediately to the nearest 5% mark instead of moving to the exact pointer position first.
+- **Stable Options Text Size**: The custom settings menu now uses fixed typography metrics so button text no longer shifts size on the first open after page load.
+- **Native-Like Menu Hold**: The YouTube controls and custom settings menu now stay open when the mouse leaves the video area, matching YouTube's native settings menu behavior.
+- **Outside Click Close Behavior**: Clicking outside the YouTube player now closes both the custom menu and the player controls, matching the native settings menu.
+- **Hover Recovery After Close**: After outside-click closing, hovering the video can reveal YouTube controls again normally.
+- **Stable On-Video Positioning**: The on-video slider now falls back to a fixed low position when native controls or progress-bar measurements are unavailable, preventing upward drift while hovering.
+
+### 👀 VISUAL CHANGE
+
+- **Cleaner Button Text Alignment**: Menu buttons now have explicit heights, line heights, and centered flex layout for more consistent text positioning.
+
+### 🔧 CODE OPTIMIZATION
+
+- **Press-Aware Slider Input**: Added a small first-input handler that preserves free dragging while matching the older 1.5.1 press behavior.

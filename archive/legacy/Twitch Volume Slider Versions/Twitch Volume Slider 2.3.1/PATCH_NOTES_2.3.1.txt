@@ -1,0 +1,16 @@
+📋 Patch Notes - Version 2.3.1
+
+### ⚡ PERFORMANCE IMPROVEMENTS
+
+- **No More Background Polling**: Removed repeating timers that checked volume hold and options-menu state several times per second; the slider now reacts on a schedule only when needed and when player controls change.
+- **Smaller DOM Watch Area**: Reattach detection now watches the Twitch player area instead of the entire page, so unrelated site updates trigger less work.
+- **Faster Startup Attach**: Initial attach retries stop as soon as the slider is ready instead of running on a fixed interval until the attempt limit.
+
+### 🐛 BUG FIXES
+
+- **Observer Rebind After Navigation**: Player control and native-settings observers now reconnect when Twitch rebuilds the player during channel navigation, so menu hold behavior stays reliable after switching streams.
+- **Layout Guard During Drag**: On-video repositioning no longer interrupts while you are dragging or hovering the volume slider.
+
+### 🔧 CODE OPTIMIZATIONS
+
+- **Shared Snap Helper**: Slider snap logic uses the same helper on press and release for easier maintenance.

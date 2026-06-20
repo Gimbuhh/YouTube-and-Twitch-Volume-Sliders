@@ -1,0 +1,36 @@
+Patch Notes - Version 2.0
+
+### Compact In-Bar Volume Control
+
+- Replaced the old floating resting overlay with a compact 40px circular in-bar control.
+- The collapsed control shows the current volume with a Twitch-purple SVG arc that starts at 12 o'clock.
+- The center icon uses the same speaker states as YouTube 2.0: muted/0% shows an x, 1-50% shows one bow, and 51-100% shows two bows.
+- Clicking the speaker/arc icon toggles mute in both collapsed and expanded states.
+- Hovering or focusing expands the same control to the right into a wide pill slider.
+- Collapse/expand now uses the same simple width-only animation as YouTube 2.0, so the icon stays fixed and the control reads as one element.
+- The collapsed and expanded states share the same translucent pill background model.
+- The volume arc uses a smooth SVG circle/pathLength implementation.
+- The value label now uses a compact fixed, center-aligned slot, so the slider bar never changes size when switching between `5%`, `10%`, `100%`, or `Muted`.
+- Tightened the value-label spacing and aligned the fill/tick visuals to the thumb-center travel span, so percentage positions stay visually consistent from 0% to 100%.
+- Removed the old time-based snap workaround during drag; free dragging is the default again.
+- Direct track clicks still snap to the nearest 5% point even when free dragging is selected.
+- Added `USER_SETTINGS.snapToFive` as a code-level option for snapping slider movement to 5% steps.
+- Added `USER_SETTINGS.alwaysExpanded` as a code-level option for keeping the pill open without hover.
+- After changing volume, the pill stays expanded until Twitch's player controls hide.
+- The 5% step marks stay visible whenever the pill is expanded, including the keep-open state after a volume change.
+
+### Twitch Control Bar Integration
+
+- The slider now lives inside Twitch's native player control bar.
+- It is inserted after Twitch's native mute/volume group instead of floating over the video.
+- The active pill gives the volume bar more horizontal travel for finer adjustments.
+- The old header toggle-button path was removed.
+- `USER_SETTINGS.volumeSliderEnabled` remains as the code-level override for enabling or disabling the custom slider.
+- `USER_SETTINGS.snapToFive` can enable optional 5% snapping without changing the default free-drag behavior.
+- `USER_SETTINGS.alwaysExpanded` can keep the full pill visible without hover.
+
+### Cleanup
+
+- Removed obsolete opacity and slider-size USER_SETTINGS.
+- Removed trial motion classes/timers and the extra SVG annulus/backing layer.
+- Aligned the Twitch 2.0 shell with the finalized YouTube 2.0 structure: one shared pill background, one SVG icon/arc stack, and one width-only expand/collapse path.

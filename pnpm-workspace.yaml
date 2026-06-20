@@ -1,0 +1,8 @@
+allowBuilds:
+  esbuild: true
+
+supportedArchitectures:
+  os:
+    - current
+  cpu:
+    - current

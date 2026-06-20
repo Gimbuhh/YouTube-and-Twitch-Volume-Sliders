@@ -1,0 +1,33 @@
+📋 Patch Notes - Version 2.2
+
+### ✨ NEW FEATURES
+
+- **Dedicated Options Button**: Added a Volume Slider button next to YouTube's native settings button for opening the slider settings without using YouTube's settings menu.
+- **Complete Custom Settings Panel**: Added one panel for On, Off, Replace native, replacement placement, Snap to 5%, Always expanded, Show on video, and on-video opacity.
+- **On-Video Slider Mode**: Added an option to move the slider from the controls bar onto the video with separate idle and active opacity controls.
+
+### 👀 VISUAL CHANGES
+
+- **Cleaner Settings UI**: Replaced the native-menu integration with a compact custom panel that matches YouTube's dark player styling.
+- **Centered Checkbox Checks**: Refined checkbox styling so selected settings look centered and polished.
+- **Settings Button Placement**: Positioned the Volume Slider settings button directly beside YouTube's native settings button.
+- **Progress Bar Clearance**: Positioned the options panel above YouTube's progress bar so it no longer covers the scrubber.
+
+### 🛠️ CONFIGURATION UPDATES
+
+- **Saved Setting Support**: Preserved saved settings for slider mode, placement, snap behavior, expanded behavior, video placement, and opacity.
+- **Code Overrides Preserved**: Kept `USER_SETTINGS` overrides for users who prefer script-level defaults instead of saved browser settings.
+- **Legacy Storage Removed**: Removed old unused migration keys so 2.2 relies only on the current settings model.
+
+### 🐛 BUG FIXES
+
+- **No Native Menu Conflicts**: Removed the old dependency on YouTube's native settings menu, avoiding submenu sizing, clipping, and stale state issues.
+- **Stable Replace Native Mode**: Improved native volume replacement so the custom slider can occupy the intended controls position reliably.
+- **Popup Auto-Close Behavior**: The custom settings panel closes cleanly on outside click, Escape, YouTube settings open, player control hide, and navigation.
+- **Native-Like Preview Suppression**: Progress-bar preview thumbnails are hidden while the custom options panel is open, matching YouTube's native settings menu behavior.
+
+### 🔧 CODE OPTIMIZATIONS
+
+- **Removed Submenu Code**: Deleted the old native-settings submenu implementation and its sizing/refit helpers.
+- **Simpler Settings Surface**: Consolidated all slider preferences into one custom popup flow.
+- **Release Naming Cleanup**: Removed the WIP label from the YouTube 2.2 userscript name.

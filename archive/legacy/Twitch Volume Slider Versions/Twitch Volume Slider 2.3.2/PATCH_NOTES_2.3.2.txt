@@ -1,0 +1,5 @@
+📋 Patch Notes - Version 2.3.2
+
+### 🐛 BUG FIX
+
+- **Empty Volume Arc at 0%**: The circular volume indicator no longer shows a small filled dot when volume is muted or at 0%.

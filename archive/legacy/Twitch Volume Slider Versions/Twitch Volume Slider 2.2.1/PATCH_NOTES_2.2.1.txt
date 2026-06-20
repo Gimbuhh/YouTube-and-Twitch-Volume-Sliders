@@ -1,0 +1,9 @@
+📋 Patch Notes - Version 2.2.1
+
+### 👀 VISUAL CHANGE
+
+- **Consistent Slider Bar Thickness**: The volume slider bar now always uses the thicker hover-state height, so it no longer changes size when hovered.
+
+### 🔧 CODE OPTIMIZATION
+
+- **Simpler Slider Hover Styling**: Removed the hover-only track height change and made the thicker bar the default.

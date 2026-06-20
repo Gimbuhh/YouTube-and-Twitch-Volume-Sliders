@@ -1,0 +1,18 @@
+📋 Patch Notes - Version 2.3
+
+### 👀 VISUAL CHANGES
+
+- **Redesigned Options Menu**: The Volume Slider options popup now uses segmented mode buttons, a right-aligned checkbox column, and cleaner opacity rows with Reset beside each slider.
+- **Softer Control Shadow**: The volume pill shadow is lighter and closer to native Twitch control buttons.
+- **Clearer Volume Arc Track**: The unfilled portion of the volume ring is easier to see against the pill background.
+- **Refined Active Button Styling**: Selected menu buttons use Twitch purple with improved text readability.
+
+### 🐛 BUG FIXES
+
+- **Volume Arc Updates**: The purple volume ring now updates correctly as volume changes.
+- **Full Volume Arc**: The ring no longer leaves a visible gap at 100% volume.
+- **Smarter Menu Scrolling**: The options menu height adapts to the player area and scrolls cleanly on smaller screens and mobile layouts.
+
+### 🔧 CODE OPTIMIZATIONS
+
+- **Shared Theme Constants**: Twitch accent colors, arc track color, and panel shadow are centralized for easier tuning across the slider and options menu.

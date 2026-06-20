@@ -1,0 +1,34 @@
+📋 Patch Notes - Version 2.2
+
+### ✨ NEW FEATURES
+
+- **Dedicated Options Button**: Added a Twitch Volume Slider settings button beside the native player settings button.
+- **Complete Custom Settings Panel**: Added On, Off, Replace native, replacement placement, Snap to 5%, Always expanded, Show on video, and on-video opacity controls.
+- **Replace Native Mode**: Added a mode that hides Twitch's native volume control and places the custom slider in its spot.
+- **Show On Video Mode**: Added an option to move the slider onto the video with adjustable idle and active opacity.
+
+### 👀 VISUAL CHANGES
+
+- **YouTube 2.2 Slider Style**: Updated the Twitch slider pill, bar, icon, and expansion behavior to match the newer YouTube 2.2 implementation.
+- **Twitch Accent Styling**: Kept Twitch-specific purple accents for selected buttons, checkboxes, and the volume slider.
+- **Neutral Settings Panel**: Updated the Twitch settings panel to use the same neutral dark panel style as YouTube, with purple only for selected controls.
+- **Correct Button Placement**: Positioned the Volume Slider settings button after the quality indicator and clip button, directly before Twitch's native settings cog.
+
+### 🛠️ CONFIGURATION UPDATES
+
+- **Saved Setting Support**: Added saved settings for slider mode, replacement placement, snap behavior, expanded behavior, video placement, and opacity.
+- **Code Overrides Added**: Added `USER_SETTINGS` overrides so script-level defaults can still be used instead of saved browser settings.
+
+### 🐛 BUG FIXES
+
+- **Stable Dragging In Controls**: Fixed the slider refreshing while dragging in Twitch's controls area.
+- **Stable Dragging On Video**: Fixed the same reattach behavior when the slider is shown on the video.
+- **No Rapid Collapse Loop**: Fixed the pill rapidly collapsing and expanding while changing volume.
+- **Button Slot Self-Correction**: Fixed the settings button staying too far left when Twitch added the quality indicator or clip button after injection.
+- **Native Replacement Visibility**: Fixed native volume hiding and custom slider placement in Replace native mode.
+
+### 🔧 CODE OPTIMIZATIONS
+
+- **Idempotent Overlay Placement**: Made Twitch overlay placement reuse the existing element instead of constantly moving or rebuilding it.
+- **Interaction-Aware Reattach Logic**: Prevented Twitch DOM updates from interrupting hover, focus, or drag interactions.
+- **Scoped Settings Lookup**: Scoped the Twitch settings-button lookup to the right controls group for more reliable placement.

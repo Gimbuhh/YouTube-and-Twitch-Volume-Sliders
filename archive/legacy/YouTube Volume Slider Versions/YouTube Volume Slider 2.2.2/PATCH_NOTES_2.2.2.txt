@@ -1,0 +1,9 @@
+📋 Patch Notes - Version 2.2.2
+
+### 🐛 BUG FIX
+
+- **Instant Press Snap**: Pressing the volume bar in free-drag mode now snaps immediately to the nearest 5% mark instead of moving to the exact pointer position first.
+
+### 🔧 CODE OPTIMIZATION
+
+- **Press-Aware Slider Input**: Added a small first-input handler that preserves free dragging while matching the older 1.5.1 press behavior.
