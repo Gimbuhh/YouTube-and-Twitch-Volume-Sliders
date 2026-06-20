@@ -74,3 +74,40 @@ test('YouTube: mounting beneath a stationary pointer does not expand the slider'
   assert.ok(overlay.classList.contains('tm-expanded'));
   runtime.close();
 });
+
+test('YouTube: clicking the video surface dismisses options without reaching playback',async()=>{
+  const {runtime,fixture}=await loadPlatform(platforms[0]);
+  runtime.document.getElementById('tm-volume-options-button').click();
+  const popup=runtime.document.getElementById('tm-volume-options-popup');
+  assert.equal(popup.hasAttribute('hidden'),false);
+
+  let playbackClicks=0;
+  fixture.player.addEventListener('click',()=>playbackClicks++);
+  fixture.video.dispatchEvent(new runtime.window.MouseEvent('click',{bubbles:true,cancelable:true}));
+
+  assert.equal(popup.hasAttribute('hidden'),true);
+  assert.equal(playbackClicks,0);
+  runtime.close();
+});
+
+test('Twitch: hiding controls clears interaction expansion until the next slider hover',async()=>{
+  const {runtime}=await loadPlatform(platforms[1]);
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  const controls=runtime.document.querySelector('[data-a-target="player-controls"]');
+
+  overlay.dispatchEvent(new runtime.window.MouseEvent('mouseenter'));
+  slider.value='65';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.ok(overlay.classList.contains('tm-expanded'));
+
+  controls.setAttribute('data-a-visible','false');
+  await new Promise(resolve=>runtime.window.setTimeout(resolve,0));
+  assert.ok(overlay.classList.contains('tm-collapsed'));
+  assert.equal(overlay.dataset.tmKeepExpanded,'false');
+
+  controls.setAttribute('data-a-visible','true');
+  await new Promise(resolve=>runtime.window.setTimeout(resolve,0));
+  assert.ok(overlay.classList.contains('tm-collapsed'));
+  runtime.close();
+});

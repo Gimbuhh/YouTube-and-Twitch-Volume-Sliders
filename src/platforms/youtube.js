@@ -1219,6 +1219,17 @@ export function startYouTubeVolumeSlider() {
         player.classList.add('ytp-autohide');
     }
 
+    function isYouTubeVideoSurfaceClick(event) {
+        const target = event.target;
+        const player = getPlayerContainer();
+        if (!target || !player?.contains?.(target)) return false;
+
+        return !target.closest?.(
+            '.ytp-chrome-bottom, .ytp-chrome-top, button, a, input, select, textarea, ' +
+            '[role="button"], [role="slider"], [role="menuitem"]'
+        );
+    }
+
     function startOptionsControlsHold() {
         keepYouTubeControlsVisible();
         ensurePlayerControlsObserver();
@@ -1246,8 +1257,13 @@ export function startYouTubeVolumeSlider() {
                 const btn = document.getElementById(OPTIONS_BUTTON_ID);
                 if (popup.contains(event.target) || btn?.contains(event.target)) return;
                 const clickedOutsidePlayer = !getPlayerContainer()?.contains?.(event.target);
+                const clickedVideoSurface = isYouTubeVideoSurfaceClick(event);
                 closeVolumeOptionsPopup();
                 if (clickedOutsidePlayer) hideYouTubeControls();
+                if (clickedVideoSurface) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
             };
             document.addEventListener('click', optionsPopupOutsideHandler, true);
         }

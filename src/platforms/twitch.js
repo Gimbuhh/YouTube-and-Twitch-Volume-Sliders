@@ -1863,7 +1863,17 @@ export function startTwitchVolumeSlider() {
         video.addEventListener('volumechange', onVideoVolumeChange);
 
         const onLayoutChange = () => {
-            if (!overlay.isConnected || isOverlayInteractionFocused(overlay)) return;
+            if (!overlay.isConnected) return;
+            if (areTwitchControlsHidden()) {
+                if (!isAlwaysExpandedEnabled()) {
+                    overlay.dataset.tmDragging = 'false';
+                    clearExpandedHold(overlay);
+                    setOverlayExpanded(overlay, false, true);
+                }
+                updateOverlayOpacity(overlay);
+                return;
+            }
+            if (isOverlayInteractionFocused(overlay)) return;
             placeOverlay(overlay, getPlayerContainer(video), getTwitchControlsHost());
         };
         window.addEventListener('resize', onLayoutChange);
