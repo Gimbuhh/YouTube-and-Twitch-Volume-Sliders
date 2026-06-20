@@ -4,6 +4,7 @@ Dates are reported only when supported by repository evidence. GitHub displays t
 
 | Version | Original release date | Available scripts | Details |
 | --- | --- | --- | --- |
+| 2.4.4 | 2026-06-21 | YouTube, Twitch | [Notes](../release-notes/2.4.4.md) |
 | 2.4.3 | 2026-06-20 | YouTube, Twitch | [Notes](../release-notes/2.4.3.md) |
 | 2.4.2 | 2026-06-20 | YouTube, Twitch | [Notes](../release-notes/2.4.2.md) |
 | 2.4.1 | 2026-06-20 | YouTube, Twitch | [Notes](../release-notes/2.4.1.md) |

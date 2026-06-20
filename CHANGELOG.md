@@ -2,6 +2,11 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.4.4 - 2026-06-21
+
+- Made the custom YouTube settings menu dismiss video-surface clicks without also toggling playback, matching YouTube's native settings behavior.
+- Collapsed Twitch's volume slider when player controls hide, clearing temporary interaction expansion when Always expanded is disabled.
+
 ## 2.4.3 - 2026-06-20
 
 - Prevented unrelated pointer releases from being treated as volume-slider interactions.
