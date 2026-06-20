@@ -1,7 +1,25 @@
-const focusableSelector = 'input:not(:disabled),button:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
+const focusableSelector = [
+  'input:not(:disabled):not([tabindex="-1"])',
+  'button:not(:disabled):not([tabindex="-1"])',
+  'select:not(:disabled):not([tabindex="-1"])',
+  'textarea:not(:disabled):not([tabindex="-1"])',
+  '[tabindex]:not([tabindex="-1"])'
+].join(',');
+
+function isHiddenFromFocus(element, boundary) {
+  const view = element.ownerDocument?.defaultView;
+  for (let current = element; current; current = current.parentElement) {
+    if (current.hidden || current.getAttribute?.('aria-hidden') === 'true') return true;
+    const style = view?.getComputedStyle?.(current);
+    if (style?.display === 'none' || style?.visibility === 'hidden' || style?.visibility === 'collapse') return true;
+    if (current === boundary) break;
+  }
+  return false;
+}
 
 export function getOptionsPopupFocusable(popup) {
-  return Array.from(popup.querySelectorAll(focusableSelector));
+  return Array.from(popup.querySelectorAll(focusableSelector))
+    .filter((element) => !isHiddenFromFocus(element, popup));
 }
 
 export function createOptionsButtonIconSvg(document) {

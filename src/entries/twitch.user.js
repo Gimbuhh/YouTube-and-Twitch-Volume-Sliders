@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Twitch Volume Slider 2.4.1
+// @name         Twitch Volume Slider 2.4.2
 // @namespace    http://tampermonkey.net/
-// @version      2.4.1
+// @version      2.4.2
 // @description  Compact in-bar volume indicator that expands into a wide Twitch volume slider.
 // @author       isagie (Made using AI)
 // @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png

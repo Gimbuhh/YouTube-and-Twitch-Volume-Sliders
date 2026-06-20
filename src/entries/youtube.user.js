@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         YouTube Volume Slider 2.4.1
+// @name         YouTube Volume Slider 2.4.2
 // @namespace    http://tampermonkey.net/
-// @version      2.4.1
+// @version      2.4.2
 // @description  Compact in-bar volume indicator that expands into a wide YouTube volume slider.
 // @author       isagie (Made using AI)
 // @icon         https://www.youtube.com/favicon.ico

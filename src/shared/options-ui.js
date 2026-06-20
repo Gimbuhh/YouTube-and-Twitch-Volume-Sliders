@@ -7,6 +7,49 @@ export function createOptionsUi(dependencies) {
     setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent
   } = dependencies;
 
+    function getEnabledRadios(group) {
+        return Array.from(group.querySelectorAll('[role="radio"]:not(:disabled)'));
+    }
+
+    function syncOptionsRadioGroups(popup) {
+        popup?.querySelectorAll('[role="radiogroup"]').forEach((group) => {
+            const radios = getEnabledRadios(group);
+            const checked = radios.find((radio) => radio.getAttribute('aria-checked') === 'true');
+            const tabStop = checked || radios[0];
+            group.querySelectorAll('[role="radio"]').forEach((radio) => {
+                radio.tabIndex = radio === tabStop ? 0 : -1;
+            });
+        });
+    }
+
+    function handleRadioNavigation(event) {
+        const radio = event.currentTarget;
+        const group = radio.closest('[role="radiogroup"]');
+        if (!group) return;
+        const radios = getEnabledRadios(group);
+        const currentIndex = radios.indexOf(radio);
+        if (currentIndex < 0) return;
+
+        let nextIndex;
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+            nextIndex = (currentIndex - 1 + radios.length) % radios.length;
+        } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+            nextIndex = (currentIndex + 1) % radios.length;
+        } else if (event.key === 'Home') {
+            nextIndex = 0;
+        } else if (event.key === 'End') {
+            nextIndex = radios.length - 1;
+        } else {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const next = radios[nextIndex];
+        next.click();
+        next.focus();
+    }
+
     function createOptionsCheckboxRow(id, label, isChecked, onToggle) {
         const row = document.createElement('button');
         row.type = 'button';
@@ -43,13 +86,16 @@ export function createOptionsUi(dependencies) {
         btn.className = 'tm-volume-options-radio';
         btn.setAttribute('role', 'radio');
         btn.setAttribute('aria-checked', isChecked ? 'true' : 'false');
+        btn.tabIndex = isChecked ? 0 : -1;
         btn.textContent = label;
         btn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
             onSelect();
             refreshOptionsPopupState();
+            syncOptionsRadioGroups(document.getElementById(OPTIONS_POPUP_ID));
         });
+        btn.addEventListener('keydown', handleRadioNavigation);
         return btn;
     }
 
@@ -262,5 +308,5 @@ export function createOptionsUi(dependencies) {
         return popup;
     }
 
-  return { buildOptionsPopup };
+  return { buildOptionsPopup, syncOptionsRadioGroups };
 }

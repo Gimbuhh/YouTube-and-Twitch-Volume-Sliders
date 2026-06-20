@@ -1107,7 +1107,7 @@ export function startYouTubeVolumeSlider() {
     }
 
 
-    const { buildOptionsPopup } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsRadioGroups } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
@@ -1157,6 +1157,7 @@ export function startYouTubeVolumeSlider() {
         if (opacitySection) {
             opacitySection.style.display = isSliderOnVideo() ? '' : 'none';
         }
+        syncOptionsRadioGroups(popup);
     }
 
     function ensureOptionsPopup() {
@@ -1237,7 +1238,7 @@ export function startYouTubeVolumeSlider() {
         getPlayerContainer()?.classList?.add('tm-volume-options-open');
         startOptionsControlsHold();
         document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute('aria-expanded', 'true');
-        const initialFocus = popup.querySelector('input:checked:not(:disabled)') || getOptionsPopupFocusable(popup)[0];
+        const initialFocus = popup.querySelector('[id^="tm-volume-options-mode-"][role="radio"][aria-checked="true"]:not(:disabled)') || getOptionsPopupFocusable(popup)[0];
         initialFocus?.focus();
 
         if (!optionsPopupOutsideHandler) {

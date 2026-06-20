@@ -2,6 +2,13 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.4.2 - 2026-06-20
+
+- Kept keyboard focus inside the options dialog when conditional opacity controls are hidden.
+- Added selected-option focus, one Tab stop per radio group, and arrow/Home/End navigation for options radios.
+- Made release packaging transactional, synchronized package and userscript versions, and added rollback coverage.
+- Added public contribution and security-reporting guidance.
+
 ## 2.4.1 - 2026-06-20
 
 - Prevented the YouTube volume slider from expanding when it first appears beneath a stationary pointer during page load.
