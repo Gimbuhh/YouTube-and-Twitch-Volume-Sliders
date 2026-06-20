@@ -2,6 +2,11 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.4.3 - 2026-06-20
+
+- Prevented unrelated pointer releases from being treated as volume-slider interactions.
+- Preserved mute state and the collapsed overlay when clicks begin outside the slider.
+
 ## 2.4.2 - 2026-06-20
 
 - Kept keyboard focus inside the options dialog when conditional opacity controls are hidden.

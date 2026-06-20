@@ -32,6 +32,20 @@ for(const config of platforms){
     runtime.close();
   });
 
+  test(`${config.name}: unrelated pointerup does not apply the saved slider value`,async()=>{
+    const {runtime,fixture}=await loadPlatform(config,(current,currentFixture)=>{
+      current.window.localStorage.setItem(config.volumeKey,'50');
+      if(config.file==='youtube')currentFixture.player.mute();else currentFixture.player._tmPlayerApi.setMuted(true);
+    });
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+    assert.equal(fixture.state.muted,true);
+    assert.ok(overlay.classList.contains('tm-collapsed'));
+    runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+    assert.equal(fixture.state.muted,true);
+    assert.ok(overlay.classList.contains('tm-collapsed'));
+    runtime.close();
+  });
+
   test(`${config.name}: full artifact exposes semantic controls and reattaches after detachment`,async()=>{
     const {runtime}=await loadPlatform(config);
     const overlay=runtime.document.getElementById('tm-volume-slider-overlay');

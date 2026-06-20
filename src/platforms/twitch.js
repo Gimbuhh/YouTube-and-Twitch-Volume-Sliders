@@ -1795,7 +1795,8 @@ export function startTwitchVolumeSlider() {
         };
 
         const finishSliderInteraction = (event) => {
-            if (event?.type === 'pointerup') {
+            const wasDragging = overlay.dataset.tmDragging === 'true';
+            if (event?.type === 'pointerup' && wasDragging) {
                 snapDirectClickIfNeeded();
             }
             overlay.dataset.tmDragging = 'false';
