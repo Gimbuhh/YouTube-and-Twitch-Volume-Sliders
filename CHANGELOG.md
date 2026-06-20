@@ -15,3 +15,33 @@ All notable changes to the maintained userscripts are documented here. Historica
 - Made overlay lifecycle cleanup ownership-safe across detached SPA subtrees.
 - Replaced click-only mute markup with an accessible native button.
 - Added complete options-dialog focus entry, containment, dismissal, and restoration behavior.
+
+## Historical Releases
+
+Exact release dates were not retained for versions `1.0` through `2.3.2`. Repository evidence establishes only that these builds had been archived by 2026-03-29. Their original patch notes are preserved without invented dates:
+
+| Version | Available scripts | Original notes |
+| --- | --- | --- |
+| 2.3.2 | YouTube, Twitch | [2.3.2](release-notes/2.3.2.md) |
+| 2.3.1 | YouTube, Twitch | [2.3.1](release-notes/2.3.1.md) |
+| 2.3 | YouTube, Twitch | [2.3](release-notes/2.3.md) |
+| 2.2.3 | YouTube, Twitch | [2.2.3](release-notes/2.2.3.md) |
+| 2.2.2 | YouTube, Twitch | [2.2.2](release-notes/2.2.2.md) |
+| 2.2.1 | YouTube, Twitch | [2.2.1](release-notes/2.2.1.md) |
+| 2.2 | YouTube, Twitch | [2.2](release-notes/2.2.md) |
+| 2.1 | YouTube, Twitch | [2.1](release-notes/2.1.md) |
+| 2.0 | YouTube, Twitch | [2.0](release-notes/2.0.md) |
+| 1.5.1 | YouTube, Twitch | [1.5.1](release-notes/1.5.1.md) |
+| 1.5 | YouTube, Twitch | [1.5](release-notes/1.5.md) |
+| 1.4.2 | Twitch | [1.4.2](release-notes/1.4.2.md) |
+| 1.4.1 | YouTube, Twitch | [1.4.1](release-notes/1.4.1.md) |
+| 1.4 | YouTube, Twitch | [1.4](release-notes/1.4.md) |
+| 1.3.2 | YouTube, Twitch | [1.3.2](release-notes/1.3.2.md) |
+| 1.3.1 | YouTube, Twitch | [1.3.1](release-notes/1.3.1.md) |
+| 1.3 | YouTube, Twitch | [1.3](release-notes/1.3.md) |
+| 1.2.2 | YouTube | [1.2.2](release-notes/1.2.2.md) |
+| 1.2.1 | YouTube, Twitch | [1.2.1](release-notes/1.2.1.md) |
+| 1.2 | YouTube, Twitch | [1.2](release-notes/1.2.md) |
+| 1.1.5 | YouTube | [1.1.5](release-notes/1.1.5.md) |
+| 1.1 | YouTube, Twitch | [1.1](release-notes/1.1.md) |
+| 1.0 | YouTube, Twitch | [1.0](release-notes/1.0.md) |

@@ -14,6 +14,7 @@
     "check:generated": "node scripts/verify-generated.mjs",
     "check:archive": "node scripts/archive-manifest.mjs",
     "check:security": "node scripts/security-scan.mjs",
+    "history:generate": "node scripts/generate-historical-releases.mjs",
     "check": "node scripts/archive-manifest.mjs && node scripts/build.mjs && node scripts/validate-metadata.mjs && node scripts/check-syntax.mjs && node --test && node scripts/verify-generated.mjs && node scripts/security-scan.mjs",
     "release": "node scripts/release.mjs"
   },

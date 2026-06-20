@@ -13,16 +13,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Inspect version tag
+        id: release
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          if [ "$version" = "$package_version" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Historical tag $GITHUB_REF_NAME is published from its archived assets."
+          fi
       - uses: pnpm/action-setup@v4
+        if: steps.release.outputs.publish == 'true'
         with:
           version: 11.0.7
       - uses: actions/setup-node@v4
+        if: steps.release.outputs.publish == 'true'
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: steps.release.outputs.publish == 'true'
       - run: pnpm check
+        if: steps.release.outputs.publish == 'true'
       - name: Verify release version and archive
+        if: steps.release.outputs.publish == 'true'
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -31,6 +48,7 @@ jobs:
           test -f "release-notes/$version.md"
           node scripts/verify-release.mjs "$version"
       - name: Publish GitHub Release
+        if: steps.release.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

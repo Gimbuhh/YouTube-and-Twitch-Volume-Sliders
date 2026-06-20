@@ -28,13 +28,13 @@ pnpm check
 pnpm release -- 2.4.2
 ```
 
-Edit canonical code under `src/`; never edit `dist/` or archives manually. `dist/` is generated, `archive/legacy/` preserves historical releases, and `archive/releases/` contains immutable packaged releases. See [architecture](docs/architecture.md), [testing](docs/testing.md), and [releasing](docs/releasing.md).
+Edit canonical code under `src/`; never edit `dist/` or archives manually. `dist/` is generated, `archive/legacy/` preserves historical releases, and `archive/releases/` contains immutable packaged releases. See [architecture](docs/architecture.md), [testing](docs/testing.md), [releasing](docs/releasing.md), and the [GitHub-first workflow](docs/github-workflow.md).
 
 `node_modules/` is machine-local and intentionally excluded. Recreate it with the frozen lockfile instead of copying it between Windows and macOS; pnpm installs only native packages for the current machine.
 
 ## Releases
 
-Every release contains both standalone `.user.js` files and matching release notes. The full history is recorded in the [changelog](CHANGELOG.md), while original pre-project versions remain preserved under `archive/legacy/`.
+Every release contains the standalone `.user.js` files available for that version and matching release notes. The maintained history is recorded in the [changelog](CHANGELOG.md), and the evidence-based [version history](docs/version-history.md) covers original pre-project builds preserved under `archive/legacy/`.
 
 Pull requests and pushes run the full check on Windows. A version tag such as `v2.4.1` runs the checks again and publishes both verified scripts as GitHub Release assets. See [releasing](docs/releasing.md) for the maintainer workflow.
 

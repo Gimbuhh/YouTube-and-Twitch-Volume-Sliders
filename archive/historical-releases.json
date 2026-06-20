@@ -1,0 +1,312 @@
+[
+  {
+    "version": "1.0",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.0/YouTube Volume Slider 1.0.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.0/Twitch Volume Slider 1.0.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.1",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.1/YouTube Volume Slider 1.1.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.1/Twitch Volume Slider 1.1.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.1.5",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.1.5/YouTube Volume Slider 1.1.5.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.2",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.2/YouTube Volume Slider 1.2.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.2/Twitch Volume Slider 1.2.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.2.1",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.2.1/YouTube Volume Slider 1.2.1.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.2.1/Twitch Volume Slider 1.2.1.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.2.2",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.2.2/YouTube Volume Slider 1.2.2.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.3",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.3/YouTube Volume Slider 1.3.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.3/Twitch Volume Slider 1.3.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.3.1",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.3.1/YouTube Volume Slider 1.3.1.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.3.1/Twitch Volume Slider 1.3.1.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.3.2",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.3.2/YouTube Volume Slider 1.3.2.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.3.2/Twitch Volume Slider 1.3.2.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.4",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.4/YouTube Volume Slider 1.4.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.4/Twitch Volume Slider 1.4.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.4.1",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.4.1/YouTube Volume Slider 1.4.1.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.4.1/Twitch Volume Slider 1.4.1.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.4.2",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.4.2/Twitch Volume Slider 1.4.2.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.5",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.5/YouTube Volume Slider 1.5.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.5/Twitch Volume Slider 1.5.txt"
+      }
+    ]
+  },
+  {
+    "version": "1.5.1",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 1.5.1/YouTube Volume Slider 1.5.1.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 1.5.1/Twitch Volume Slider 1.5.1.txt"
+      }
+    ]
+  },
+  {
+    "version": "2.0",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 2.0/YouTube Volume Slider 2.0.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 2.0/Twitch Volume Slider 2.0.txt"
+      }
+    ]
+  },
+  {
+    "version": "2.1",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 2.1/YouTube Volume Slider 2.1.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 2.1/Twitch Volume Slider 2.1.txt"
+      }
+    ]
+  },
+  {
+    "version": "2.2",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 2.2/YouTube Volume Slider 2.2.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 2.2/Twitch Volume Slider 2.2.txt"
+      }
+    ]
+  },
+  {
+    "version": "2.2.1",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 2.2.1/YouTube Volume Slider 2.2.1.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 2.2.1/Twitch Volume Slider 2.2.1.txt"
+      }
+    ]
+  },
+  {
+    "version": "2.2.2",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 2.2.2/YouTube Volume Slider 2.2.2.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 2.2.2/Twitch Volume Slider 2.2.2.txt"
+      }
+    ]
+  },
+  {
+    "version": "2.2.3",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 2.2.3/YouTube Volume Slider 2.2.3.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 2.2.3/Twitch Volume Slider 2.2.3.txt"
+      }
+    ]
+  },
+  {
+    "version": "2.3",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 2.3/YouTube Volume Slider 2.3.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 2.3/Twitch Volume Slider 2.3.txt"
+      }
+    ]
+  },
+  {
+    "version": "2.3.1",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 2.3.1/YouTube Volume Slider 2.3.1.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 2.3.1/Twitch Volume Slider 2.3.1.txt"
+      }
+    ]
+  },
+  {
+    "version": "2.3.2",
+    "archivedBy": "2026-03-29",
+    "platforms": [
+      {
+        "name": "youtube",
+        "script": "archive/legacy/YouTube Volume Slider Versions/YouTube Volume Slider 2.3.2/YouTube Volume Slider 2.3.2.txt"
+      },
+      {
+        "name": "twitch",
+        "script": "archive/legacy/Twitch Volume Slider Versions/Twitch Volume Slider 2.3.2/Twitch Volume Slider 2.3.2.txt"
+      }
+    ]
+  }
+]
