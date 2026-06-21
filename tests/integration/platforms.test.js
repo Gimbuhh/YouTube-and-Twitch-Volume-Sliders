@@ -90,6 +90,26 @@ test('YouTube: clicking the video surface dismisses options without reaching pla
   runtime.close();
 });
 
+test('YouTube: clicking the video surface collapses a held slider and reaches playback',async()=>{
+  const {runtime,fixture}=await loadPlatform(platforms[0]);
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+
+  slider.value='65';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.ok(overlay.classList.contains('tm-expanded'));
+  assert.equal(overlay.dataset.tmKeepExpanded,'true');
+
+  let playbackClicks=0;
+  fixture.player.addEventListener('click',()=>playbackClicks++);
+  fixture.video.dispatchEvent(new runtime.window.MouseEvent('click',{bubbles:true,cancelable:true}));
+
+  assert.ok(overlay.classList.contains('tm-collapsed'));
+  assert.equal(overlay.dataset.tmKeepExpanded,'false');
+  assert.equal(playbackClicks,1);
+  runtime.close();
+});
+
 test('Twitch: hiding controls clears interaction expansion until the next slider hover',async()=>{
   const {runtime}=await loadPlatform(platforms[1]);
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');

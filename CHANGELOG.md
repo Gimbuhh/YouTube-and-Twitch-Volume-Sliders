@@ -2,6 +2,10 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.4.5 - 2026-06-21
+
+- Made a video-surface play/pause click collapse YouTube's temporarily held-open volume slider, matching the native volume control without blocking playback.
+
 ## 2.4.4 - 2026-06-21
 
 - Made the custom YouTube settings menu dismiss video-surface clicks without also toggling playback, matching YouTube's native settings behavior.

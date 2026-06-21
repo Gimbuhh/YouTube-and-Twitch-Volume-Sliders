@@ -1,6 +1,6 @@
 {
   "name": "youtube-twitch-volume-sliders",
-  "version": "2.4.4",
+  "version": "2.4.5",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.0.7",

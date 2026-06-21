@@ -1443,6 +1443,12 @@ export function startYouTubeVolumeSlider() {
             updateOverlayOpacity(overlay);
             collapseOverlayIfIdle(overlay);
         });
+        const collapseHeldSliderOnVideoClick = (event) => {
+            if (overlay.dataset.tmKeepExpanded !== 'true' || !isYouTubeVideoSurfaceClick(event)) return;
+            clearExpandedHold(overlay);
+            setOverlayExpanded(overlay, false);
+        };
+        document.addEventListener('click', collapseHeldSliderOnVideoClick, true);
 
         const iconCell = document.createElement('button');
         iconCell.type = 'button';
@@ -1624,6 +1630,7 @@ export function startYouTubeVolumeSlider() {
             window.removeEventListener('blur', finishSliderInteraction);
             window.removeEventListener('resize', onLayoutChange);
             window.removeEventListener('pointermove', markPointerIntent, true);
+            document.removeEventListener('click', collapseHeldSliderOnVideoClick, true);
             controlsObserver.disconnect();
             detachmentObserver.disconnect();
             clearExpandedHold(overlay);

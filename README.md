@@ -36,7 +36,7 @@ Edit canonical code under `src/`; never edit `dist/` or archives manually. `dist
 
 Every release contains the standalone `.user.js` files available for that version and matching release notes. The maintained history is recorded in the [changelog](CHANGELOG.md), and the evidence-based [version history](docs/version-history.md) covers original pre-project builds preserved under `archive/legacy/`.
 
-Pull requests and pushes run the full check on Windows. A version tag such as `v2.4.4` runs the checks again and publishes both verified scripts as GitHub Release assets. See [releasing](docs/releasing.md) for the maintainer workflow.
+Pull requests and pushes run the full check on Windows. A version tag such as `v2.4.5` runs the checks again and publishes both verified scripts as GitHub Release assets. See [releasing](docs/releasing.md) for the maintainer workflow.
 
 ## Contributing
 
