@@ -131,3 +131,27 @@ test('Twitch: hiding controls clears interaction expansion until the next slider
   assert.ok(overlay.classList.contains('tm-collapsed'));
   runtime.close();
 });
+
+test('Twitch: on-video slider expands on deliberate hover while controls are hidden',async()=>{
+  const {runtime}=await loadPlatform(platforms[1],current=>{
+    current.window.localStorage.setItem('tm-twitch-volume-slider-location','video');
+  });
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const controls=runtime.document.querySelector('[data-a-target="player-controls"]');
+
+  assert.ok(overlay.classList.contains('tm-collapsed'));
+  assert.equal(overlay.parentElement.className,'video-player');
+
+  controls.setAttribute('data-a-visible','false');
+  await new Promise(resolve=>runtime.window.setTimeout(resolve,0));
+  assert.ok(overlay.classList.contains('tm-collapsed'));
+
+  runtime.window.dispatchEvent(new runtime.window.MouseEvent('pointermove',{bubbles:true}));
+  overlay.dispatchEvent(new runtime.window.MouseEvent('mouseenter'));
+  assert.ok(overlay.classList.contains('tm-expanded'));
+
+  controls.setAttribute('aria-hidden','true');
+  await new Promise(resolve=>runtime.window.setTimeout(resolve,0));
+  assert.ok(overlay.classList.contains('tm-expanded'));
+  runtime.close();
+});

@@ -1651,11 +1651,21 @@ export function startTwitchVolumeSlider() {
             alignSelf: 'center',
             transition: 'width 0.22s cubic-bezier(0.16, 1, 0.3, 1)'
         });
+
+        let hasPointerIntent = false;
+        const markPointerIntent = () => {
+            hasPointerIntent = true;
+            window.removeEventListener('pointermove', markPointerIntent, true);
+        };
+        window.addEventListener('pointermove', markPointerIntent, true);
         overlay.addEventListener('mouseenter', () => {
+            if (!hasPointerIntent) return;
+            overlay.dataset.tmHovering = 'true';
             setOverlayExpanded(overlay, true);
             updateOverlayOpacity(overlay);
         });
         overlay.addEventListener('mouseleave', () => {
+            overlay.dataset.tmHovering = 'false';
             overlay.dataset.tmDragging = 'false';
             collapseOverlayIfIdle(overlay, true);
             updateOverlayOpacity(overlay);
@@ -1865,6 +1875,13 @@ export function startTwitchVolumeSlider() {
         const onLayoutChange = () => {
             if (!overlay.isConnected) return;
             if (areTwitchControlsHidden()) {
+                if (isSliderOnVideo()) {
+                    updateVideoOverlayPosition(overlay, getPlayerContainer(video));
+                }
+                if (isOverlayInteractionFocused(overlay)) {
+                    updateOverlayOpacity(overlay);
+                    return;
+                }
                 if (!isAlwaysExpandedEnabled()) {
                     overlay.dataset.tmDragging = 'false';
                     clearExpandedHold(overlay);
@@ -1910,6 +1927,7 @@ export function startTwitchVolumeSlider() {
             window.removeEventListener('pointercancel', finishSliderInteraction, true);
             window.removeEventListener('blur', finishSliderInteraction);
             window.removeEventListener('resize', onLayoutChange);
+            window.removeEventListener('pointermove', markPointerIntent, true);
             controlsObserver.disconnect();
             detachmentObserver.disconnect();
             clearExpandedHold(overlay);

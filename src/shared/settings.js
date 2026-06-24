@@ -153,7 +153,10 @@ export function createVolumeSettings({
   }
 
   function isOverlayInteractionFocused(overlay) {
-    return overlay?.dataset.tmDragging === 'true' || overlay?.matches?.(':hover') || overlay?.contains?.(document.activeElement);
+    return overlay?.dataset.tmDragging === 'true' ||
+      overlay?.dataset.tmHovering === 'true' ||
+      overlay?.matches?.(':hover') ||
+      overlay?.contains?.(document.activeElement);
   }
 
   function setVolumeSliderMode(mode) {

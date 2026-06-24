@@ -1427,10 +1427,12 @@ export function startYouTubeVolumeSlider() {
         window.addEventListener('pointermove', markPointerIntent, true);
         overlay.addEventListener('mouseenter', () => {
             if (!hasPointerIntent) return;
+            overlay.dataset.tmHovering = 'true';
             setOverlayExpanded(overlay, true);
             updateOverlayOpacity(overlay);
         });
         overlay.addEventListener('mouseleave', () => {
+            overlay.dataset.tmHovering = 'false';
             overlay.dataset.tmDragging = 'false';
             updateOverlayOpacity(overlay);
             collapseOverlayIfIdle(overlay, true);
