@@ -54,9 +54,21 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" \
-            dist/youtube-volume-slider.user.js \
-            dist/twitch-volume-slider.user.js \
-            --verify-tag \
-            --title "Volume Sliders $version" \
-            --notes-file "release-notes/$version.md"
+          youtube_asset="archive/releases/$version/YouTube Volume Slider $version/YouTube Volume Slider $version.user.js"
+          twitch_asset="archive/releases/$version/Twitch Volume Slider $version/Twitch Volume Slider $version.user.js"
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "Volume Sliders $version" \
+              --notes-file "release-notes/$version.md"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "Volume Sliders $version" \
+              --notes-file "release-notes/$version.md"
+          fi
+
+          gh release upload "$GITHUB_REF_NAME" \
+            "$youtube_asset" \
+            "$twitch_asset" \
+            --clobber
