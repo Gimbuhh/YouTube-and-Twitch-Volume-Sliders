@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.0
 // @description  Large centered volume slider overlay for Twitch, optimized for remote VNC control.
-// @author       You
+// @author       Gimbuhh (Made using AI)
 // @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
 // @match        https://www.twitch.tv/*
 // @run-at       document-idle
