@@ -2,6 +2,12 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.4.6 - 2026-06-24
+
+- Fixed Twitch's on-video slider so deliberate hover expands it even while Twitch keeps the native player controls hidden.
+- Tracked overlay hover state explicitly to make interaction checks more reliable during player layout updates.
+- Preserved YouTube's stationary-pointer guard while sharing the stronger hover-focus behavior.
+
 ## 2.4.5 - 2026-06-21
 
 - Made a video-surface play/pause click collapse YouTube's temporarily held-open volume slider, matching the native volume control without blocking playback.
