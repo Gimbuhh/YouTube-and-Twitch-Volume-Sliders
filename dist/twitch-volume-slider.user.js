@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Twitch Volume Slider 2.4.6
-// @namespace    http://tampermonkey.net/
+// @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
 // @version      2.4.6
 // @description  Compact in-bar volume indicator that expands into a wide Twitch volume slider.
 // @author       Gimbuhh (Made using AI)
