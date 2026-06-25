@@ -1,7 +1,7 @@
 export function createOverlayUi(dependencies) {
   const {
     document, window, getSpeakerIconMode, isAlwaysExpandedEnabled, isSliderOnVideo,
-    updateOverlayOpacity, finishExpandedHoldIfDue,
+    updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue,
     accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
     arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
   } = dependencies;
@@ -82,7 +82,7 @@ export function createOverlayUi(dependencies) {
             margin: '0',
             alignSelf: 'auto',
             flex: '0 0 auto',
-            transition: 'opacity 0.18s ease, width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease'
+            transition: 'width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease'
         } : {
             position: 'relative',
             left: 'auto',
@@ -105,7 +105,8 @@ export function createOverlayUi(dependencies) {
             justifyContent: 'flex-start',
             gap: '0',
             background: 'transparent',
-            transform: onVideo ? 'translateX(-50%)' : 'translateY(0)'
+            transform: onVideo ? 'translateX(-50%) scale(var(--tm-overlay-scale, 1))' : 'translateY(0)',
+            transformOrigin: onVideo ? 'center bottom' : 'center center'
         };
 
         if (expanded) {
@@ -115,6 +116,7 @@ export function createOverlayUi(dependencies) {
                 width: 'clamp(320px, 34vw, 460px)',
                 padding: '0 12px 0 0'
             });
+            updateOverlaySize(overlay);
             updateOverlayOpacity(overlay);
             return;
         }
@@ -125,6 +127,7 @@ export function createOverlayUi(dependencies) {
             width: '40px',
             padding: '0 12px 0 0'
         });
+        updateOverlaySize(overlay);
         updateOverlayOpacity(overlay);
     }
 

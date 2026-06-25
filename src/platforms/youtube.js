@@ -23,8 +23,10 @@ export function startYouTubeVolumeSlider() {
     const ALWAYS_EXPANDED_KEY = 'tm-yt-volume-slider-always-expanded';
     const OVERLAY_OPACITY_IDLE_KEY = 'tm-yt-volume-slider-opacity-idle';
     const OVERLAY_OPACITY_ACTIVE_KEY = 'tm-yt-volume-slider-opacity-active';
+    const OVERLAY_SIZE_KEY = 'tm-yt-volume-slider-size';
     const DEFAULT_OVERLAY_OPACITY_IDLE = 45;
     const DEFAULT_OVERLAY_OPACITY_ACTIVE = 95;
+    const DEFAULT_OVERLAY_SIZE = 100;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
     const NAV_REATTACH_DELAY_MS = 700;
@@ -51,7 +53,9 @@ export function startYouTubeVolumeSlider() {
         // On-video slider opacity when unfocused: 'saved' or 0-100 as a percentage. Default: 45
         overlayOpacityUnfocused: 'saved',
         // On-video slider opacity when focused/hovered: 'saved' or 0-100 as a percentage. Default: 95
-        overlayOpacityFocused: 'saved'
+        overlayOpacityFocused: 'saved',
+        // On-video slider size: 'saved' or 100-200 as a percentage. Default: 100
+        overlaySize: 'saved'
     };
 
     let cachedYtPlayer = null;
@@ -73,10 +77,10 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, updateOverlaySize, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage: localStorage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY },
-        defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE },
+        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY },
+        defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
         onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
         clearExpandedHold: (overlay) => clearExpandedHold(overlay),
@@ -471,12 +475,12 @@ export function startYouTubeVolumeSlider() {
   background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
   background-size: 100% 100%;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: none;
   z-index: 1;
 }
-#${OVERLAY_ID}.tm-expanded .tm-slider-ticks,
-#${OVERLAY_ID}:hover .tm-slider-ticks {
+#${OVERLAY_ID}.tm-expanded .tm-slider-ticks {
   opacity: 1;
+  transition: opacity 0.12s ease 0.08s;
 }
 
         `;
@@ -485,7 +489,7 @@ export function startYouTubeVolumeSlider() {
 
     const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg } = createOverlayUi({
         document, window, getSpeakerIconMode, isAlwaysExpandedEnabled, isSliderOnVideo,
-        updateOverlayOpacity, finishExpandedHoldIfDue,
+        updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue,
         accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
         arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
     });
@@ -1123,7 +1127,8 @@ export function startYouTubeVolumeSlider() {
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
         isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
-        setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent
+        setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
+        getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent
     });
 
 
@@ -1167,6 +1172,10 @@ export function startYouTubeVolumeSlider() {
         const opacitySection = popup.querySelector('#tm-volume-options-opacity-section');
         if (opacitySection) {
             opacitySection.style.display = isSliderOnVideo() ? '' : 'none';
+        }
+        const sizeSection = popup.querySelector('#tm-volume-options-size-section');
+        if (sizeSection) {
+            sizeSection.style.display = isSliderOnVideo() ? '' : 'none';
         }
         syncOptionsRadioGroups(popup);
     }

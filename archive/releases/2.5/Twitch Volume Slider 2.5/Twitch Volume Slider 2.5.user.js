@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         YouTube Volume Slider 2.5
+// @name         Twitch Volume Slider 2.5
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
 // @version      2.5
-// @description  Compact in-bar volume indicator that expands into a wide YouTube volume slider.
+// @description  Compact in-bar volume indicator that expands into a wide Twitch volume slider.
 // @author       Gimbuhh (Made using AI)
-// @icon         https://www.youtube.com/favicon.ico
-// @match        https://www.youtube.com/*
-// @updateURL    https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/youtube-volume-slider.user.js
-// @downloadURL  https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/youtube-volume-slider.user.js
+// @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
+// @match        https://www.twitch.tv/*
+// @updateURL    https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
+// @downloadURL  https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==
@@ -88,9 +88,11 @@
       if (!expanded && isAlwaysExpandedEnabled()) {
         expanded = true;
       }
+      const stateChanged = expanded !== overlay.classList.contains("tm-expanded");
       if (!force && (expanded && overlay.classList.contains("tm-expanded") || !expanded && overlay.classList.contains("tm-collapsed"))) {
         return;
       }
+      if (stateChanged) beginOverlayWidthAnimation(overlay);
       const onVideo = isSliderOnVideo();
       const baseStyle = onVideo ? {
         position: "absolute",
@@ -99,7 +101,7 @@
         margin: "0",
         alignSelf: "auto",
         flex: "0 0 auto",
-        transition: "width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease"
+        transition: "opacity 0.18s ease, width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease"
       } : {
         position: "relative",
         left: "auto",
@@ -129,7 +131,7 @@
         overlay.classList.remove("tm-collapsed");
         overlay.classList.add("tm-expanded");
         Object.assign(overlay.style, pillStyle, {
-          width: "clamp(320px, 34vw, 460px)",
+          width: "var(--tm-expanded-width, clamp(320px, 34vw, 460px))",
           padding: "0 12px 0 0"
         });
         updateOverlaySize(overlay);
@@ -144,6 +146,26 @@
       });
       updateOverlaySize(overlay);
       updateOverlayOpacity(overlay);
+    }
+    function beginOverlayWidthAnimation(overlay) {
+      if (overlay._finishWidthAnimation) {
+        overlay._finishWidthAnimation();
+      }
+      overlay.classList.add("tm-width-animating");
+      const finish = (event) => {
+        if (event && event.target !== overlay) return;
+        if (event && event.propertyName !== "width") return;
+        overlay.classList.remove("tm-width-animating");
+        overlay.removeEventListener("transitionend", finish);
+        if (overlay._widthAnimationTimer) {
+          window2.clearTimeout(overlay._widthAnimationTimer);
+          overlay._widthAnimationTimer = 0;
+        }
+        overlay._finishWidthAnimation = null;
+      };
+      overlay._finishWidthAnimation = finish;
+      overlay.addEventListener("transitionend", finish);
+      overlay._widthAnimationTimer = window2.setTimeout(finish, 280);
     }
     function shouldKeepOverlayExpanded(overlay) {
       return isAlwaysExpandedEnabled() || overlay.matches(":hover") || overlay.contains(document2.activeElement) || overlay.dataset.tmDragging === "true";
@@ -929,8 +951,8 @@
     return style;
   }
 
-  // src/platforms/youtube.js
-  function startYouTubeVolumeSlider() {
+  // src/platforms/twitch.js
+  function startTwitchVolumeSlider() {
     "use strict";
     const OVERLAY_ID = "tm-volume-slider-overlay";
     const SLIDER_ID = "tm-volume-slider-range";
@@ -938,58 +960,71 @@
     const OPTIONS_STYLE_ID = "tm-volume-options-style";
     const OPTIONS_BUTTON_ID = "tm-volume-options-button";
     const OPTIONS_POPUP_ID = "tm-volume-options-popup";
-    const STORAGE_KEY = "tm-yt-volume";
-    const VOLUME_MODE_KEY = "tm-yt-volume-slider-mode";
-    const SLIDER_LOCATION_KEY = "tm-yt-volume-slider-location";
-    const REPLACE_NATIVE_PLACEMENT_KEY = "tm-yt-volume-slider-replace-placement";
-    const SNAP_TO_5_KEY = "tm-yt-volume-slider-snap-to-5";
-    const ALWAYS_EXPANDED_KEY = "tm-yt-volume-slider-always-expanded";
-    const OVERLAY_OPACITY_IDLE_KEY = "tm-yt-volume-slider-opacity-idle";
-    const OVERLAY_OPACITY_ACTIVE_KEY = "tm-yt-volume-slider-opacity-active";
-    const OVERLAY_SIZE_KEY = "tm-yt-volume-slider-size";
+    const STORAGE_KEY = "tm-twitch-volume";
+    const MUTE_STORAGE_KEY = "tm-twitch-muted";
+    const VOLUME_MODE_KEY = "tm-twitch-volume-slider-mode";
+    const SLIDER_LOCATION_KEY = "tm-twitch-volume-slider-location";
+    const REPLACE_NATIVE_PLACEMENT_KEY = "tm-twitch-volume-slider-replace-placement";
+    const SNAP_TO_5_KEY = "tm-twitch-volume-slider-snap-to-5";
+    const ALWAYS_EXPANDED_KEY = "tm-twitch-volume-slider-always-expanded";
+    const OVERLAY_OPACITY_IDLE_KEY = "tm-twitch-volume-slider-opacity-idle";
+    const OVERLAY_OPACITY_ACTIVE_KEY = "tm-twitch-volume-slider-opacity-active";
+    const OVERLAY_SIZE_KEY = "tm-twitch-volume-slider-size";
     const DEFAULT_OVERLAY_OPACITY_IDLE = 45;
     const DEFAULT_OVERLAY_OPACITY_ACTIVE = 95;
     const DEFAULT_OVERLAY_SIZE = 100;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
-    const NAV_REATTACH_DELAY_MS = 700;
-    const NAV_DEBOUNCE_MS = 180;
+    const TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS = 5e3;
+    const TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR = '[data-a-target="player-settings-button"], button[aria-label="Settings"]';
+    const TWITCH_NATIVE_SETTINGS_UI_SELECTOR = `${TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR}, [data-a-target="player-settings-menu"], [data-a-target="player-settings-submenu"], [data-a-target="player-settings-submenu-back-button"]`;
     const ON_VIDEO_IDLE_BOTTOM_PX = 12;
     const ON_VIDEO_MAX_CONTROLS_OFFSET_PX = 140;
-    const VOLUME_ACCENT_LIGHT = "#cc4444";
-    const VOLUME_ACCENT_DARK = "#bb3333";
-    const VOLUME_ACCENT_MID = "#cc5555";
-    const VOLUME_ACCENT_DISABLED = "rgba(187, 51, 51, 0.55)";
+    const VOLUME_ACCENT_LIGHT = "#a970ff";
+    const VOLUME_ACCENT_DARK = "#9146ff";
+    const VOLUME_ACCENT_MID = "#b38cff";
+    const VOLUME_ACCENT_DISABLED = "rgba(145, 70, 255, 0.55)";
     const VOLUME_ARC_TRACK = "rgba(255, 255, 255, 0.38)";
     const VOLUME_PANEL_DROP_SHADOW = "drop-shadow(0 2px 5px rgba(0, 0, 0, 0.06))";
     const USER_SETTINGS = {
       // Volume slider mode: 'saved', 'off', 'on', or 'replace-native'. Default: 'saved'
       volumeSliderMode: "saved",
+      // Where to place the slider when replacing native volume: 'saved', 'native', or 'custom'. Default: 'saved'
+      replaceNativePlacement: "saved",
       // Slider location: 'saved', 'controls', or 'video'. Default: 'saved'
       sliderLocation: "saved",
-      // Replace-native placement: 'saved', 'native', or 'custom'. Default: 'saved'
-      replaceNativePlacement: "saved",
       // Snap slider movement to 5% steps: 'saved', true, or false. Default: 'saved'
       snapToFive: "saved",
       // Keep the volume pill expanded: 'saved', true, or false. Default: 'saved'
       alwaysExpanded: "saved",
-      // On-video slider opacity when unfocused: 'saved' or 0-100 as a percentage. Default: 45
+      // Opacity for the on-video slider when idle/focused: 'saved' or 0-100. Default: 'saved'
       overlayOpacityUnfocused: "saved",
-      // On-video slider opacity when focused/hovered: 'saved' or 0-100 as a percentage. Default: 95
       overlayOpacityFocused: "saved",
       // On-video slider size: 'saved' or 100-200 as a percentage. Default: 100
       overlaySize: "saved"
     };
-    let cachedYtPlayer = null;
+    let cachedApi = null;
+    let cachedApiFromElement = null;
+    let startupLockUntil = 0;
+    let startupCorrectionApplied = false;
+    let userIntentUntil = 0;
     let navReattachTimer = 0;
+    let navLateRestoreTimer = 0;
     let navDebounceTimer = 0;
+    let lastKnownPath = window.location.pathname;
     let attachObserver = null;
     let attachObserverTarget = null;
     let attachBootstrapObserver = null;
-    let playerControlsObserver = null;
-    let playerControlsObserverTarget = null;
+    let optionsControlsHoldObserver = null;
+    let optionsControlsHoldTargetKey = null;
+    let nativeSettingsObserver = null;
+    let nativeSettingsObserverTarget = null;
     const overlayLifecycle = createOverlayLifecycle();
     const { getVideoElement, resetVideoElement, ensurePlayerPositioning } = createVideoLocator(document, window);
+    const USER_INTENT_GRACE_MS = 5e3;
+    const NAV_REATTACH_DELAY_MS = 700;
+    const NAV_LATE_RESTORE_DELAY_MS = 4200;
+    const NAV_DEBOUNCE_MS = 180;
     const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, updateOverlaySize, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
       document,
       storage: localStorage,
@@ -1020,72 +1055,94 @@
       debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
       isSnapEnabled: () => isSnapTo5Enabled()
     });
-    function applyNativeVolumeVisibility() {
-      const shouldHideNative = isOverlayEnabled() && isNativeVolumeReplacementEnabled();
-      document.querySelectorAll(".ytp-volume-area").forEach((area) => {
-        const nextDisplay = shouldHideNative ? "none" : "";
-        if (area.style.display !== nextDisplay) {
-          area.style.display = nextDisplay;
-        }
-      });
-      if (shouldHideNative) {
-        const overlay = document.getElementById(OVERLAY_ID);
-        const player = getPlayerContainer();
-        const controlsHost = getYouTubeControlsHost(player);
-        if (overlay && player) {
-          placeOverlay(overlay, player, controlsHost);
-        }
-      }
-    }
     function getPlayerContainer(video = getVideoElement()) {
-      const moviePlayer = document.getElementById("movie_player");
-      if (moviePlayer) {
-        return moviePlayer;
+      if (!video) {
+        return null;
       }
-      return video ? video.parentElement : null;
+      return video.closest('.video-player, .video-player__container, [data-a-target="video-player"]') || video.parentElement;
     }
-    function getYouTubeControlsHost(player) {
-      if (!player) return null;
-      return player.querySelector(".ytp-left-controls") || document.querySelector(".ytp-left-controls");
+    function getTwitchControlsHost() {
+      return document.querySelector("#channel-player .player-controls__left-control-group") || document.querySelector('[aria-label="Player Controls"] .player-controls__left-control-group') || document.querySelector(".player-controls__left-control-group");
     }
-    function getNativeVolumeArea(controlsHost) {
-      return controlsHost?.querySelector?.(".ytp-volume-area") || document.querySelector(".ytp-volume-area");
+    function getTwitchPlayerControlsRoot() {
+      return document.querySelector('[data-a-target="player-controls"].player-controls') || document.querySelector('[data-a-target="player-controls"]');
     }
-    function positionOverlayAboveScrubber(overlay, player) {
-      const progressBar = document.querySelector(".ytp-progress-bar-padding");
-      const barEl = progressBar ? progressBar.closest(".ytp-progress-bar") || progressBar.parentElement : null;
-      const ref = barEl || progressBar;
-      if (!overlay || !player || !ref) {
+    function getTwitchPlayerControlsShell() {
+      return getTwitchPlayerControlsRoot()?.closest?.(".tw-transition") || null;
+    }
+    function getTwitchPlayerControlsSection() {
+      return document.querySelector('#channel-player, [aria-label="Player Controls"]');
+    }
+    function getTwitchRightControlsHost() {
+      return document.querySelector("#channel-player .player-controls__right-control-group") || document.querySelector('[aria-label="Player Controls"] .player-controls__right-control-group') || document.querySelector(".player-controls__right-control-group");
+    }
+    function getTwitchSettingsButton(host = getTwitchRightControlsHost()) {
+      return host?.querySelector?.('[data-a-target="player-settings-button"]') || host?.querySelector?.('button[aria-label="Settings"]') || null;
+    }
+    function isNativeSettingsMenuOpen() {
+      return getTwitchSettingsButton()?.getAttribute("aria-expanded") === "true";
+    }
+    function isClickOnNativeSettingsUi(event) {
+      return !!event.target?.closest?.(TWITCH_NATIVE_SETTINGS_UI_SELECTOR);
+    }
+    function getDirectChildOf(parent, child) {
+      let node = child;
+      while (node && node.parentElement && node.parentElement !== parent) {
+        node = node.parentElement;
+      }
+      return node && node.parentElement === parent ? node : null;
+    }
+    function getNativeVolumeGroup(controlsHost = getTwitchControlsHost()) {
+      if (!controlsHost) return null;
+      const muteButton = controlsHost.querySelector('[data-a-target="player-mute-unmute-button"]');
+      return muteButton ? getDirectChildOf(controlsHost, muteButton) : null;
+    }
+    function getTwitchSettingsWrapper(host = getTwitchRightControlsHost()) {
+      const settingsBtn = getTwitchSettingsButton(host);
+      return host && settingsBtn ? getDirectChildOf(host, settingsBtn) : null;
+    }
+    function positionOverlayAboveControls(overlay, player) {
+      const controls = getTwitchPlayerControlsSection();
+      if (!overlay || !player || !controls) {
         if (overlay) overlay.style.bottom = `${ON_VIDEO_IDLE_BOTTOM_PX}px`;
         return;
       }
       const playerRect = player.getBoundingClientRect();
-      const barRect = ref.getBoundingClientRect();
-      const hasUsableBarRect = barRect.width > 0 && barRect.height > 0 && barRect.top >= playerRect.top && barRect.top < playerRect.bottom;
-      if (!hasUsableBarRect) {
+      const controlsRect = controls.getBoundingClientRect();
+      const hasUsableControlsRect = controlsRect.width > 0 && controlsRect.height > 0 && controlsRect.top >= playerRect.top && controlsRect.top < playerRect.bottom;
+      if (!hasUsableControlsRect) {
         overlay.style.bottom = `${ON_VIDEO_IDLE_BOTTOM_PX}px`;
         return;
       }
-      const bottomPx = playerRect.bottom - barRect.top + 8;
+      const bottomPx = playerRect.bottom - controlsRect.top + 8;
       const safeBottomPx = Math.min(Math.max(20, bottomPx), ON_VIDEO_MAX_CONTROLS_OFFSET_PX);
       overlay.style.bottom = `${safeBottomPx}px`;
     }
     function updateVideoOverlayPosition(overlay, player) {
       if (!overlay || !player || !isSliderOnVideo()) return;
-      if (player.classList.contains("ytp-autohide")) {
+      if (areTwitchControlsHidden()) {
         overlay.style.bottom = `${ON_VIDEO_IDLE_BOTTOM_PX}px`;
         return;
       }
-      positionOverlayAboveScrubber(overlay, player);
+      positionOverlayAboveControls(overlay, player);
     }
     function placeOverlayInControls(overlay, controlsHost) {
       if (!overlay || !controlsHost) return;
-      const nativeVolumeArea = getNativeVolumeArea(controlsHost);
-      if (shouldUseNativeReplacementSlot() && nativeVolumeArea && nativeVolumeArea.parentElement === controlsHost) {
-        if (overlay.parentElement !== controlsHost || overlay.nextElementSibling !== nativeVolumeArea) {
-          controlsHost.insertBefore(overlay, nativeVolumeArea);
+      const nativeVolumeGroup = getNativeVolumeGroup(controlsHost);
+      if (shouldUseNativeReplacementSlot() && nativeVolumeGroup && nativeVolumeGroup.parentElement === controlsHost) {
+        if (overlay.parentElement !== controlsHost || overlay.nextElementSibling !== nativeVolumeGroup) {
+          controlsHost.insertBefore(overlay, nativeVolumeGroup);
         }
-      } else if (overlay.parentElement !== controlsHost || overlay.nextElementSibling) {
+        return;
+      }
+      if (nativeVolumeGroup && nativeVolumeGroup.parentElement === controlsHost) {
+        if (overlay.parentElement === controlsHost && overlay.previousElementSibling === nativeVolumeGroup) {
+          return;
+        }
+        nativeVolumeGroup.insertAdjacentElement("afterend", overlay);
+        return;
+      }
+      if (overlay.parentElement !== controlsHost || overlay.nextElementSibling) {
         controlsHost.appendChild(overlay);
       }
     }
@@ -1105,11 +1162,30 @@
       setOverlayExpanded(overlay, expanded, true);
       updateOverlayOpacity(overlay);
     }
+    function applyNativeVolumeVisibility() {
+      const nativeVolumeGroup = getNativeVolumeGroup();
+      if (nativeVolumeGroup) {
+        const shouldHideNative = isOverlayEnabled() && isNativeVolumeReplacementEnabled();
+        const nextDisplay = shouldHideNative ? "none" : "";
+        if (nativeVolumeGroup.style.display !== nextDisplay) {
+          nativeVolumeGroup.style.display = nextDisplay;
+        }
+      }
+      const overlay = document.getElementById(OVERLAY_ID);
+      const video = getVideoElement();
+      const player = getPlayerContainer(video);
+      const controlsHost = getTwitchControlsHost();
+      if (overlay && player && !isOverlayInteractionFocused(overlay)) {
+        placeOverlay(overlay, player, controlsHost);
+      }
+    }
     function createStylesIfNeeded() {
       const style = createStyleElement(document, "tm-volume-slider-style");
       if (!style) return;
+      style.type = "text/css";
       const css = `
 #${OVERLAY_ID} {
+  --tm-expanded-width: clamp(320px, 34vw, 460px);
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
@@ -1145,8 +1221,13 @@
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  opacity: 1;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.08s ease;
   margin-top: calc((var(--tm-active-track-h, 9px) - var(--tm-thumb-size, 22px)) / 2);
+}
+
+#${OVERLAY_ID}.tm-width-animating input[type=range]::-webkit-slider-thumb {
+  opacity: 0;
 }
 
 #${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:hover {
@@ -1167,7 +1248,12 @@
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  opacity: 1;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.08s ease;
+}
+
+#${OVERLAY_ID}.tm-width-animating input[type=range]::-moz-range-thumb {
+  opacity: 0;
 }
 
 #${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {
@@ -1204,7 +1290,7 @@
   z-index: 0;
   border-radius: inherit;
   border: none;
-  background: rgba(8, 13, 15, 0.34);
+  background: rgba(55, 48, 62, 0.34);
   box-sizing: border-box;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -1305,7 +1391,7 @@
   width: 106px;
   height: 40px;
   box-sizing: border-box;
-  pointer-events: none !important;
+  pointer-events: none;
 }
 
 #${OVERLAY_ID} #${VALUE_LABEL_ID} {
@@ -1315,21 +1401,16 @@
   width: 54px;
   transform: translateY(-50%);
   white-space: nowrap;
-  font-size: 18px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.95);
-  text-align: center;
-  user-select: none;
-  letter-spacing: 0;
 }
 
 #${OVERLAY_ID} .tm-volume-slider-row {
   --tm-active-track-h: 11px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-active-track-h, 9px) / 2);
-  flex: 1 1 auto;
-  min-width: 180px;
+  flex: 0 0 calc(var(--tm-expanded-width) - 118px);
   height: 40px;
+  min-width: 0;
+  width: calc(var(--tm-expanded-width) - 118px);
 }
 
 #${OVERLAY_ID} .tm-slider-track {
@@ -1356,12 +1437,11 @@
   background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
   background-size: 100% 100%;
   opacity: 0;
-  transition: none;
+  transition: opacity 0.2s ease;
   z-index: 1;
 }
 #${OVERLAY_ID}.tm-expanded .tm-slider-ticks {
   opacity: 1;
-  transition: opacity 0.12s ease 0.08s;
 }
 
         `;
@@ -1382,9 +1462,19 @@
       arcTrack: VOLUME_ARC_TRACK,
       expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
     });
-    function areYouTubeControlsHidden() {
-      const player = getPlayerContainer();
-      return !!player?.classList?.contains("ytp-autohide") || !!player?.classList?.contains("ytp-hide-controls");
+    function areTwitchControlsHidden() {
+      const controlsRoot = getTwitchPlayerControlsRoot();
+      const controlsShell = getTwitchPlayerControlsShell();
+      const controls = getTwitchPlayerControlsSection();
+      if (controlsShell?.getAttribute("aria-hidden") === "true") return true;
+      if (controlsRoot?.getAttribute("data-a-visible") === "false") return true;
+      if (controlsRoot?.getAttribute("aria-hidden") === "true") return true;
+      if (!controls) return false;
+      if (controls.getAttribute("aria-hidden") === "true") return true;
+      const shellStyle = controlsShell ? window.getComputedStyle(controlsShell) : null;
+      const rootStyle = controlsRoot ? window.getComputedStyle(controlsRoot) : null;
+      const controlsStyle = window.getComputedStyle(controls);
+      return shellStyle?.display === "none" || shellStyle?.visibility === "hidden" || Number(shellStyle?.opacity) === 0 || rootStyle?.display === "none" || rootStyle?.visibility === "hidden" || Number(rootStyle?.opacity) === 0 || controlsStyle.display === "none" || controlsStyle.visibility === "hidden" || Number(controlsStyle.opacity) === 0;
     }
     function finishExpandedHoldIfDue(overlay) {
       if (!overlay?.isConnected) {
@@ -1399,10 +1489,6 @@
         return;
       }
       clearExpandedHold(overlay);
-      if (areYouTubeControlsHidden()) {
-        setOverlayExpanded(overlay, false);
-        return;
-      }
       collapseOverlayIfIdle(overlay, true);
     }
     function collapseOverlayIfIdle(overlay, force = false) {
@@ -1411,97 +1497,142 @@
           setOverlayExpanded(overlay, true);
           return;
         }
-        if (overlay.dataset.tmKeepExpanded === "true" && !areYouTubeControlsHidden()) {
-          return;
-        }
         if (overlay.dataset.tmKeepExpanded === "true") {
-          clearExpandedHold(overlay);
+          return;
         }
         if (force || !shouldKeepOverlayExpanded(overlay)) {
           setOverlayExpanded(overlay, false);
         }
       }, 0);
     }
-    function getYouTubePlayer() {
-      if (cachedYtPlayer && cachedYtPlayer.isConnected && typeof cachedYtPlayer.getVolume === "function") {
-        return cachedYtPlayer;
+    function getTwitchPlayerApi() {
+      try {
+        const playerSel = 'div[data-a-target="player-overlay-click-handler"], .video-player';
+        const el = document.querySelector(playerSel);
+        if (!el) return null;
+        if (cachedApi && cachedApiFromElement === el) {
+          return cachedApi;
+        }
+        let instance;
+        for (const key in el) {
+          if (key.startsWith("__reactInternalInstance$") || key.startsWith("__reactFiber$")) {
+            instance = el[key];
+            break;
+          }
+        }
+        if (!instance) return null;
+        let parent = instance.return;
+        for (let i = 0; i < 50; i++) {
+          if (!parent || !parent.memoizedProps) break;
+          const player = parent.memoizedProps.mediaPlayerInstance;
+          if (player) {
+            const api = player.core ?? player.playerInstance?.core ?? player;
+            if (typeof api?.getVolume === "function" && typeof api?.setVolume === "function") {
+              cachedApi = api;
+              cachedApiFromElement = el;
+              return api;
+            }
+          }
+          parent = parent.return;
+        }
+      } catch (e) {
       }
-      const player = document.getElementById("movie_player");
-      if (player && typeof player.getVolume === "function") {
-        cachedYtPlayer = player;
-        return player;
-      }
-      cachedYtPlayer = null;
+      cachedApi = null;
+      cachedApiFromElement = null;
       return null;
     }
     function getVolume(video) {
-      const ytPlayer = getYouTubePlayer();
-      if (ytPlayer) {
-        const isMuted2 = ytPlayer.isMuted();
-        if (isMuted2) {
-          return 0;
+      try {
+        const api = getTwitchPlayerApi();
+        if (api) {
+          if (api.isMuted && api.isMuted()) return 0;
+          const vol2 = api.getVolume();
+          return Math.round((typeof vol2 === "number" ? vol2 : 0) * 100);
         }
-        return ytPlayer.getVolume();
+      } catch (e) {
       }
       const vol = (video.muted ? 0 : video.volume) || 0;
       return Math.round(vol * 100);
     }
+    function setVolume(video, value) {
+      try {
+        const api = getTwitchPlayerApi();
+        if (api) {
+          if (api.isMuted && api.isMuted()) api.setMuted(false);
+          api.setVolume(Math.min(1, Math.max(0, value / 100)));
+          return;
+        }
+      } catch (e) {
+      }
+      video.volume = value / 100;
+      video.muted = false;
+    }
     function isMuted(video) {
-      const ytPlayer = getYouTubePlayer();
-      if (ytPlayer && typeof ytPlayer.isMuted === "function") {
-        return ytPlayer.isMuted();
+      try {
+        const api = getTwitchPlayerApi();
+        if (api && api.isMuted) return api.isMuted();
+      } catch (e) {
       }
       return !!video.muted;
     }
-    function toggleMute(video) {
-      const ytPlayer = getYouTubePlayer();
-      if (ytPlayer) {
-        if (ytPlayer.isMuted()) {
-          ytPlayer.unMute();
-        } else {
-          ytPlayer.mute();
+    function setMuted(video, muted) {
+      try {
+        const api = getTwitchPlayerApi();
+        if (api && api.setMuted) {
+          api.setMuted(!!muted);
+          return;
         }
-      } else {
-        video.muted = !video.muted;
+      } catch (e) {
       }
+      video.muted = !!muted;
     }
-    function setVolume(video, value) {
-      const ytPlayer = getYouTubePlayer();
-      if (ytPlayer) {
-        if (ytPlayer.isMuted()) {
-          ytPlayer.unMute();
-        }
-        ytPlayer.setVolume(value);
-      } else {
-        video.volume = value / 100;
-        video.muted = false;
-      }
+    function toggleMute(video) {
+      setMuted(video, !isMuted(video));
     }
     function restoreSavedVolume(video) {
+      const wasMuted = isMuted(video);
       const value = getSavedVolume();
       if (value !== null) {
-        const wasMuted = isMuted(video);
         setVolume(video, value);
-        if (wasMuted && !isMuted(video)) {
-          const ytPlayer = getYouTubePlayer();
-          if (ytPlayer) ytPlayer.mute();
-          else video.muted = true;
+      }
+      try {
+        const savedMute = localStorage.getItem(MUTE_STORAGE_KEY);
+        if (savedMute === "true") {
+          setMuted(video, true);
+        } else if (savedMute === "false") {
+          setMuted(video, false);
+        } else {
+          setMuted(video, wasMuted);
         }
+      } catch (e) {
       }
     }
-    function setSliderFromPlayer(slider, label, video) {
-      const muted = isMuted(video);
-      const displayValue = getVolume(video);
-      slider.value = String(displayValue);
-      if (label) {
-        label.textContent = muted ? "Muted" : `${displayValue}%`;
+    function saveMute(muted) {
+      try {
+        localStorage.setItem(MUTE_STORAGE_KEY, muted ? "true" : "false");
+      } catch (e) {
       }
-      updateSliderBar(slider);
-      updateVolumeIndicator(document.getElementById(OVERLAY_ID), displayValue, muted);
+    }
+    function markUserVolumeIntent() {
+      userIntentUntil = Date.now() + USER_INTENT_GRACE_MS;
+    }
+    function setSliderFromPlayer(slider, label, video) {
+      try {
+        const muted = isMuted(video);
+        const displayValue = getVolume(video);
+        slider.value = String(displayValue);
+        if (label) {
+          label.textContent = muted ? "Muted" : `${displayValue}%`;
+        }
+        updateSliderBar(slider);
+        updateVolumeIndicator(document.getElementById(OVERLAY_ID), displayValue, muted);
+      } catch (e) {
+      }
     }
     function ensureOptionsStyles() {
       const style = createStyleElement(document, OPTIONS_STYLE_ID);
       if (!style) return;
+      style.type = "text/css";
       style.textContent = `
             #${OPTIONS_BUTTON_ID} {
                 opacity: 0.94;
@@ -1552,8 +1683,12 @@
             #${OPTIONS_POPUP_ID}[hidden] {
                 display: none;
             }
-            .tm-volume-options-open .ytp-tooltip {
-                display: none !important;
+            .tm-volume-options-controls-shell-hold,
+            [data-a-target="player-controls"].tm-volume-options-controls-hold,
+            [data-a-target="player-controls"].tm-volume-options-controls-hold #channel-player {
+                opacity: 1 !important;
+                pointer-events: auto !important;
+                visibility: visible !important;
             }
             .tm-volume-options-header {
                 align-items: center;
@@ -1859,12 +1994,6 @@
             }
         `;
     }
-    function closeYouTubeSettingsPopupIfOpen() {
-      const isOpen = Array.from(document.querySelectorAll(".ytp-settings-menu")).some((popup) => popup.style.display !== "none" && popup.offsetParent !== null);
-      if (isOpen) {
-        document.querySelector(".ytp-settings-button")?.click();
-      }
-    }
     function getVolumeModeLabel(mode = getVolumeSliderMode()) {
       if (mode === "off") return "Off";
       return mode === "replace-native" ? "Replace native" : "On";
@@ -1877,47 +2006,70 @@
       btn.setAttribute("aria-label", label);
       btn.setAttribute("title", label);
     }
-    function getRightControlsHost(player) {
-      if (!player) return null;
-      return player.querySelector(".ytp-right-controls-left") || player.querySelector(".ytp-right-controls");
-    }
     function injectVolumeOptionsButton() {
       ensureOptionsStyles();
-      const player = getPlayerContainer();
-      const host = getRightControlsHost(player);
-      const settingsBtn = host?.querySelector?.(".ytp-settings-button");
-      if (!host || !settingsBtn) return;
-      let btn = document.getElementById(OPTIONS_BUTTON_ID);
-      if (btn && btn.parentElement === host && btn.nextElementSibling === settingsBtn) {
+      const host = getTwitchRightControlsHost();
+      const settingsWrapper = getTwitchSettingsWrapper(host);
+      const settingsBtn = getTwitchSettingsButton(host);
+      if (!host || !settingsWrapper || !settingsBtn) return;
+      ensureNativeSettingsHoldIsolation();
+      let wrapper = document.getElementById(`${OPTIONS_BUTTON_ID}-wrapper`);
+      if (wrapper && wrapper.parentElement === host && wrapper.nextElementSibling === settingsWrapper) {
         updateOptionsButtonState();
         return;
       }
-      btn?.remove();
-      btn = document.createElement("button");
+      if (wrapper && wrapper.querySelector(`#${OPTIONS_BUTTON_ID}`)) {
+        host.insertBefore(wrapper, settingsWrapper);
+        updateOptionsButtonState();
+        ensureOptionsControlsHoldObserver();
+        return;
+      }
+      wrapper?.remove();
+      wrapper = document.createElement("div");
+      wrapper.id = `${OPTIONS_BUTTON_ID}-wrapper`;
+      wrapper.className = "InjectLayout-sc-1i43xsx-0 iDMNUO";
+      const inner = document.createElement("div");
+      inner.className = "Layout-sc-1xcs6mc-0 ScLayoutCssVars-sc-1pn65j5-0 jfyitl kDsKkP";
+      const btn = document.createElement("button");
       btn.id = OPTIONS_BUTTON_ID;
       btn.type = "button";
-      btn.className = "ytp-button";
-      btn.dataset.priority = "6";
+      btn.className = settingsBtn.className || "ScCoreButton-sc-ocjdkq-0 ScButtonIcon-sc-9yap0r-0";
       btn.setAttribute("aria-haspopup", "true");
       btn.setAttribute("aria-expanded", "false");
-      btn.appendChild(createOptionsButtonIconSvg(document));
+      const figure = document.createElement("div");
+      figure.className = "ButtonIconFigure-sc-1emm8lf-0 lnTwMD";
+      const svgWrap = document.createElement("div");
+      svgWrap.className = "ScSvgWrapper-sc-wkgzod-0 kccyMt tw-svg";
+      svgWrap.appendChild(createOptionsButtonIconSvg(document));
+      figure.appendChild(svgWrap);
+      btn.appendChild(figure);
       updateOptionsButtonState(btn);
       btn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         toggleVolumeOptionsPopup();
       });
-      host.insertBefore(btn, settingsBtn);
-      ensurePlayerControlsObserver();
+      inner.appendChild(btn);
+      wrapper.appendChild(inner);
+      host.insertBefore(wrapper, settingsWrapper);
+      ensureOptionsControlsHoldObserver();
+    }
+    function isOptionsButtonInPreferredSlot() {
+      const host = getTwitchRightControlsHost();
+      const settingsWrapper = getTwitchSettingsWrapper(host);
+      const wrapper = document.getElementById(`${OPTIONS_BUTTON_ID}-wrapper`);
+      return !!(host && settingsWrapper && wrapper && wrapper.parentElement === host && wrapper.nextElementSibling === settingsWrapper);
     }
     function removeVolumeOptionsButton() {
-      document.getElementById(OPTIONS_BUTTON_ID)?.remove();
+      document.getElementById(`${OPTIONS_BUTTON_ID}-wrapper`)?.remove();
       closeVolumeOptionsPopup();
     }
     let optionsPopupOutsideHandler = null;
     let optionsPopupKeyHandler = null;
     let optionsPopupRepositionHandler = null;
     let optionsPopupOpener = null;
+    let optionsPostCloseOutsideHandler = null;
+    let optionsPostCloseControlsTimer = 0;
     function getOptionsPopup() {
       return document.getElementById(OPTIONS_POPUP_ID);
     }
@@ -1994,10 +2146,7 @@
       if (!btn || !player || !popup) return;
       const playerRect = player.getBoundingClientRect();
       const btnRect = btn.getBoundingClientRect();
-      const progressBar = document.querySelector(".ytp-progress-bar-padding");
-      const barEl = progressBar ? progressBar.closest(".ytp-progress-bar") || progressBar.parentElement : null;
-      const barRect = barEl?.getBoundingClientRect?.();
-      const bottomPx = barRect ? playerRect.bottom - barRect.top + 8 : playerRect.bottom - btnRect.top + 8;
+      const bottomPx = playerRect.bottom - btnRect.top + 8;
       popup.style.right = `${Math.max(8, playerRect.right - btnRect.right)}px`;
       popup.style.bottom = `${Math.max(8, bottomPx)}px`;
       popup.style.left = "auto";
@@ -2012,44 +2161,114 @@
       if (resetScroll) body.scrollTop = 0;
       else body.scrollTop = Math.min(body.scrollTop, Math.max(0, body.scrollHeight - body.clientHeight));
     }
-    function keepYouTubeControlsVisible() {
-      const player = getPlayerContainer();
-      if (!player) return;
-      player.classList.remove("ytp-autohide", "ytp-hide-controls");
-      if (typeof player.showControls === "function") {
-        try {
-          player.showControls();
-        } catch (e) {
-        }
+    function keepTwitchControlsVisible() {
+      const controlsRoot = getTwitchPlayerControlsRoot();
+      const controlsShell = getTwitchPlayerControlsShell();
+      const controls = getTwitchPlayerControlsSection();
+      if (controlsShell) {
+        controlsShell.classList.add("tm-volume-options-controls-shell-hold");
+        controlsShell.setAttribute("aria-hidden", "false");
+        controlsShell.style.opacity = "1";
+        controlsShell.style.visibility = "visible";
+      }
+      if (controlsRoot) {
+        controlsRoot.classList.add("tm-volume-options-controls-hold");
+        controlsRoot.setAttribute("data-a-visible", "true");
+        controlsRoot.setAttribute("aria-hidden", "false");
+        controlsRoot.style.opacity = "1";
+        controlsRoot.style.visibility = "visible";
+      }
+      if (controls) {
+        controls.setAttribute("aria-hidden", "false");
+        controls.style.opacity = "1";
+        controls.style.visibility = "visible";
       }
     }
-    function hideYouTubeControls() {
-      const player = getPlayerContainer();
-      if (!player) return;
-      player.classList.add("ytp-autohide");
+    function hideTwitchControls() {
+      const controlsRoot = getTwitchPlayerControlsRoot();
+      const controlsShell = getTwitchPlayerControlsShell();
+      const controls = getTwitchPlayerControlsSection();
+      if (controlsShell) {
+        controlsShell.setAttribute("aria-hidden", "true");
+      }
+      if (controlsRoot) {
+        controlsRoot.setAttribute("data-a-visible", "false");
+        controlsRoot.setAttribute("aria-hidden", "true");
+      }
+      if (controls) {
+        controls.setAttribute("aria-hidden", "true");
+      }
     }
-    function isYouTubeVideoSurfaceClick(event) {
-      const target = event.target;
+    function isPointerOverTwitchPlayerArea() {
       const player = getPlayerContainer();
-      if (!target || !player?.contains?.(target)) return false;
-      return !target.closest?.(
-        '.ytp-chrome-bottom, .ytp-chrome-top, button, a, input, select, textarea, [role="button"], [role="slider"], [role="menuitem"]'
-      );
+      const controlsRoot = getTwitchPlayerControlsRoot();
+      return !!(player?.matches?.(":hover") || controlsRoot?.matches?.(":hover"));
+    }
+    function isClickOutsideTwitchPlayerArea(event) {
+      const target = event.target;
+      if (getPlayerContainer()?.contains?.(target)) return false;
+      if (getTwitchPlayerControlsRoot()?.contains?.(target)) return false;
+      return true;
+    }
+    function releaseTwitchControlsVisibility() {
+      const controlsRoot = getTwitchPlayerControlsRoot();
+      const controlsShell = getTwitchPlayerControlsShell();
+      const controls = getTwitchPlayerControlsSection();
+      controlsShell?.classList?.remove("tm-volume-options-controls-shell-hold");
+      [controlsShell, controlsRoot, controls].forEach((el) => {
+        el?.classList?.remove("tm-volume-options-controls-hold");
+        el?.style?.removeProperty("opacity");
+        el?.style?.removeProperty("visibility");
+        el?.style?.removeProperty("pointer-events");
+      });
     }
     function startOptionsControlsHold() {
-      keepYouTubeControlsVisible();
-      ensurePlayerControlsObserver();
+      keepTwitchControlsVisible();
+      ensureOptionsControlsHoldObserver();
+    }
+    function stopOptionsControlsHold() {
+      releaseTwitchControlsVisibility();
+    }
+    function clearPostCloseControlsHold() {
+      if (optionsPostCloseControlsTimer) {
+        clearTimeout(optionsPostCloseControlsTimer);
+        optionsPostCloseControlsTimer = 0;
+      }
+      if (optionsPostCloseOutsideHandler) {
+        document.removeEventListener("click", optionsPostCloseOutsideHandler, true);
+        optionsPostCloseOutsideHandler = null;
+      }
+    }
+    function endPostCloseControlsHold(hideControls) {
+      clearPostCloseControlsHold();
+      if (hideControls && !isNativeSettingsMenuOpen()) {
+        hideTwitchControls();
+      }
+      releaseTwitchControlsVisibility();
+    }
+    function startPostCloseControlsHold() {
+      if (isNativeSettingsMenuOpen()) return;
+      clearPostCloseControlsHold();
+      keepTwitchControlsVisible();
+      optionsPostCloseControlsTimer = window.setTimeout(() => {
+        endPostCloseControlsHold(!isPointerOverTwitchPlayerArea());
+      }, TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS);
+      optionsPostCloseOutsideHandler = (event) => {
+        if (isClickOnNativeSettingsUi(event)) return;
+        if (!isClickOutsideTwitchPlayerArea(event)) return;
+        endPostCloseControlsHold(true);
+      };
+      document.addEventListener("click", optionsPostCloseOutsideHandler, true);
     }
     function openVolumeOptionsPopup() {
+      clearPostCloseControlsHold();
       ensureOptionsStyles();
       const popup = ensureOptionsPopup();
       if (!popup) return;
-      closeYouTubeSettingsPopupIfOpen();
       optionsPopupOpener = document.activeElement;
       refreshOptionsPopupState();
       popup.removeAttribute("hidden");
       positionOptionsPopup(popup, true);
-      getPlayerContainer()?.classList?.add("tm-volume-options-open");
       startOptionsControlsHold();
       document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute("aria-expanded", "true");
       const initialFocus = popup.querySelector('[id^="tm-volume-options-mode-"][role="radio"][aria-checked="true"]:not(:disabled)') || getOptionsPopupFocusable(popup)[0];
@@ -2058,14 +2277,9 @@
         optionsPopupOutsideHandler = (event) => {
           const btn = document.getElementById(OPTIONS_BUTTON_ID);
           if (popup.contains(event.target) || btn?.contains(event.target)) return;
-          const clickedOutsidePlayer = !getPlayerContainer()?.contains?.(event.target);
-          const clickedVideoSurface = isYouTubeVideoSurfaceClick(event);
+          const clickedOutsideControls = !getTwitchPlayerControlsRoot()?.contains?.(event.target);
           closeVolumeOptionsPopup();
-          if (clickedOutsidePlayer) hideYouTubeControls();
-          if (clickedVideoSurface) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
+          if (clickedOutsideControls) startPostCloseControlsHold();
         };
         document.addEventListener("click", optionsPopupOutsideHandler, true);
       }
@@ -2105,7 +2319,7 @@
         if (popup.contains(document.activeElement)) document.activeElement.blur();
         popup.setAttribute("hidden", "");
       }
-      getPlayerContainer()?.classList?.remove("tm-volume-options-open");
+      stopOptionsControlsHold();
       document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute("aria-expanded", "false");
       if (optionsPopupOutsideHandler) {
         document.removeEventListener("click", optionsPopupOutsideHandler, true);
@@ -2128,43 +2342,67 @@
       optionsPopupOpener = null;
     }
     function setupNativeSettingsCloseHandler() {
-      if (window.__tmYtVolumeNativeSettingsCloseBound) return;
-      window.__tmYtVolumeNativeSettingsCloseBound = true;
+      if (window.__tmTwitchVolumeNativeSettingsCloseBound) return;
+      window.__tmTwitchVolumeNativeSettingsCloseBound = true;
       document.addEventListener("click", (event) => {
-        if (event.target?.closest?.(".ytp-settings-button")) {
+        if (event.target?.closest?.(TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR)) {
           closeVolumeOptionsPopup();
         }
       }, false);
+      ensureNativeSettingsHoldIsolation();
     }
-    function disconnectPlayerControlsObserver() {
-      playerControlsObserver?.disconnect();
-      playerControlsObserver = null;
-      playerControlsObserverTarget = null;
+    function disconnectOptionsControlsHoldObserver() {
+      optionsControlsHoldObserver?.disconnect();
+      optionsControlsHoldObserver = null;
+      optionsControlsHoldTargetKey = null;
     }
-    function onPlayerControlsMutation() {
-      if (isOptionsPopupOpen() && areYouTubeControlsHidden()) {
-        keepYouTubeControlsVisible();
-      }
-      const overlay = document.getElementById(OVERLAY_ID);
-      if (overlay?.dataset?.tmKeepExpanded === "true" && areYouTubeControlsHidden()) {
-        clearExpandedHold(overlay);
-        setOverlayExpanded(overlay, false);
-      }
+    function disconnectNativeSettingsObserver() {
+      nativeSettingsObserver?.disconnect();
+      nativeSettingsObserver = null;
+      nativeSettingsObserverTarget = null;
     }
-    function ensurePlayerControlsObserver() {
-      const player = getPlayerContainer();
-      if (!player) return;
-      if (playerControlsObserverTarget === player) return;
-      disconnectPlayerControlsObserver();
-      playerControlsObserverTarget = player;
-      playerControlsObserver = new MutationObserver(onPlayerControlsMutation);
-      playerControlsObserver.observe(player, { attributes: true, attributeFilter: ["class"] });
+    function ensureNativeSettingsHoldIsolation() {
+      const settingsBtn = getTwitchSettingsButton();
+      if (!settingsBtn) return;
+      if (nativeSettingsObserverTarget === settingsBtn) return;
+      disconnectNativeSettingsObserver();
+      nativeSettingsObserverTarget = settingsBtn;
+      nativeSettingsObserver = new MutationObserver(() => {
+        if (isNativeSettingsMenuOpen()) {
+          endPostCloseControlsHold(false);
+        }
+      });
+      nativeSettingsObserver.observe(settingsBtn, { attributes: true, attributeFilter: ["aria-expanded"] });
     }
     function toggleVolumeOptionsPopup() {
       if (isOptionsPopupOpen()) {
         closeVolumeOptionsPopup();
       } else {
         openVolumeOptionsPopup();
+      }
+    }
+    function ensureOptionsControlsHoldObserver() {
+      const controlsRoot = getTwitchPlayerControlsRoot();
+      const controlsShell = getTwitchPlayerControlsShell();
+      const controls = getTwitchPlayerControlsSection();
+      if (!controlsRoot && !controlsShell && !controls) return;
+      const targetKey = [controlsRoot, controlsShell, controls].map((el) => el?.id || el?.className || "").join("|");
+      if (optionsControlsHoldTargetKey === targetKey) return;
+      disconnectOptionsControlsHoldObserver();
+      optionsControlsHoldTargetKey = targetKey;
+      optionsControlsHoldObserver = new MutationObserver(() => {
+        if (areTwitchControlsHidden() && isOptionsPopupOpen()) {
+          keepTwitchControlsVisible();
+        }
+      });
+      if (controlsShell) {
+        optionsControlsHoldObserver.observe(controlsShell, { attributes: true, attributeFilter: ["aria-hidden", "style", "class"] });
+      }
+      if (controlsRoot) {
+        optionsControlsHoldObserver.observe(controlsRoot, { attributes: true, attributeFilter: ["data-a-visible", "aria-hidden", "style", "class"] });
+      }
+      if (controls) {
+        optionsControlsHoldObserver.observe(controls, { attributes: true, attributeFilter: ["aria-hidden", "style", "class"] });
       }
     }
     function createOverlay(video, player, controlsHost) {
@@ -2187,7 +2425,7 @@
         maxWidth: "none",
         height: "40px",
         minHeight: "40px",
-        padding: "0",
+        padding: "0 12px 0 0",
         background: "transparent",
         backdropFilter: "none",
         WebkitBackdropFilter: "none",
@@ -2223,23 +2461,17 @@
       overlay.addEventListener("mouseleave", () => {
         overlay.dataset.tmHovering = "false";
         overlay.dataset.tmDragging = "false";
-        updateOverlayOpacity(overlay);
         collapseOverlayIfIdle(overlay, true);
+        updateOverlayOpacity(overlay);
       });
       overlay.addEventListener("focusin", () => {
         setOverlayExpanded(overlay, true);
         updateOverlayOpacity(overlay);
       });
       overlay.addEventListener("focusout", () => {
-        updateOverlayOpacity(overlay);
         collapseOverlayIfIdle(overlay);
+        updateOverlayOpacity(overlay);
       });
-      const collapseHeldSliderOnVideoClick = (event) => {
-        if (overlay.dataset.tmKeepExpanded !== "true" || !isYouTubeVideoSurfaceClick(event)) return;
-        clearExpandedHold(overlay);
-        setOverlayExpanded(overlay, false);
-      };
-      document.addEventListener("click", collapseHeldSliderOnVideoClick, true);
       const iconCell = document.createElement("button");
       iconCell.type = "button";
       iconCell.className = "tm-volume-icon-cell";
@@ -2250,7 +2482,9 @@
       iconCell.addEventListener("click", (e) => {
         e.stopPropagation();
         e.preventDefault();
+        markUserVolumeIntent();
         toggleMute(video);
+        saveMute(isMuted(video));
         setSliderFromPlayer(slider, label, video);
         markVolumeChangedWhileExpanded(overlay);
       });
@@ -2258,15 +2492,38 @@
       panelBg.className = "tm-volume-panel-bg";
       const topRow = document.createElement("div");
       topRow.className = "tm-volume-controls tm-volume-top-row";
+      topRow.style.display = "flex";
+      topRow.style.alignItems = "center";
+      topRow.style.gap = "0";
+      topRow.style.flex = "0 0 auto";
+      topRow.style.position = "relative";
+      topRow.style.width = "106px";
+      topRow.style.height = "40px";
+      topRow.style.boxSizing = "border-box";
       const label = document.createElement("div");
       label.id = VALUE_LABEL_ID;
+      Object.assign(label.style, {
+        fontSize: "18px",
+        fontWeight: "500",
+        color: "rgba(255, 255, 255, 0.95)",
+        textAlign: "center",
+        userSelect: "none",
+        letterSpacing: "0",
+        position: "absolute",
+        left: "46px",
+        top: "50%",
+        width: "54px",
+        transform: "translateY(-50%)",
+        whiteSpace: "nowrap"
+      });
       label.textContent = "100%";
       topRow.appendChild(label);
       const sliderWrap = document.createElement("div");
       sliderWrap.className = "tm-volume-controls tm-volume-slider-row";
       sliderWrap.style.position = "relative";
-      sliderWrap.style.width = "auto";
-      sliderWrap.style.flex = "1 1 auto";
+      sliderWrap.style.width = "calc(var(--tm-expanded-width, clamp(320px, 34vw, 460px)) - 118px)";
+      sliderWrap.style.flex = "0 0 calc(var(--tm-expanded-width, clamp(320px, 34vw, 460px)) - 118px)";
+      sliderWrap.style.minWidth = "0";
       sliderWrap.style.height = "40px";
       sliderWrap.style.display = "flex";
       sliderWrap.style.alignItems = "center";
@@ -2301,6 +2558,7 @@
       let clickSnapHandled = false;
       const applySliderValue = (value) => {
         setVolume(video, value);
+        saveMute(false);
         label.textContent = `${value}%`;
         updateSliderBar(slider);
         updateVolumeIndicator(overlay, value, isMuted(video));
@@ -2333,8 +2591,8 @@
           snapDirectClickIfNeeded();
         }
         overlay.dataset.tmDragging = "false";
-        updateOverlayOpacity(overlay);
         collapseOverlayIfIdle(overlay, !overlay.matches(":hover"));
+        updateOverlayOpacity(overlay);
       };
       slider.addEventListener("pointerdown", (event) => {
         pointerStartX = event.clientX;
@@ -2358,19 +2616,68 @@
       window.addEventListener("pointercancel", finishSliderInteraction, true);
       window.addEventListener("blur", finishSliderInteraction);
       slider.addEventListener("input", () => {
+        markUserVolumeIntent();
         applySliderValue(readPressAwareSliderValue());
       });
       slider.addEventListener("change", () => {
+        markUserVolumeIntent();
         applySliderValue(readSnappedSliderValue(slider));
         cancelScheduledSaveVolume();
         saveVolume(Number(slider.value) || 0);
+        markVolumeChangedWhileExpanded(overlay);
       });
       const onVideoVolumeChange = () => {
-        if (!document.getElementById(OVERLAY_ID)) return;
-        setSliderFromPlayer(slider, label, video);
-        if (!isMuted(video)) scheduleSaveVolume(getVolume(video));
+        if (Date.now() <= startupLockUntil) {
+          if (Date.now() <= userIntentUntil || startupCorrectionApplied) {
+            return;
+          }
+          const savedValue = getSavedVolume();
+          if (savedValue !== null && Math.abs(getVolume(video) - savedValue) > 1) {
+            setVolume(video, savedValue);
+          }
+          startupCorrectionApplied = true;
+          return;
+        }
+        try {
+          setSliderFromPlayer(slider, label, video);
+          if (!isMuted(video)) {
+            scheduleSaveVolume(getVolume(video));
+          }
+        } catch (e) {
+        }
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
+      const onLayoutChange = () => {
+        if (!overlay.isConnected) return;
+        if (areTwitchControlsHidden()) {
+          if (isSliderOnVideo()) {
+            updateVideoOverlayPosition(overlay, getPlayerContainer(video));
+          }
+          if (isOverlayInteractionFocused(overlay)) {
+            updateOverlayOpacity(overlay);
+            return;
+          }
+          if (!isAlwaysExpandedEnabled()) {
+            overlay.dataset.tmDragging = "false";
+            clearExpandedHold(overlay);
+            setOverlayExpanded(overlay, false, true);
+          }
+          updateOverlayOpacity(overlay);
+          return;
+        }
+        if (isOverlayInteractionFocused(overlay)) return;
+        placeOverlay(overlay, getPlayerContainer(video), getTwitchControlsHost());
+      };
+      window.addEventListener("resize", onLayoutChange);
+      const controlsObserver = new MutationObserver(onLayoutChange);
+      const controlsRootForLayout = getTwitchPlayerControlsRoot();
+      const controlsForLayout = getTwitchPlayerControlsSection();
+      if (controlsRootForLayout) {
+        controlsObserver.observe(controlsRootForLayout, { attributes: true, attributeFilter: ["data-a-visible", "class", "aria-hidden", "style"] });
+      }
+      if (controlsForLayout) {
+        controlsObserver.observe(controlsForLayout, { attributes: true, attributeFilter: ["class", "aria-hidden", "style"] });
+      }
       sliderWrap.appendChild(sliderTrack);
       sliderWrap.appendChild(slider);
       sliderWrap.appendChild(tickOverlay);
@@ -2381,14 +2688,6 @@
       placeOverlay(overlay, player, controlsHost);
       setSliderFromPlayer(slider, label, video);
       setOverlayExpanded(overlay, false, true);
-      updateVideoOverlayPosition(overlay, player);
-      const onLayoutChange = () => {
-        if (!overlay.isConnected || isOverlayInteractionFocused(overlay)) return;
-        placeOverlay(overlay, player, controlsHost);
-      };
-      window.addEventListener("resize", onLayoutChange);
-      const controlsObserver = new MutationObserver(onLayoutChange);
-      controlsObserver.observe(player, { attributes: true, attributeFilter: ["class"] });
       const detachmentObserver = new MutationObserver(() => {
         if (overlayLifecycle.owns(overlay) && !overlay.isConnected) {
           disposeActiveOverlay();
@@ -2403,7 +2702,6 @@
         window.removeEventListener("blur", finishSliderInteraction);
         window.removeEventListener("resize", onLayoutChange);
         window.removeEventListener("pointermove", markPointerIntent, true);
-        document.removeEventListener("click", collapseHeldSliderOnVideoClick, true);
         controlsObserver.disconnect();
         detachmentObserver.disconnect();
         clearExpandedHold(overlay);
@@ -2423,55 +2721,68 @@
     function attachSliderIfPossible() {
       const video = getVideoElement();
       const player = getPlayerContainer(video);
-      const controlsHost = getYouTubeControlsHost(player);
-      if (!player) {
-        return false;
-      }
+      const controlsHost = getTwitchControlsHost();
       if (!isOverlayEnabled()) {
         removeOverlay();
-        applyNativeVolumeVisibility();
         injectVolumeOptionsButton();
         return !!document.getElementById(OPTIONS_BUTTON_ID);
       }
-      if (!video || !player || !controlsHost && !isSliderOnVideo()) {
+      if (!video || !player || !controlsHost) {
         injectVolumeOptionsButton();
         return false;
       }
-      const existingOverlay = document.getElementById(OVERLAY_ID);
-      if (existingOverlay) {
-        placeOverlay(existingOverlay, player, controlsHost);
-      } else {
+      const overlay = document.getElementById(OVERLAY_ID);
+      if (!overlay) {
+        startupLockUntil = Math.max(startupLockUntil, Date.now() + 2e3);
         restoreSavedVolume(video);
         createOverlay(video, player, controlsHost);
+        setTimeout(() => {
+          restoreSavedVolume(video);
+          const el = document.getElementById(OVERLAY_ID);
+          if (el) updateOverlayOpacity(el);
+        }, 1500);
+      } else if (!isOverlayInteractionFocused(overlay)) {
+        placeOverlay(overlay, player, controlsHost);
+      } else {
+        updateOverlayOpacity(overlay);
       }
       applyNativeVolumeVisibility();
       injectVolumeOptionsButton();
-      ensurePlayerControlsObserver();
+      ensureOptionsControlsHoldObserver();
+      ensureNativeSettingsHoldIsolation();
       ensureAttachObserver();
       return true;
     }
     function getAttachObserverRoot() {
-      if (document.location.pathname !== "/watch") return null;
-      return document.getElementById("movie_player") || document.querySelector(".html5-video-player") || document.getElementById("primary");
+      return getPlayerContainer() || getTwitchPlayerControlsRoot();
     }
     let lastAttach = 0;
     const ATTACH_COOLDOWN_MS = 1e3;
     let attachQueued = false;
     function handleAttachObserverMutations(mutations) {
-      if (document.location.pathname !== "/watch") return;
       const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
       if (!hasAddedNodes || attachQueued) return;
+      applyNativeVolumeVisibility();
       const overlay = document.getElementById(OVERLAY_ID);
       const button = document.getElementById(OPTIONS_BUTTON_ID);
       const overlayMissing = isOverlayEnabled() && (!overlay || !overlay.isConnected);
       const buttonMissing = !button || !button.isConnected;
-      if (!overlayMissing && !buttonMissing) return;
+      const buttonMisplaced = !buttonMissing && !isOptionsButtonInPreferredSlot();
+      if (!overlayMissing && !buttonMissing && !buttonMisplaced) return;
       attachQueued = true;
       requestAnimationFrame(() => {
         attachQueued = false;
+        if (!isOverlayEnabled()) {
+          injectVolumeOptionsButton();
+          return;
+        }
+        const currentOverlay = document.getElementById(OVERLAY_ID);
+        if (currentOverlay && currentOverlay.isConnected) {
+          injectVolumeOptionsButton();
+          return;
+        }
         const now = Date.now();
         if (now - lastAttach < ATTACH_COOLDOWN_MS) return;
-        if (document.location.pathname !== "/watch") return;
         if (attachSliderIfPossible()) {
           lastAttach = now;
         }
@@ -2515,27 +2826,61 @@
       };
       attemptAttach(0);
     }
-    function setupYtNavigationHandler() {
-      if (window.__tmYtVolumeNavBound) return;
-      window.__tmYtVolumeNavBound = true;
+    function setupNavigationHandler() {
+      if (window.__tmTwitchVolumeNavPatched) return;
+      window.__tmTwitchVolumeNavPatched = true;
+      const getPathFromUrlArg = (urlArg) => {
+        try {
+          if (urlArg === void 0 || urlArg === null || urlArg === "") {
+            return window.location.pathname;
+          }
+          return new URL(String(urlArg), window.location.href).pathname;
+        } catch (e) {
+          return window.location.pathname;
+        }
+      };
       const runReattach = () => {
         if (navReattachTimer) {
           clearTimeout(navReattachTimer);
           navReattachTimer = 0;
         }
+        if (navLateRestoreTimer) {
+          clearTimeout(navLateRestoreTimer);
+          navLateRestoreTimer = 0;
+        }
+        cachedApi = null;
+        cachedApiFromElement = null;
         resetVideoElement();
-        cachedYtPlayer = null;
         closeVolumeOptionsPopup();
-        disconnectPlayerControlsObserver();
+        disconnectOptionsControlsHoldObserver();
+        disconnectNativeSettingsObserver();
         disconnectAttachObserver();
+        startupLockUntil = Date.now() + 3500;
+        startupCorrectionApplied = false;
         navReattachTimer = window.setTimeout(() => {
-          navReattachTimer = 0;
           removeOverlay();
           removeVolumeOptionsButton();
           attachSliderIfPossible();
+          navReattachTimer = 0;
         }, NAV_REATTACH_DELAY_MS);
+        navLateRestoreTimer = window.setTimeout(() => {
+          navLateRestoreTimer = 0;
+          if (Date.now() <= userIntentUntil) return;
+          const vid = getVideoElement();
+          if (!vid) return;
+          const saved = getSavedVolume();
+          if (saved !== null && Math.abs(getVolume(vid) - saved) > 1) {
+            restoreSavedVolume(vid);
+            const sliderEl = document.getElementById(SLIDER_ID);
+            const labelEl = document.getElementById(VALUE_LABEL_ID);
+            if (sliderEl) setSliderFromPlayer(sliderEl, labelEl, vid);
+          }
+        }, NAV_LATE_RESTORE_DELAY_MS);
       };
-      const scheduleReattach = () => {
+      const scheduleReattachIfPathChanged = (nextPath) => {
+        const targetPath = nextPath || window.location.pathname;
+        if (targetPath === lastKnownPath) return;
+        lastKnownPath = targetPath;
         if (navDebounceTimer) {
           clearTimeout(navDebounceTimer);
           navDebounceTimer = 0;
@@ -2545,13 +2890,26 @@
           runReattach();
         }, NAV_DEBOUNCE_MS);
       };
-      window.addEventListener("yt-navigate-finish", scheduleReattach, true);
-      window.addEventListener("yt-page-data-updated", scheduleReattach, true);
+      const originalPushState = history.pushState;
+      history.pushState = function() {
+        const result = originalPushState.apply(this, arguments);
+        scheduleReattachIfPathChanged(getPathFromUrlArg(arguments[2]));
+        return result;
+      };
+      const originalReplaceState = history.replaceState;
+      history.replaceState = function() {
+        const result = originalReplaceState.apply(this, arguments);
+        scheduleReattachIfPathChanged(getPathFromUrlArg(arguments[2]));
+        return result;
+      };
+      window.addEventListener("popstate", () => {
+        scheduleReattachIfPathChanged(window.location.pathname);
+      }, true);
     }
     function init() {
       setupInitialAttempts();
       setupAttachObserver();
-      setupYtNavigationHandler();
+      setupNavigationHandler();
       setupNativeSettingsCloseHandler();
     }
     if (document.readyState === "complete" || document.readyState === "interactive") {
@@ -2561,6 +2919,6 @@
     }
   }
 
-  // src/entries/youtube.user.js
-  startYouTubeVolumeSlider();
+  // src/entries/twitch.user.js
+  startTwitchVolumeSlider();
 })();

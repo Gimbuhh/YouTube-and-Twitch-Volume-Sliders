@@ -88,9 +88,11 @@
       if (!expanded && isAlwaysExpandedEnabled()) {
         expanded = true;
       }
+      const stateChanged = expanded !== overlay.classList.contains("tm-expanded");
       if (!force && (expanded && overlay.classList.contains("tm-expanded") || !expanded && overlay.classList.contains("tm-collapsed"))) {
         return;
       }
+      if (stateChanged) beginOverlayWidthAnimation(overlay);
       const onVideo = isSliderOnVideo();
       const baseStyle = onVideo ? {
         position: "absolute",
@@ -99,7 +101,7 @@
         margin: "0",
         alignSelf: "auto",
         flex: "0 0 auto",
-        transition: "width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease"
+        transition: "opacity 0.18s ease, width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease"
       } : {
         position: "relative",
         left: "auto",
@@ -129,7 +131,7 @@
         overlay.classList.remove("tm-collapsed");
         overlay.classList.add("tm-expanded");
         Object.assign(overlay.style, pillStyle, {
-          width: "clamp(320px, 34vw, 460px)",
+          width: "var(--tm-expanded-width, clamp(320px, 34vw, 460px))",
           padding: "0 12px 0 0"
         });
         updateOverlaySize(overlay);
@@ -144,6 +146,26 @@
       });
       updateOverlaySize(overlay);
       updateOverlayOpacity(overlay);
+    }
+    function beginOverlayWidthAnimation(overlay) {
+      if (overlay._finishWidthAnimation) {
+        overlay._finishWidthAnimation();
+      }
+      overlay.classList.add("tm-width-animating");
+      const finish = (event) => {
+        if (event && event.target !== overlay) return;
+        if (event && event.propertyName !== "width") return;
+        overlay.classList.remove("tm-width-animating");
+        overlay.removeEventListener("transitionend", finish);
+        if (overlay._widthAnimationTimer) {
+          window2.clearTimeout(overlay._widthAnimationTimer);
+          overlay._widthAnimationTimer = 0;
+        }
+        overlay._finishWidthAnimation = null;
+      };
+      overlay._finishWidthAnimation = finish;
+      overlay.addEventListener("transitionend", finish);
+      overlay._widthAnimationTimer = window2.setTimeout(finish, 280);
     }
     function shouldKeepOverlayExpanded(overlay) {
       return isAlwaysExpandedEnabled() || overlay.matches(":hover") || overlay.contains(document2.activeElement) || overlay.dataset.tmDragging === "true";
@@ -1110,6 +1132,7 @@
       if (!style) return;
       const css = `
 #${OVERLAY_ID} {
+  --tm-expanded-width: clamp(320px, 34vw, 460px);
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
@@ -1145,8 +1168,13 @@
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  opacity: 1;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.08s ease;
   margin-top: calc((var(--tm-active-track-h, 9px) - var(--tm-thumb-size, 22px)) / 2);
+}
+
+#${OVERLAY_ID}.tm-width-animating input[type=range]::-webkit-slider-thumb {
+  opacity: 0;
 }
 
 #${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:hover {
@@ -1167,7 +1195,12 @@
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  opacity: 1;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.08s ease;
+}
+
+#${OVERLAY_ID}.tm-width-animating input[type=range]::-moz-range-thumb {
+  opacity: 0;
 }
 
 #${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {
@@ -1327,9 +1360,10 @@
   --tm-active-track-h: 11px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-active-track-h, 9px) / 2);
-  flex: 1 1 auto;
-  min-width: 180px;
+  flex: 0 0 calc(var(--tm-expanded-width) - 118px);
   height: 40px;
+  min-width: 0;
+  width: calc(var(--tm-expanded-width) - 118px);
 }
 
 #${OVERLAY_ID} .tm-slider-track {
@@ -1356,12 +1390,11 @@
   background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
   background-size: 100% 100%;
   opacity: 0;
-  transition: none;
+  transition: opacity 0.2s ease;
   z-index: 1;
 }
 #${OVERLAY_ID}.tm-expanded .tm-slider-ticks {
   opacity: 1;
-  transition: opacity 0.12s ease 0.08s;
 }
 
         `;
@@ -2265,8 +2298,9 @@
       const sliderWrap = document.createElement("div");
       sliderWrap.className = "tm-volume-controls tm-volume-slider-row";
       sliderWrap.style.position = "relative";
-      sliderWrap.style.width = "auto";
-      sliderWrap.style.flex = "1 1 auto";
+      sliderWrap.style.width = "calc(var(--tm-expanded-width, clamp(320px, 34vw, 460px)) - 118px)";
+      sliderWrap.style.flex = "0 0 calc(var(--tm-expanded-width, clamp(320px, 34vw, 460px)) - 118px)";
+      sliderWrap.style.minWidth = "0";
       sliderWrap.style.height = "40px";
       sliderWrap.style.display = "flex";
       sliderWrap.style.alignItems = "center";

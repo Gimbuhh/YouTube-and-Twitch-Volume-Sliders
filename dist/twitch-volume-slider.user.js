@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Twitch Volume Slider 2.4.7
+// @name         Twitch Volume Slider 2.5
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.4.7
+// @version      2.5
 // @description  Compact in-bar volume indicator that expands into a wide Twitch volume slider.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
@@ -23,6 +23,7 @@
       isAlwaysExpandedEnabled,
       isSliderOnVideo,
       updateOverlayOpacity,
+      updateOverlaySize,
       finishExpandedHoldIfDue,
       accentLight: VOLUME_ACCENT_LIGHT,
       accentDark: VOLUME_ACCENT_DARK,
@@ -98,7 +99,7 @@
         margin: "0",
         alignSelf: "auto",
         flex: "0 0 auto",
-        transition: "opacity 0.18s ease, width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease"
+        transition: "width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease"
       } : {
         position: "relative",
         left: "auto",
@@ -121,7 +122,8 @@
         justifyContent: "flex-start",
         gap: "0",
         background: "transparent",
-        transform: onVideo ? "translateX(-50%)" : "translateY(0)"
+        transform: onVideo ? "translateX(-50%) scale(var(--tm-overlay-scale, 1))" : "translateY(0)",
+        transformOrigin: onVideo ? "center bottom" : "center center"
       };
       if (expanded) {
         overlay.classList.remove("tm-collapsed");
@@ -130,6 +132,7 @@
           width: "clamp(320px, 34vw, 460px)",
           padding: "0 12px 0 0"
         });
+        updateOverlaySize(overlay);
         updateOverlayOpacity(overlay);
         return;
       }
@@ -139,6 +142,7 @@
         width: "40px",
         padding: "0 12px 0 0"
       });
+      updateOverlaySize(overlay);
       updateOverlayOpacity(overlay);
     }
     function shouldKeepOverlayExpanded(overlay) {
@@ -269,7 +273,10 @@
       setSliderLocation,
       getSavedOverlayOpacityPercent,
       setSavedOverlayOpacityPercent,
-      resetSavedOverlayOpacityPercent
+      resetSavedOverlayOpacityPercent,
+      getSavedOverlaySizePercent,
+      setSavedOverlaySizePercent,
+      resetSavedOverlaySizePercent
     } = dependencies;
     function getEnabledRadios(group) {
       return Array.from(group.querySelectorAll('[role="radio"]:not(:disabled)'));
@@ -511,6 +518,68 @@
       section.appendChild(createOpacityRow("Active", true));
       return section;
     }
+    function createSizeSection() {
+      const section = document2.createElement("div");
+      section.className = "tm-volume-options-section";
+      section.id = "tm-volume-options-size-section";
+      section.appendChild(createOptionsSectionLabel("On-video size"));
+      const row = document2.createElement("div");
+      row.className = "tm-volume-options-opacity-row";
+      const labelGroup = document2.createElement("div");
+      labelGroup.className = "tm-volume-options-opacity-label-group";
+      const name = document2.createElement("span");
+      name.className = "tm-volume-options-opacity-name";
+      name.textContent = "Size";
+      const valueEl = document2.createElement("span");
+      valueEl.className = "tm-volume-options-opacity-value";
+      const resetBtn = document2.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "tm-volume-options-opacity-reset";
+      resetBtn.textContent = "Reset";
+      resetBtn.setAttribute("aria-label", "Reset on-video size");
+      const slider = document2.createElement("input");
+      slider.type = "range";
+      slider.min = "100";
+      slider.max = "200";
+      slider.step = "5";
+      slider.className = "tm-volume-options-opacity-slider";
+      slider.setAttribute("aria-label", "On-video size");
+      const setFill = (pct) => {
+        slider.style.setProperty("--tm-opacity-fill", `${pct - 100}%`);
+      };
+      const refresh = () => {
+        const pct = getSavedOverlaySizePercent();
+        slider.value = String(pct);
+        setFill(pct);
+        valueEl.textContent = `${Math.round(pct)}%`;
+      };
+      refresh();
+      ["click", "mousedown", "pointerdown", "keydown"].forEach((type) => {
+        slider.addEventListener(type, (event) => event.stopPropagation());
+      });
+      slider.addEventListener("input", () => {
+        const pct = Number(slider.value) || 100;
+        setFill(pct);
+        valueEl.textContent = `${Math.round(pct)}%`;
+        setSavedOverlaySizePercent(pct);
+      });
+      resetBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        resetSavedOverlaySizePercent();
+        refresh();
+      });
+      labelGroup.appendChild(name);
+      labelGroup.appendChild(valueEl);
+      const controls = document2.createElement("div");
+      controls.className = "tm-volume-options-opacity-controls";
+      controls.appendChild(slider);
+      controls.appendChild(resetBtn);
+      row.appendChild(labelGroup);
+      row.appendChild(controls);
+      section.appendChild(row);
+      return section;
+    }
     function buildOptionsPopup() {
       const popup = document2.createElement("div");
       popup.id = OPTIONS_POPUP_ID;
@@ -529,6 +598,7 @@
       body.appendChild(createPlacementSection());
       body.appendChild(createBehaviorSection());
       body.appendChild(createOpacitySection());
+      body.appendChild(createSizeSection());
       popup.appendChild(header);
       popup.appendChild(body);
       popup.addEventListener("click", (event) => event.stopPropagation());
@@ -562,6 +632,12 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
     return Math.min(100, Math.max(0, number));
+  }
+  function normalizeOverlaySizePercent(value, fallback) {
+    if (value === null || value === void 0 || value === "") return fallback;
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(200, Math.max(100, number));
   }
   function createVolumeSettings({
     document: document2,
@@ -642,6 +718,7 @@
     function updateOverlayOpacity(overlay) {
       if (!overlay) return;
       overlay.style.opacity = isSliderOnVideo() ? String(getSavedOverlayOpacityPercent(isOverlayInteractionFocused(overlay)) / 100) : "1";
+      updateOverlaySize(overlay);
     }
     function setSavedOverlayOpacityPercent(focused, value) {
       const fallback = focused ? defaults.activeOpacity : defaults.idleOpacity;
@@ -651,6 +728,25 @@
     function resetSavedOverlayOpacityPercent(focused) {
       remove(focused ? keys.activeOpacity : keys.idleOpacity);
       updateOverlayOpacity(document2.getElementById(overlayId));
+    }
+    function getSavedOverlaySizePercent() {
+      if (userSettings.overlaySize !== "saved") {
+        return normalizeOverlaySizePercent(userSettings.overlaySize, defaults.overlaySize);
+      }
+      return normalizeOverlaySizePercent(read(keys.overlaySize), defaults.overlaySize);
+    }
+    function updateOverlaySize(overlay) {
+      if (!overlay) return;
+      const scale = isSliderOnVideo() ? getSavedOverlaySizePercent() / 100 : 1;
+      overlay.style.setProperty("--tm-overlay-scale", String(scale));
+    }
+    function setSavedOverlaySizePercent(value) {
+      write(keys.overlaySize, String(normalizeOverlaySizePercent(value, defaults.overlaySize)));
+      updateOverlaySize(document2.getElementById(overlayId));
+    }
+    function resetSavedOverlaySizePercent() {
+      remove(keys.overlaySize);
+      updateOverlaySize(document2.getElementById(overlayId));
     }
     function isOverlayInteractionFocused(overlay) {
       return overlay?.dataset.tmDragging === "true" || overlay?.dataset.tmHovering === "true" || overlay?.matches?.(":hover") || overlay?.contains?.(document2.activeElement);
@@ -678,6 +774,10 @@
       getSavedOverlayOpacityPercent,
       setSavedOverlayOpacityPercent,
       resetSavedOverlayOpacityPercent,
+      getSavedOverlaySizePercent,
+      setSavedOverlaySizePercent,
+      resetSavedOverlaySizePercent,
+      updateOverlaySize,
       isOverlayInteractionFocused,
       updateOverlayOpacity,
       setVolumeSliderMode,
@@ -847,8 +947,10 @@
     const ALWAYS_EXPANDED_KEY = "tm-twitch-volume-slider-always-expanded";
     const OVERLAY_OPACITY_IDLE_KEY = "tm-twitch-volume-slider-opacity-idle";
     const OVERLAY_OPACITY_ACTIVE_KEY = "tm-twitch-volume-slider-opacity-active";
+    const OVERLAY_SIZE_KEY = "tm-twitch-volume-slider-size";
     const DEFAULT_OVERLAY_OPACITY_IDLE = 45;
     const DEFAULT_OVERLAY_OPACITY_ACTIVE = 95;
+    const DEFAULT_OVERLAY_SIZE = 100;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
     const TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS = 5e3;
@@ -875,7 +977,9 @@
       alwaysExpanded: "saved",
       // Opacity for the on-video slider when idle/focused: 'saved' or 0-100. Default: 'saved'
       overlayOpacityUnfocused: "saved",
-      overlayOpacityFocused: "saved"
+      overlayOpacityFocused: "saved",
+      // On-video slider size: 'saved' or 100-200 as a percentage. Default: 100
+      overlaySize: "saved"
     };
     let cachedApi = null;
     let cachedApiFromElement = null;
@@ -899,13 +1003,13 @@
     const NAV_REATTACH_DELAY_MS = 700;
     const NAV_LATE_RESTORE_DELAY_MS = 4200;
     const NAV_DEBOUNCE_MS = 180;
-    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, updateOverlaySize, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
       document,
       storage: localStorage,
       userSettings: USER_SETTINGS,
       overlayId: OVERLAY_ID,
-      keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY },
-      defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE },
+      keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY },
+      defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE },
       onPlacementChanged: () => {
         attachSliderIfPossible();
         applyNativeVolumeVisibility();
@@ -1299,12 +1403,12 @@
   background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
   background-size: 100% 100%;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: none;
   z-index: 1;
 }
-#${OVERLAY_ID}.tm-expanded .tm-slider-ticks,
-#${OVERLAY_ID}:hover .tm-slider-ticks {
+#${OVERLAY_ID}.tm-expanded .tm-slider-ticks {
   opacity: 1;
+  transition: opacity 0.12s ease 0.08s;
 }
 
         `;
@@ -1317,6 +1421,7 @@
       isAlwaysExpandedEnabled,
       isSliderOnVideo,
       updateOverlayOpacity,
+      updateOverlaySize,
       finishExpandedHoldIfDue,
       accentLight: VOLUME_ACCENT_LIGHT,
       accentDark: VOLUME_ACCENT_DARK,
@@ -1955,7 +2060,10 @@
       setSliderLocation,
       getSavedOverlayOpacityPercent,
       setSavedOverlayOpacityPercent,
-      resetSavedOverlayOpacityPercent
+      resetSavedOverlayOpacityPercent,
+      getSavedOverlaySizePercent,
+      setSavedOverlaySizePercent,
+      resetSavedOverlaySizePercent
     });
     function refreshOptionsPopupState() {
       const popup = getOptionsPopup();
@@ -1980,6 +2088,10 @@
       const opacitySection = popup.querySelector("#tm-volume-options-opacity-section");
       if (opacitySection) {
         opacitySection.style.display = isSliderOnVideo() ? "" : "none";
+      }
+      const sizeSection = popup.querySelector("#tm-volume-options-size-section");
+      if (sizeSection) {
+        sizeSection.style.display = isSliderOnVideo() ? "" : "none";
       }
       syncOptionsRadioGroups(popup);
     }

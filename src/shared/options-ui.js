@@ -4,7 +4,8 @@ export function createOptionsUi(dependencies) {
     getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
     isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
-    setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent
+    setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
+    getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent
   } = dependencies;
 
     function getEnabledRadios(group) {
@@ -281,6 +282,80 @@ export function createOptionsUi(dependencies) {
         return section;
     }
 
+    function createSizeSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+        section.id = 'tm-volume-options-size-section';
+        section.appendChild(createOptionsSectionLabel('On-video size'));
+
+        const row = document.createElement('div');
+        row.className = 'tm-volume-options-opacity-row';
+
+        const labelGroup = document.createElement('div');
+        labelGroup.className = 'tm-volume-options-opacity-label-group';
+
+        const name = document.createElement('span');
+        name.className = 'tm-volume-options-opacity-name';
+        name.textContent = 'Size';
+
+        const valueEl = document.createElement('span');
+        valueEl.className = 'tm-volume-options-opacity-value';
+
+        const resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.className = 'tm-volume-options-opacity-reset';
+        resetBtn.textContent = 'Reset';
+        resetBtn.setAttribute('aria-label', 'Reset on-video size');
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '100';
+        slider.max = '200';
+        slider.step = '5';
+        slider.className = 'tm-volume-options-opacity-slider';
+        slider.setAttribute('aria-label', 'On-video size');
+
+        const setFill = (pct) => {
+            slider.style.setProperty('--tm-opacity-fill', `${pct - 100}%`);
+        };
+        const refresh = () => {
+            const pct = getSavedOverlaySizePercent();
+            slider.value = String(pct);
+            setFill(pct);
+            valueEl.textContent = `${Math.round(pct)}%`;
+        };
+        refresh();
+
+        ['click', 'mousedown', 'pointerdown', 'keydown'].forEach((type) => {
+            slider.addEventListener(type, (event) => event.stopPropagation());
+        });
+        slider.addEventListener('input', () => {
+            const pct = Number(slider.value) || 100;
+            setFill(pct);
+            valueEl.textContent = `${Math.round(pct)}%`;
+            setSavedOverlaySizePercent(pct);
+        });
+        resetBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            resetSavedOverlaySizePercent();
+            refresh();
+        });
+
+        labelGroup.appendChild(name);
+        labelGroup.appendChild(valueEl);
+
+        const controls = document.createElement('div');
+        controls.className = 'tm-volume-options-opacity-controls';
+        controls.appendChild(slider);
+        controls.appendChild(resetBtn);
+
+        row.appendChild(labelGroup);
+        row.appendChild(controls);
+        section.appendChild(row);
+        return section;
+    }
+
     function buildOptionsPopup() {
         const popup = document.createElement('div');
         popup.id = OPTIONS_POPUP_ID;
@@ -301,6 +376,7 @@ export function createOptionsUi(dependencies) {
         body.appendChild(createPlacementSection());
         body.appendChild(createBehaviorSection());
         body.appendChild(createOpacitySection());
+        body.appendChild(createSizeSection());
 
         popup.appendChild(header);
         popup.appendChild(body);
