@@ -2,7 +2,7 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
-## Unreleased
+## 2.4.7 - 2026-06-25
 
 - Refined the expanded volume slider into a smooth rounded pill track with thumb-aligned fill at low and high values.
 - Removed the slider and percentage fade-in during expansion so the control reveals cleanly without blinking.
