@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { createSettings, normalizeBooleanSetting, normalizeOpacityPercent, normalizeVolumeSliderMode } from '../../src/shared/settings.js';
+import { createSettings, normalizeBooleanSetting, normalizeOpacityPercent, normalizeOverlaySizePercent, normalizeVolumeSliderMode } from '../../src/shared/settings.js';
 import { clampVolume, snapTo5 } from '../../src/shared/volume.js';
 
 test('saved volume parsing and clamping', () => {
@@ -21,6 +21,9 @@ test('settings defaults and boolean normalization', () => {
   assert.equal(normalizeVolumeSliderMode('invalid'), null);
   assert.equal(normalizeOpacityPercent(120, 45), 100);
   assert.equal(normalizeOpacityPercent('invalid', 45), 45);
+  assert.equal(normalizeOverlaySizePercent(250, 100), 200);
+  assert.equal(normalizeOverlaySizePercent(60, 100), 100);
+  assert.equal(normalizeOverlaySizePercent('invalid', 100), 100);
 });
 
 test('volume clamping and snap-to-five', () => {

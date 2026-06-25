@@ -2,6 +2,12 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.5 - 2026-06-25
+
+- Added an on-video size control for YouTube and Twitch, allowing the floating slider to scale from 100% to 200%.
+- Kept the size control scoped to Show on video mode, returning the overlay to normal size in the controls area.
+- Kept the expanded slider internals at a stable width during reveal/collapse so the track and grabber do not re-layout with the pill animation.
+
 ## 2.4.7 - 2026-06-25
 
 - Refined the expanded volume slider into a smooth rounded pill track with thumb-aligned fill at low and high values.

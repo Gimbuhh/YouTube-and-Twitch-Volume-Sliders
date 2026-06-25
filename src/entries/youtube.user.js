@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         YouTube Volume Slider 2.4.7
+// @name         YouTube Volume Slider 2.5
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.4.7
+// @version      2.5
 // @description  Compact in-bar volume indicator that expands into a wide YouTube volume slider.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://www.youtube.com/favicon.ico

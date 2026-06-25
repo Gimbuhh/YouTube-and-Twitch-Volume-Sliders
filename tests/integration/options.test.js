@@ -5,14 +5,15 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', sizeKey:'tm-yt-volume-slider-size' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', sizeKey:'tm-twitch-volume-slider-size' }
 ];
 
-async function openOptions(config, mode = 'on') {
+async function openOptions(config, mode = 'on', location = 'controls') {
   const runtime=createRuntime(config.url,{runScripts:'outside-only'});
   config.fixture(runtime.document);
   runtime.window.localStorage.setItem(config.modeKey, mode);
+  runtime.window.localStorage.setItem(config.locationKey, location);
   runtime.window.eval(await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`,import.meta.url),'utf8'));
   const button=runtime.document.getElementById('tm-volume-options-button');
   button.focus(); button.click();
@@ -26,6 +27,8 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
 
   const hiddenOpacity=popup.querySelector('#tm-volume-options-opacity-section');
   assert.equal(hiddenOpacity.style.display,'none');
+  const hiddenSize=popup.querySelector('#tm-volume-options-size-section');
+  assert.equal(hiddenSize.style.display,'none');
   const lastVisible=popup.querySelector('#tm-volume-options-location-video');
   lastVisible.focus();
   const forward=new runtime.window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true});
@@ -40,6 +43,27 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
 
   runtime.document.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
   assert.equal(popup.hidden,true); assert.equal(runtime.document.activeElement,button);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: on-video size option is active only for video placement`,async()=>{
+  const {runtime,popup}=await openOptions(config,'on','video');
+  const opacitySection=popup.querySelector('#tm-volume-options-opacity-section');
+  const sizeSection=popup.querySelector('#tm-volume-options-size-section');
+  assert.equal(opacitySection.style.display,'');
+  assert.equal(sizeSection.style.display,'');
+
+  const slider=popup.querySelector('#tm-volume-options-size-section input[type="range"]');
+  assert.equal(slider.value,'100');
+  slider.value='150';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(runtime.window.localStorage.getItem(config.sizeKey),'150');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').style.getPropertyValue('--tm-overlay-scale'),'1.5');
+
+  const location=popup.querySelector('#tm-volume-options-location-video');
+  location.click();
+  assert.equal(sizeSection.style.display,'none');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').style.getPropertyValue('--tm-overlay-scale'),'1');
   runtime.close();
 });
 

@@ -4,7 +4,8 @@ export function createOptionsUi(dependencies) {
     getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
     isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
-    setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent
+    setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
+    getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent
   } = dependencies;
 
     function getEnabledRadios(group) {
@@ -206,7 +207,19 @@ export function createOptionsUi(dependencies) {
         return section;
     }
 
-    function createOpacityRow(label, focused) {
+    function createRangeSettingRow({
+        label,
+        ariaLabel,
+        resetAriaLabel,
+        min,
+        max,
+        step,
+        fallback,
+        getValue,
+        setValue,
+        resetValue,
+        getFillPercent = (value) => value
+    }) {
         const row = document.createElement('div');
         row.className = 'tm-volume-options-opacity-row';
 
@@ -224,20 +237,20 @@ export function createOptionsUi(dependencies) {
         resetBtn.type = 'button';
         resetBtn.className = 'tm-volume-options-opacity-reset';
         resetBtn.textContent = 'Reset';
-        resetBtn.setAttribute('aria-label', `Reset ${label} opacity`);
+        resetBtn.setAttribute('aria-label', resetAriaLabel);
 
         const slider = document.createElement('input');
         slider.type = 'range';
-        slider.min = '0';
-        slider.max = '100';
-        slider.step = '1';
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
         slider.className = 'tm-volume-options-opacity-slider';
-        slider.setAttribute('aria-label', `${label} opacity`);
+        slider.setAttribute('aria-label', ariaLabel);
 
         const refresh = () => {
-            const pct = getSavedOverlayOpacityPercent(focused);
+            const pct = getValue();
             slider.value = String(pct);
-            slider.style.setProperty('--tm-opacity-fill', `${pct}%`);
+            slider.style.setProperty('--tm-opacity-fill', `${getFillPercent(pct)}%`);
             valueEl.textContent = `${Math.round(pct)}%`;
         };
         refresh();
@@ -246,15 +259,16 @@ export function createOptionsUi(dependencies) {
             slider.addEventListener(type, (event) => event.stopPropagation());
         });
         slider.addEventListener('input', () => {
-            const pct = Number(slider.value) || 0;
-            slider.style.setProperty('--tm-opacity-fill', `${pct}%`);
+            const value = Number(slider.value);
+            const pct = Number.isFinite(value) ? value : fallback;
+            slider.style.setProperty('--tm-opacity-fill', `${getFillPercent(pct)}%`);
             valueEl.textContent = `${Math.round(pct)}%`;
-            setSavedOverlayOpacityPercent(focused, pct);
+            setValue(pct);
         });
         resetBtn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
-            resetSavedOverlayOpacityPercent(focused);
+            resetValue();
             refresh();
         });
 
@@ -271,6 +285,21 @@ export function createOptionsUi(dependencies) {
         return row;
     }
 
+    function createOpacityRow(label, focused) {
+        return createRangeSettingRow({
+            label,
+            ariaLabel: `${label} opacity`,
+            resetAriaLabel: `Reset ${label} opacity`,
+            min: 0,
+            max: 100,
+            step: 1,
+            fallback: 0,
+            getValue: () => getSavedOverlayOpacityPercent(focused),
+            setValue: (pct) => setSavedOverlayOpacityPercent(focused, pct),
+            resetValue: () => resetSavedOverlayOpacityPercent(focused)
+        });
+    }
+
     function createOpacitySection() {
         const section = document.createElement('div');
         section.className = 'tm-volume-options-section';
@@ -278,6 +307,28 @@ export function createOptionsUi(dependencies) {
         section.appendChild(createOptionsSectionLabel('On-video opacity'));
         section.appendChild(createOpacityRow('Idle', false));
         section.appendChild(createOpacityRow('Active', true));
+        return section;
+    }
+
+    function createSizeSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+        section.id = 'tm-volume-options-size-section';
+        section.appendChild(createOptionsSectionLabel('On-video size'));
+
+        section.appendChild(createRangeSettingRow({
+            label: 'Size',
+            ariaLabel: 'On-video size',
+            resetAriaLabel: 'Reset on-video size',
+            min: 100,
+            max: 200,
+            step: 5,
+            fallback: 100,
+            getValue: getSavedOverlaySizePercent,
+            setValue: setSavedOverlaySizePercent,
+            resetValue: resetSavedOverlaySizePercent,
+            getFillPercent: (pct) => pct - 100
+        }));
         return section;
     }
 
@@ -301,6 +352,7 @@ export function createOptionsUi(dependencies) {
         body.appendChild(createPlacementSection());
         body.appendChild(createBehaviorSection());
         body.appendChild(createOpacitySection());
+        body.appendChild(createSizeSection());
 
         popup.appendChild(header);
         popup.appendChild(body);
