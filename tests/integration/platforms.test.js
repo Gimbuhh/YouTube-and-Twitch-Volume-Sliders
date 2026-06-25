@@ -5,8 +5,8 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', modeKey:'tm-yt-volume-slider-mode' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location' }
 ];
 
 async function loadPlatform(config, setup = () => {}) {
@@ -60,6 +60,24 @@ for(const config of platforms){
     const {runtime}=await loadPlatform(config,current=>current.window.localStorage.setItem(config.modeKey,'off'));
     assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
     assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+    runtime.close();
+  });
+
+  test(`${config.name}: on-video slider expands from a stable icon anchor`,async()=>{
+    const {runtime}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.locationKey,'video');
+    });
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+    assert.ok(overlay.classList.contains('tm-on-video'));
+    assert.equal(overlay.style.left,'50%');
+    assert.equal(overlay.style.transform,'translateX(-20px) scale(var(--tm-overlay-scale, 1))');
+    assert.equal(overlay.style.transformOrigin,'left bottom');
+
+    runtime.window.dispatchEvent(new runtime.window.MouseEvent('pointermove',{bubbles:true}));
+    overlay.dispatchEvent(new runtime.window.MouseEvent('mouseenter'));
+    assert.ok(overlay.classList.contains('tm-expanded'));
+    assert.equal(overlay.style.width,'var(--tm-pill-expanded-width)');
+    assert.equal(overlay.style.transform,'translateX(-20px) scale(var(--tm-overlay-scale, 1))');
     runtime.close();
   });
 }
