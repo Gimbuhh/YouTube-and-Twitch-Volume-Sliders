@@ -6,9 +6,9 @@
 4. Run `pnpm release -- <version>` exactly once (for example, `pnpm release -- 2.4.4`).
 5. Run `node scripts/verify-release.mjs <version>`.
 6. Commit the source, release notes, archive, and generated `dist` files; tag the commit (for example, `v2.4.4`).
-7. Create a GitHub Release from that tag and attach both `dist/*.user.js` files.
+7. Push the tag and let the GitHub Release workflow publish dot-named userscript assets, such as `YouTube.Volume.Slider.<version>.user.js`, with digests verified against `archive/releases/<version>/SHA256.json`.
 
-The release command updates `package.json` and both entry versions together, runs the full check, rejects an existing destination, and writes matching platform artifacts and patch notes to `archive/releases/<version>/`. It snapshots every file it owns and restores the pre-command bytes if packaging fails. Pre-existing worktree changes are preserved, while unexpected new paths abort the transaction. Archives and Git tags are immutable. When Git is unavailable, SHA-256 manifests provide the integrity fallback. Publishing and automatic update metadata are separate, reviewed operations.
+The release command updates `package.json` and both entry versions together, runs the full check, rejects an existing destination, and writes matching platform artifacts and patch notes to `archive/releases/<version>/`. It snapshots every file it owns and restores the pre-command bytes if packaging fails. Pre-existing worktree changes are preserved, while unexpected new paths abort the transaction. Archives and Git tags are immutable. When Git is unavailable, SHA-256 manifests provide the integrity fallback. Automatic update metadata points at the committed `dist/` files on `main`, and the release workflow verifies uploaded asset digests after publishing.
 
 ## Historical releases
 

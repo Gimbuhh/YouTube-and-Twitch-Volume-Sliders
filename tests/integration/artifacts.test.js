@@ -6,7 +6,11 @@ import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 for (const platform of ['youtube','twitch']) test(`${platform} artifact metadata and security boundary`, async () => {
   const source=await readFile(new URL(`../../dist/${platform}-volume-slider.user.js`,import.meta.url),'utf8');
-  assert.match(source,/\/\/ @version\s+2\.4/); assert.match(source,/\/\/ @grant\s+none/); assert.doesNotMatch(source,/@require|sourceMappingURL|\bfetch\s*\(|XMLHttpRequest/);
+  const updateUrl = `https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/${platform}-volume-slider.user.js`;
+  assert.match(source,/\/\/ @version\s+2\.4/); assert.match(source,/\/\/ @grant\s+none/);
+  assert.match(source,new RegExp(`// @updateURL\\s+${updateUrl.replaceAll('.','\\.')}`));
+  assert.match(source,new RegExp(`// @downloadURL\\s+${updateUrl.replaceAll('.','\\.')}`));
+  assert.doesNotMatch(source,/@require|sourceMappingURL|\bfetch\s*\(|XMLHttpRequest/);
   assert.ok(Buffer.byteLength(source) > (platform === 'youtube' ? 80000 : 95000), 'artifact retains full behavior');
 });
 

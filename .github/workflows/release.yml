@@ -56,6 +56,12 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           youtube_asset="archive/releases/$version/YouTube Volume Slider $version/YouTube Volume Slider $version.user.js"
           twitch_asset="archive/releases/$version/Twitch Volume Slider $version/Twitch Volume Slider $version.user.js"
+          youtube_public_asset="release-assets/YouTube.Volume.Slider.$version.user.js"
+          twitch_public_asset="release-assets/Twitch.Volume.Slider.$version.user.js"
+
+          mkdir -p release-assets
+          cp "$youtube_asset" "$youtube_public_asset"
+          cp "$twitch_asset" "$twitch_public_asset"
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" \
@@ -69,6 +75,13 @@ jobs:
           fi
 
           gh release upload "$GITHUB_REF_NAME" \
-            "$youtube_asset" \
-            "$twitch_asset" \
+            "$youtube_public_asset" \
+            "$twitch_public_asset" \
             --clobber
+
+          youtube_hash="$(VERSION="$version" node -e 'console.log(require(`./archive/releases/${process.env.VERSION}/SHA256.json`).youtube.archive.toLowerCase())')"
+          twitch_hash="$(VERSION="$version" node -e 'console.log(require(`./archive/releases/${process.env.VERSION}/SHA256.json`).twitch.archive.toLowerCase())')"
+          youtube_digest="$(gh release view "$GITHUB_REF_NAME" --json assets --jq ".assets[] | select(.name == \"YouTube.Volume.Slider.$version.user.js\") | .digest")"
+          twitch_digest="$(gh release view "$GITHUB_REF_NAME" --json assets --jq ".assets[] | select(.name == \"Twitch.Volume.Slider.$version.user.js\") | .digest")"
+          test "$youtube_digest" = "sha256:$youtube_hash"
+          test "$twitch_digest" = "sha256:$twitch_hash"

@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { distPath, parseMetadata, platforms } from './lib.mjs';
 
-const singular = ['name', 'namespace', 'version', 'description', 'author', 'icon', 'match', 'run-at', 'grant'];
+const singular = ['name', 'namespace', 'version', 'description', 'author', 'icon', 'match', 'updateURL', 'downloadURL', 'run-at', 'grant'];
+const repoRawBase = 'https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist';
 let releaseVersion;
 for (const platform of platforms) {
   const { fields } = parseMetadata(await readFile(distPath(platform), 'utf8'));
@@ -10,6 +11,9 @@ for (const platform of platforms) {
   }
   if (fields.get('run-at')[0] !== 'document-idle') throw new Error(`${platform}: invalid @run-at`);
   if (fields.get('grant')[0] !== 'none') throw new Error(`${platform}: invalid @grant`);
+  const expectedUpdateUrl = `${repoRawBase}/${platform}-volume-slider.user.js`;
+  if (fields.get('updateURL')[0] !== expectedUpdateUrl) throw new Error(`${platform}: invalid @updateURL`);
+  if (fields.get('downloadURL')[0] !== expectedUpdateUrl) throw new Error(`${platform}: invalid @downloadURL`);
   if (fields.has('require')) throw new Error(`${platform}: @require is forbidden`);
   const version = fields.get('version')[0];
   if (!/^\d+(?:\.\d+)*$/.test(version)) throw new Error(`${platform}: non-numeric version`);
