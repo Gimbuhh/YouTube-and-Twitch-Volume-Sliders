@@ -88,11 +88,9 @@
       if (!expanded && isAlwaysExpandedEnabled()) {
         expanded = true;
       }
-      const stateChanged = expanded !== overlay.classList.contains("tm-expanded");
       if (!force && (expanded && overlay.classList.contains("tm-expanded") || !expanded && overlay.classList.contains("tm-collapsed"))) {
         return;
       }
-      if (stateChanged) beginOverlayWidthAnimation(overlay);
       const onVideo = isSliderOnVideo();
       const baseStyle = onVideo ? {
         position: "absolute",
@@ -101,7 +99,7 @@
         margin: "0",
         alignSelf: "auto",
         flex: "0 0 auto",
-        transition: "opacity 0.18s ease, width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease"
+        transition: "width 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.25s ease"
       } : {
         position: "relative",
         left: "auto",
@@ -131,7 +129,7 @@
         overlay.classList.remove("tm-collapsed");
         overlay.classList.add("tm-expanded");
         Object.assign(overlay.style, pillStyle, {
-          width: "var(--tm-expanded-width, clamp(320px, 34vw, 460px))",
+          width: "var(--tm-pill-expanded-width)",
           padding: "0 12px 0 0"
         });
         updateOverlaySize(overlay);
@@ -146,26 +144,6 @@
       });
       updateOverlaySize(overlay);
       updateOverlayOpacity(overlay);
-    }
-    function beginOverlayWidthAnimation(overlay) {
-      if (overlay._finishWidthAnimation) {
-        overlay._finishWidthAnimation();
-      }
-      overlay.classList.add("tm-width-animating");
-      const finish = (event) => {
-        if (event && event.target !== overlay) return;
-        if (event && event.propertyName !== "width") return;
-        overlay.classList.remove("tm-width-animating");
-        overlay.removeEventListener("transitionend", finish);
-        if (overlay._widthAnimationTimer) {
-          window2.clearTimeout(overlay._widthAnimationTimer);
-          overlay._widthAnimationTimer = 0;
-        }
-        overlay._finishWidthAnimation = null;
-      };
-      overlay._finishWidthAnimation = finish;
-      overlay.addEventListener("transitionend", finish);
-      overlay._widthAnimationTimer = window2.setTimeout(finish, 280);
     }
     function shouldKeepOverlayExpanded(overlay) {
       return isAlwaysExpandedEnabled() || overlay.matches(":hover") || overlay.contains(document2.activeElement) || overlay.dataset.tmDragging === "true";
@@ -477,7 +455,19 @@
       section.appendChild(list);
       return section;
     }
-    function createOpacityRow(label, focused) {
+    function createRangeSettingRow({
+      label,
+      ariaLabel,
+      resetAriaLabel,
+      min,
+      max,
+      step,
+      fallback,
+      getValue,
+      setValue,
+      resetValue,
+      getFillPercent = (value) => value
+    }) {
       const row = document2.createElement("div");
       row.className = "tm-volume-options-opacity-row";
       const labelGroup = document2.createElement("div");
@@ -491,18 +481,18 @@
       resetBtn.type = "button";
       resetBtn.className = "tm-volume-options-opacity-reset";
       resetBtn.textContent = "Reset";
-      resetBtn.setAttribute("aria-label", `Reset ${label} opacity`);
+      resetBtn.setAttribute("aria-label", resetAriaLabel);
       const slider = document2.createElement("input");
       slider.type = "range";
-      slider.min = "0";
-      slider.max = "100";
-      slider.step = "1";
+      slider.min = String(min);
+      slider.max = String(max);
+      slider.step = String(step);
       slider.className = "tm-volume-options-opacity-slider";
-      slider.setAttribute("aria-label", `${label} opacity`);
+      slider.setAttribute("aria-label", ariaLabel);
       const refresh = () => {
-        const pct = getSavedOverlayOpacityPercent(focused);
+        const pct = getValue();
         slider.value = String(pct);
-        slider.style.setProperty("--tm-opacity-fill", `${pct}%`);
+        slider.style.setProperty("--tm-opacity-fill", `${getFillPercent(pct)}%`);
         valueEl.textContent = `${Math.round(pct)}%`;
       };
       refresh();
@@ -510,15 +500,16 @@
         slider.addEventListener(type, (event) => event.stopPropagation());
       });
       slider.addEventListener("input", () => {
-        const pct = Number(slider.value) || 0;
-        slider.style.setProperty("--tm-opacity-fill", `${pct}%`);
+        const value = Number(slider.value);
+        const pct = Number.isFinite(value) ? value : fallback;
+        slider.style.setProperty("--tm-opacity-fill", `${getFillPercent(pct)}%`);
         valueEl.textContent = `${Math.round(pct)}%`;
-        setSavedOverlayOpacityPercent(focused, pct);
+        setValue(pct);
       });
       resetBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        resetSavedOverlayOpacityPercent(focused);
+        resetValue();
         refresh();
       });
       labelGroup.appendChild(name);
@@ -530,6 +521,20 @@
       row.appendChild(labelGroup);
       row.appendChild(controls);
       return row;
+    }
+    function createOpacityRow(label, focused) {
+      return createRangeSettingRow({
+        label,
+        ariaLabel: `${label} opacity`,
+        resetAriaLabel: `Reset ${label} opacity`,
+        min: 0,
+        max: 100,
+        step: 1,
+        fallback: 0,
+        getValue: () => getSavedOverlayOpacityPercent(focused),
+        setValue: (pct) => setSavedOverlayOpacityPercent(focused, pct),
+        resetValue: () => resetSavedOverlayOpacityPercent(focused)
+      });
     }
     function createOpacitySection() {
       const section = document2.createElement("div");
@@ -545,61 +550,19 @@
       section.className = "tm-volume-options-section";
       section.id = "tm-volume-options-size-section";
       section.appendChild(createOptionsSectionLabel("On-video size"));
-      const row = document2.createElement("div");
-      row.className = "tm-volume-options-opacity-row";
-      const labelGroup = document2.createElement("div");
-      labelGroup.className = "tm-volume-options-opacity-label-group";
-      const name = document2.createElement("span");
-      name.className = "tm-volume-options-opacity-name";
-      name.textContent = "Size";
-      const valueEl = document2.createElement("span");
-      valueEl.className = "tm-volume-options-opacity-value";
-      const resetBtn = document2.createElement("button");
-      resetBtn.type = "button";
-      resetBtn.className = "tm-volume-options-opacity-reset";
-      resetBtn.textContent = "Reset";
-      resetBtn.setAttribute("aria-label", "Reset on-video size");
-      const slider = document2.createElement("input");
-      slider.type = "range";
-      slider.min = "100";
-      slider.max = "200";
-      slider.step = "5";
-      slider.className = "tm-volume-options-opacity-slider";
-      slider.setAttribute("aria-label", "On-video size");
-      const setFill = (pct) => {
-        slider.style.setProperty("--tm-opacity-fill", `${pct - 100}%`);
-      };
-      const refresh = () => {
-        const pct = getSavedOverlaySizePercent();
-        slider.value = String(pct);
-        setFill(pct);
-        valueEl.textContent = `${Math.round(pct)}%`;
-      };
-      refresh();
-      ["click", "mousedown", "pointerdown", "keydown"].forEach((type) => {
-        slider.addEventListener(type, (event) => event.stopPropagation());
-      });
-      slider.addEventListener("input", () => {
-        const pct = Number(slider.value) || 100;
-        setFill(pct);
-        valueEl.textContent = `${Math.round(pct)}%`;
-        setSavedOverlaySizePercent(pct);
-      });
-      resetBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        resetSavedOverlaySizePercent();
-        refresh();
-      });
-      labelGroup.appendChild(name);
-      labelGroup.appendChild(valueEl);
-      const controls = document2.createElement("div");
-      controls.className = "tm-volume-options-opacity-controls";
-      controls.appendChild(slider);
-      controls.appendChild(resetBtn);
-      row.appendChild(labelGroup);
-      row.appendChild(controls);
-      section.appendChild(row);
+      section.appendChild(createRangeSettingRow({
+        label: "Size",
+        ariaLabel: "On-video size",
+        resetAriaLabel: "Reset on-video size",
+        min: 100,
+        max: 200,
+        step: 5,
+        fallback: 100,
+        getValue: getSavedOverlaySizePercent,
+        setValue: setSavedOverlaySizePercent,
+        resetValue: resetSavedOverlaySizePercent,
+        getFillPercent: (pct) => pct - 100
+      }));
       return section;
     }
     function buildOptionsPopup() {
@@ -1185,7 +1148,7 @@
       style.type = "text/css";
       const css = `
 #${OVERLAY_ID} {
-  --tm-expanded-width: clamp(320px, 34vw, 460px);
+  --tm-pill-expanded-width: clamp(320px, 34vw, 460px);
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
@@ -1221,13 +1184,8 @@
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  opacity: 1;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.08s ease;
+  transition: all 0.2s ease;
   margin-top: calc((var(--tm-active-track-h, 9px) - var(--tm-thumb-size, 22px)) / 2);
-}
-
-#${OVERLAY_ID}.tm-width-animating input[type=range]::-webkit-slider-thumb {
-  opacity: 0;
 }
 
 #${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:hover {
@@ -1248,12 +1206,7 @@
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  opacity: 1;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.08s ease;
-}
-
-#${OVERLAY_ID}.tm-width-animating input[type=range]::-moz-range-thumb {
-  opacity: 0;
+  transition: all 0.2s ease;
 }
 
 #${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {
@@ -1407,10 +1360,10 @@
   --tm-active-track-h: 11px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-active-track-h, 9px) / 2);
-  flex: 0 0 calc(var(--tm-expanded-width) - 118px);
-  height: 40px;
+  flex: 0 0 calc(var(--tm-pill-expanded-width) - 118px);
+  width: calc(var(--tm-pill-expanded-width) - 118px);
   min-width: 0;
-  width: calc(var(--tm-expanded-width) - 118px);
+  height: 40px;
 }
 
 #${OVERLAY_ID} .tm-slider-track {
@@ -1437,11 +1390,12 @@
   background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
   background-size: 100% 100%;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: none;
   z-index: 1;
 }
 #${OVERLAY_ID}.tm-expanded .tm-slider-ticks {
   opacity: 1;
+  transition: opacity 0.12s ease 0.08s;
 }
 
         `;
@@ -2521,9 +2475,8 @@
       const sliderWrap = document.createElement("div");
       sliderWrap.className = "tm-volume-controls tm-volume-slider-row";
       sliderWrap.style.position = "relative";
-      sliderWrap.style.width = "calc(var(--tm-expanded-width, clamp(320px, 34vw, 460px)) - 118px)";
-      sliderWrap.style.flex = "0 0 calc(var(--tm-expanded-width, clamp(320px, 34vw, 460px)) - 118px)";
-      sliderWrap.style.minWidth = "0";
+      sliderWrap.style.width = "auto";
+      sliderWrap.style.flex = "1 1 auto";
       sliderWrap.style.height = "40px";
       sliderWrap.style.display = "flex";
       sliderWrap.style.alignItems = "center";

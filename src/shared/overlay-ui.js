@@ -113,7 +113,7 @@ export function createOverlayUi(dependencies) {
             overlay.classList.remove('tm-collapsed');
             overlay.classList.add('tm-expanded');
             Object.assign(overlay.style, pillStyle, {
-                width: 'clamp(320px, 34vw, 460px)',
+                width: 'var(--tm-pill-expanded-width)',
                 padding: '0 12px 0 0'
             });
             updateOverlaySize(overlay);

@@ -6,8 +6,8 @@ Both scripts replace or complement the sites' native controls with a small indic
 
 ## Install
 
-- [YouTube Volume Slider 2.4.7](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.4.7/YouTube.Volume.Slider.2.4.7.user.js)
-- [Twitch Volume Slider 2.4.7](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.4.7/Twitch.Volume.Slider.2.4.7.user.js)
+- [YouTube Volume Slider 2.5](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5/YouTube.Volume.Slider.2.5.user.js)
+- [Twitch Volume Slider 2.5](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5/Twitch.Volume.Slider.2.5.user.js)
 
 Install a current userscript manager such as Tampermonkey or Violentmonkey in a modern browser, download the appropriate file above, and open it with the userscript manager. Both scripts update from the committed `dist/` files on `main`.
 
@@ -15,6 +15,7 @@ Install a current userscript manager such as Tampermonkey or Violentmonkey in a 
 
 - Compact control that expands to a full range slider
 - Optional native-control replacement and persistent volume settings
+- Adjustable on-video slider size for larger remote-control displays
 - Mute-safe restoration across reloads and single-page navigation
 - Keyboard and screen-reader accessible mute and options controls
 - Site-specific YouTube and Twitch adapters backed by shared UI and lifecycle code
@@ -25,7 +26,7 @@ Install a current userscript manager such as Tampermonkey or Violentmonkey in a 
 pnpm install --frozen-lockfile
 pnpm build
 pnpm check
-pnpm release -- 2.4.7
+pnpm release -- 2.5
 ```
 
 Edit canonical code under `src/`; never edit `dist/` or archives manually. `dist/` is generated, `archive/legacy/` preserves historical releases, and `archive/releases/` contains immutable packaged releases. See [architecture](docs/architecture.md), [testing](docs/testing.md), [releasing](docs/releasing.md), and [contributing](CONTRIBUTING.md).
@@ -36,7 +37,7 @@ Edit canonical code under `src/`; never edit `dist/` or archives manually. `dist
 
 Every release contains the standalone `.user.js` files available for that version and matching release notes. The maintained history is recorded in the [changelog](CHANGELOG.md), and the evidence-based [version history](docs/version-history.md) covers original pre-project builds preserved under `archive/legacy/`.
 
-Pull requests and pushes run the full check on Windows. A version tag such as `v2.4.7` runs the checks again and publishes both verified scripts as GitHub Release assets. See [releasing](docs/releasing.md) for the maintainer workflow.
+Pull requests and pushes run the full check on Windows. A version tag such as `v2.5` runs the checks again and publishes both verified scripts as GitHub Release assets. See [releasing](docs/releasing.md) for the maintainer workflow.
 
 ## Contributing
 

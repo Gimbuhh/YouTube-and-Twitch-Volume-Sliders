@@ -8,3 +8,4 @@
 ## Changed
 
 - Scales the full on-video volume pill together, including the icon, value label, slider rail, track, thumb, background, and hit targets.
+- Keeps the expanded slider internals at a stable width during reveal/collapse so the track and grabber do not re-layout with the pill animation.

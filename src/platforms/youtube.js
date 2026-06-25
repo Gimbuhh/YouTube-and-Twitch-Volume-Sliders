@@ -229,6 +229,7 @@ export function startYouTubeVolumeSlider() {
         if (!style) return;
         const css = `
 #${OVERLAY_ID} {
+  --tm-pill-expanded-width: clamp(320px, 34vw, 460px);
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
@@ -446,8 +447,9 @@ export function startYouTubeVolumeSlider() {
   --tm-active-track-h: 11px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-active-track-h, 9px) / 2);
-  flex: 1 1 auto;
-  min-width: 180px;
+  flex: 0 0 calc(var(--tm-pill-expanded-width) - 118px);
+  width: calc(var(--tm-pill-expanded-width) - 118px);
+  min-width: 0;
   height: 40px;
 }
 
