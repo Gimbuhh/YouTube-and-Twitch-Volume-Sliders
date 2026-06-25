@@ -7,6 +7,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 - Fixed Twitch's on-video slider so deliberate hover expands it even while Twitch keeps the native player controls hidden.
 - Tracked overlay hover state explicitly to make interaction checks more reliable during player layout updates.
 - Preserved YouTube's stationary-pointer guard while sharing the stronger hover-focus behavior.
+- Added userscript auto-update metadata pointing at the public `main` branch distribution files.
 
 ## 2.4.5 - 2026-06-21
 
