@@ -5,8 +5,8 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', modeKey:'tm-yt-volume-slider-mode' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location' }
 ];
 
 async function loadPlatform(config, setup = () => {}) {
@@ -60,6 +60,24 @@ for(const config of platforms){
     const {runtime}=await loadPlatform(config,current=>current.window.localStorage.setItem(config.modeKey,'off'));
     assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
     assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+    runtime.close();
+  });
+
+  test(`${config.name}: on-video slider expands from a stable icon anchor`,async()=>{
+    const {runtime}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.locationKey,'video');
+    });
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+    assert.ok(overlay.classList.contains('tm-on-video'));
+    assert.equal(overlay.style.left,'50%');
+    assert.equal(overlay.style.transform,'translateX(-20px) scale(var(--tm-overlay-scale, 1))');
+    assert.equal(overlay.style.transformOrigin,'left bottom');
+
+    runtime.window.dispatchEvent(new runtime.window.MouseEvent('pointermove',{bubbles:true}));
+    overlay.dispatchEvent(new runtime.window.MouseEvent('mouseenter'));
+    assert.ok(overlay.classList.contains('tm-expanded'));
+    assert.equal(overlay.style.width,'var(--tm-pill-expanded-width)');
+    assert.equal(overlay.style.transform,'translateX(-20px) scale(var(--tm-overlay-scale, 1))');
     runtime.close();
   });
 }
@@ -153,5 +171,45 @@ test('Twitch: on-video slider expands on deliberate hover while controls are hid
   controls.setAttribute('aria-hidden','true');
   await new Promise(resolve=>runtime.window.setTimeout(resolve,0));
   assert.ok(overlay.classList.contains('tm-expanded'));
+  runtime.close();
+});
+
+test('Twitch: video click after slider interaction keeps native controls open',async()=>{
+  const {runtime,fixture}=await loadPlatform(platforms[1]);
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  const controls=runtime.document.querySelector('[data-a-target="player-controls"]');
+
+  slider.value='65';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.ok(overlay.classList.contains('tm-expanded'));
+  assert.equal(overlay.dataset.tmKeepExpanded,'true');
+
+  let pointerDownReachedVideo=false;
+  let playbackClicks=0;
+  fixture.video.addEventListener('pointerdown',()=>{
+    pointerDownReachedVideo=true;
+    controls.setAttribute('data-a-visible','false');
+    controls.setAttribute('aria-hidden','true');
+  });
+  fixture.video.addEventListener('click',()=>playbackClicks++);
+  fixture.video.dispatchEvent(new runtime.window.MouseEvent('pointerdown',{bubbles:true,cancelable:true}));
+  await new Promise(resolve=>runtime.window.setTimeout(resolve,0));
+  assert.equal(pointerDownReachedVideo,true);
+  assert.equal(controls.getAttribute('data-a-visible'),'true');
+  assert.equal(controls.getAttribute('aria-hidden'),'false');
+
+  fixture.video.dispatchEvent(new runtime.window.MouseEvent('click',{bubbles:true,cancelable:true}));
+  await new Promise(resolve=>runtime.window.setTimeout(resolve,0));
+
+  assert.ok(overlay.classList.contains('tm-collapsed'));
+  assert.equal(overlay.dataset.tmKeepExpanded,'false');
+  assert.equal(playbackClicks,1);
+  assert.equal(controls.getAttribute('data-a-visible'),'true');
+  assert.equal(controls.getAttribute('aria-hidden'),'false');
+
+  runtime.document.body.dispatchEvent(new runtime.window.MouseEvent('click',{bubbles:true,cancelable:true}));
+  assert.equal(controls.getAttribute('data-a-visible'),'false');
+  assert.equal(controls.getAttribute('aria-hidden'),'true');
   runtime.close();
 });
