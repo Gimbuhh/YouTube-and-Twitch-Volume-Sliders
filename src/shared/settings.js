@@ -30,6 +30,13 @@ export function normalizeOpacityPercent(value, fallback) {
   return Math.min(100, Math.max(0, number));
 }
 
+export function normalizeOverlaySizePercent(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(200, Math.max(100, number));
+}
+
 export function createSettings(storage, keys) {
   const read = (key) => { try { return storage.getItem(key); } catch { return null; } };
   const write = (key, value) => { try { storage.setItem(key, value); } catch { /* storage may be unavailable */ } };
@@ -139,6 +146,7 @@ export function createVolumeSettings({
     overlay.style.opacity = isSliderOnVideo()
       ? String(getSavedOverlayOpacityPercent(isOverlayInteractionFocused(overlay)) / 100)
       : '1';
+    updateOverlaySize(overlay);
   }
 
   function setSavedOverlayOpacityPercent(focused, value) {
@@ -150,6 +158,29 @@ export function createVolumeSettings({
   function resetSavedOverlayOpacityPercent(focused) {
     remove(focused ? keys.activeOpacity : keys.idleOpacity);
     updateOverlayOpacity(document.getElementById(overlayId));
+  }
+
+  function getSavedOverlaySizePercent() {
+    if (userSettings.overlaySize !== 'saved') {
+      return normalizeOverlaySizePercent(userSettings.overlaySize, defaults.overlaySize);
+    }
+    return normalizeOverlaySizePercent(read(keys.overlaySize), defaults.overlaySize);
+  }
+
+  function updateOverlaySize(overlay) {
+    if (!overlay) return;
+    const scale = isSliderOnVideo() ? getSavedOverlaySizePercent() / 100 : 1;
+    overlay.style.setProperty('--tm-overlay-scale', String(scale));
+  }
+
+  function setSavedOverlaySizePercent(value) {
+    write(keys.overlaySize, String(normalizeOverlaySizePercent(value, defaults.overlaySize)));
+    updateOverlaySize(document.getElementById(overlayId));
+  }
+
+  function resetSavedOverlaySizePercent() {
+    remove(keys.overlaySize);
+    updateOverlaySize(document.getElementById(overlayId));
   }
 
   function isOverlayInteractionFocused(overlay) {
@@ -174,7 +205,8 @@ export function createVolumeSettings({
     isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled,
     setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
-    isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode,
+    getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
+    updateOverlaySize, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode,
     isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot
   };
 }
