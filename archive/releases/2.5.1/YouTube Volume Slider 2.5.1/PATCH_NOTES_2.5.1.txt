@@ -1,0 +1,7 @@
+# Volume Sliders 2.5.1
+
+## Changed
+
+- Redesigns the Show on video expand/collapse animation so the volume icon stays anchored while the pill reveals the value label and slider from that edge.
+- Adds a subtle fade and slide reveal for the on-video label and slider controls, avoiding the previous center-out expansion where both sides moved at once.
+- Makes the visible slider bar thinner while keeping the larger click and drag target, with a new Bar thickness preference for users who want a thinner or thicker bar.

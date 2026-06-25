@@ -25,9 +25,11 @@ export function startTwitchVolumeSlider() {
     const OVERLAY_OPACITY_IDLE_KEY = 'tm-twitch-volume-slider-opacity-idle';
     const OVERLAY_OPACITY_ACTIVE_KEY = 'tm-twitch-volume-slider-opacity-active';
     const OVERLAY_SIZE_KEY = 'tm-twitch-volume-slider-size';
+    const SLIDER_THICKNESS_KEY = 'tm-twitch-volume-slider-thickness';
     const DEFAULT_OVERLAY_OPACITY_IDLE = 45;
     const DEFAULT_OVERLAY_OPACITY_ACTIVE = 95;
     const DEFAULT_OVERLAY_SIZE = 100;
+    const DEFAULT_SLIDER_THICKNESS = 50;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
     const TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS = 5000;
@@ -61,7 +63,9 @@ export function startTwitchVolumeSlider() {
         overlayOpacityUnfocused: 'saved',
         overlayOpacityFocused: 'saved',
         // On-video slider size: 'saved' or 100-200 as a percentage. Default: 100
-        overlaySize: 'saved'
+        overlaySize: 'saved',
+        // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 50
+        sliderThickness: 'saved'
     };
 
     let cachedApi = null;
@@ -95,10 +99,10 @@ export function startTwitchVolumeSlider() {
 
 
 
-    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, updateOverlaySize, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage: localStorage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY },
-        defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE },
+        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY },
+        defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
         onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
         clearExpandedHold: (overlay) => clearExpandedHold(overlay),
@@ -504,6 +508,23 @@ export function startTwitchVolumeSlider() {
   pointer-events: auto;
 }
 
+#${OVERLAY_ID}.tm-on-video .tm-volume-top-row,
+#${OVERLAY_ID}.tm-on-video .tm-volume-slider-row {
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: opacity 0.12s ease, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#${OVERLAY_ID}.tm-on-video.tm-expanded .tm-volume-top-row,
+#${OVERLAY_ID}.tm-on-video.tm-expanded .tm-volume-slider-row {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+#${OVERLAY_ID}.tm-on-video.tm-expanded .tm-volume-slider-row {
+  transition-delay: 0.04s;
+}
+
 #${OVERLAY_ID} .tm-volume-top-row {
   flex: 0 0 auto;
   position: relative;
@@ -524,8 +545,9 @@ export function startTwitchVolumeSlider() {
 
 #${OVERLAY_ID} .tm-volume-slider-row {
   --tm-active-track-h: 11px;
+  --tm-visual-track-h: 5px;
   --tm-thumb-size: 22px;
-  --tm-track-radius: calc(var(--tm-active-track-h, 9px) / 2);
+  --tm-track-radius: calc(var(--tm-visual-track-h, 5px) / 2);
   flex: 0 0 calc(var(--tm-pill-expanded-width) - 118px);
   width: calc(var(--tm-pill-expanded-width) - 118px);
   min-width: 0;
@@ -538,7 +560,7 @@ export function startTwitchVolumeSlider() {
   right: 0;
   top: 50%;
   transform: translateY(-50%);
-  height: var(--tm-active-track-h, 9px);
+  height: var(--tm-visual-track-h, 5px);
   border-radius: 999px;
   overflow: hidden;
   pointer-events: none;
@@ -551,7 +573,7 @@ export function startTwitchVolumeSlider() {
   right: calc(var(--tm-thumb-size, 22px) / 2);
   top: 50%;
   transform: translateY(-50%);
-  height: 9px;
+  height: var(--tm-visual-track-h, 5px);
   pointer-events: none;
   background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
   background-size: 100% 100%;
@@ -1272,7 +1294,8 @@ export function startTwitchVolumeSlider() {
         isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
         isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
         setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
-        getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent
+        getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
+        getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent
     });
 
 
@@ -1414,6 +1437,17 @@ export function startTwitchVolumeSlider() {
         return true;
     }
 
+    function isTwitchVideoSurfaceClick(event) {
+        const target = event.target;
+        const player = getPlayerContainer();
+        if (!target || !player?.contains?.(target)) return false;
+
+        return !target.closest?.(
+            '[data-a-target="player-controls"], button, a, input, select, textarea, ' +
+            '[role="button"], [role="slider"], [role="menuitem"]'
+        );
+    }
+
     function releaseTwitchControlsVisibility() {
         const controlsRoot = getTwitchPlayerControlsRoot();
         const controlsShell = getTwitchPlayerControlsShell();
@@ -1459,6 +1493,7 @@ export function startTwitchVolumeSlider() {
         if (isNativeSettingsMenuOpen()) return;
         clearPostCloseControlsHold();
         keepTwitchControlsVisible();
+        ensureOptionsControlsHoldObserver();
         optionsPostCloseControlsTimer = window.setTimeout(() => {
             endPostCloseControlsHold(!isPointerOverTwitchPlayerArea());
         }, TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS);
@@ -1469,6 +1504,11 @@ export function startTwitchVolumeSlider() {
             endPostCloseControlsHold(true);
         };
         document.addEventListener('click', optionsPostCloseOutsideHandler, true);
+    }
+
+    function markTwitchVolumeInteraction(overlay) {
+        markVolumeChangedWhileExpanded(overlay);
+        startPostCloseControlsHold();
     }
 
     function openVolumeOptionsPopup() {
@@ -1613,7 +1653,7 @@ export function startTwitchVolumeSlider() {
         disconnectOptionsControlsHoldObserver();
         optionsControlsHoldTargetKey = targetKey;
         optionsControlsHoldObserver = new MutationObserver(() => {
-            if (areTwitchControlsHidden() && isOptionsPopupOpen()) {
+            if (areTwitchControlsHidden() && (isOptionsPopupOpen() || optionsPostCloseControlsTimer)) {
                 keepTwitchControlsVisible();
             }
         });
@@ -1700,6 +1740,12 @@ export function startTwitchVolumeSlider() {
             collapseOverlayIfIdle(overlay);
             updateOverlayOpacity(overlay);
         });
+        const collapseHeldSliderOnVideoClick = (event) => {
+            if (overlay.dataset.tmKeepExpanded !== 'true' || !isTwitchVideoSurfaceClick(event)) return;
+            clearExpandedHold(overlay);
+            setOverlayExpanded(overlay, false);
+        };
+        document.addEventListener('click', collapseHeldSliderOnVideoClick, true);
 
         const iconCell = document.createElement('button');
         iconCell.type = 'button';
@@ -1715,7 +1761,7 @@ export function startTwitchVolumeSlider() {
             toggleMute(video);
             saveMute(isMuted(video));
             setSliderFromPlayer(slider, label, video);
-            markVolumeChangedWhileExpanded(overlay);
+            markTwitchVolumeInteraction(overlay);
         });
         const panelBg = document.createElement('div');
         panelBg.className = 'tm-volume-panel-bg';
@@ -1802,7 +1848,7 @@ export function startTwitchVolumeSlider() {
             updateSliderBar(slider);
             updateVolumeIndicator(overlay, value, isMuted(video));
             scheduleSaveVolume(value);
-            markVolumeChangedWhileExpanded(overlay);
+            markTwitchVolumeInteraction(overlay);
         };
 
         const snapDirectClickIfNeeded = () => {
@@ -1867,9 +1913,8 @@ export function startTwitchVolumeSlider() {
         slider.addEventListener('change', () => {
             markUserVolumeIntent();
             applySliderValue(readSnappedSliderValue(slider));
-        cancelScheduledSaveVolume();
+            cancelScheduledSaveVolume();
             saveVolume(Number(slider.value) || 0);
-            markVolumeChangedWhileExpanded(overlay);
         });
 
         // Sync slider UI and persist volume on any external/native change
@@ -1938,6 +1983,7 @@ export function startTwitchVolumeSlider() {
         placeOverlay(overlay, player, controlsHost);
         setSliderFromPlayer(slider, label, video);
         setOverlayExpanded(overlay, false, true);
+        updateSliderThickness(overlay);
 
         const detachmentObserver = new MutationObserver(() => {
             if (overlayLifecycle.owns(overlay) && !overlay.isConnected) {
@@ -1953,8 +1999,10 @@ export function startTwitchVolumeSlider() {
             window.removeEventListener('blur', finishSliderInteraction);
             window.removeEventListener('resize', onLayoutChange);
             window.removeEventListener('pointermove', markPointerIntent, true);
+            document.removeEventListener('click', collapseHeldSliderOnVideoClick, true);
             controlsObserver.disconnect();
             detachmentObserver.disconnect();
+            clearPostCloseControlsHold();
             clearExpandedHold(overlay);
         };
         overlayLifecycle.set(overlay, cleanup);

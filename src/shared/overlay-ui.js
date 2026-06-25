@@ -75,6 +75,8 @@ export function createOverlayUi(dependencies) {
             return;
         }
         const onVideo = isSliderOnVideo();
+        overlay.classList.toggle('tm-on-video', onVideo);
+        overlay.classList.toggle('tm-in-controls', !onVideo);
         const baseStyle = onVideo ? {
             position: 'absolute',
             left: '50%',
@@ -105,8 +107,8 @@ export function createOverlayUi(dependencies) {
             justifyContent: 'flex-start',
             gap: '0',
             background: 'transparent',
-            transform: onVideo ? 'translateX(-50%) scale(var(--tm-overlay-scale, 1))' : 'translateY(0)',
-            transformOrigin: onVideo ? 'center bottom' : 'center center'
+            transform: onVideo ? 'translateX(-20px) scale(var(--tm-overlay-scale, 1))' : 'translateY(0)',
+            transformOrigin: onVideo ? 'left bottom' : 'center center'
         };
 
         if (expanded) {

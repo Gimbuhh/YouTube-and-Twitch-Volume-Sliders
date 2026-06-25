@@ -37,6 +37,13 @@ export function normalizeOverlaySizePercent(value, fallback) {
   return Math.min(200, Math.max(100, number));
 }
 
+export function normalizeSliderThicknessPercent(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(125, Math.max(25, number));
+}
+
 export function createSettings(storage, keys) {
   const read = (key) => { try { return storage.getItem(key); } catch { return null; } };
   const write = (key, value) => { try { storage.setItem(key, value); } catch { /* storage may be unavailable */ } };
@@ -183,6 +190,32 @@ export function createVolumeSettings({
     updateOverlaySize(document.getElementById(overlayId));
   }
 
+  function getSavedSliderThicknessPercent() {
+    if (userSettings.sliderThickness !== 'saved') {
+      return normalizeSliderThicknessPercent(userSettings.sliderThickness, defaults.sliderThickness);
+    }
+    return normalizeSliderThicknessPercent(read(keys.sliderThickness), defaults.sliderThickness);
+  }
+
+  function updateSliderThickness(overlay) {
+    if (!overlay) return;
+    const pct = getSavedSliderThicknessPercent();
+    const thickness = `${(pct * 0.11).toFixed(2)}px`;
+    overlay.style.setProperty('--tm-visual-track-h', thickness);
+    overlay.querySelectorAll?.('.tm-volume-slider-row')
+      .forEach((row) => row.style.setProperty('--tm-visual-track-h', thickness));
+  }
+
+  function setSavedSliderThicknessPercent(value) {
+    write(keys.sliderThickness, String(normalizeSliderThicknessPercent(value, defaults.sliderThickness)));
+    updateSliderThickness(document.getElementById(overlayId));
+  }
+
+  function resetSavedSliderThicknessPercent() {
+    remove(keys.sliderThickness);
+    updateSliderThickness(document.getElementById(overlayId));
+  }
+
   function isOverlayInteractionFocused(overlay) {
     return overlay?.dataset.tmDragging === 'true' ||
       overlay?.dataset.tmHovering === 'true' ||
@@ -206,7 +239,8 @@ export function createVolumeSettings({
     setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
     getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
-    updateOverlaySize, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode,
+    getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent,
+    updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode,
     isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot
   };
 }
