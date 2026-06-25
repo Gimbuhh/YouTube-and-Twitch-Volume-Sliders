@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Twitch Volume Slider 2.5
+// @name         Twitch Volume Slider 2.5.1
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.5
+// @version      2.5.1
 // @description  Compact in-bar volume indicator that expands into a wide Twitch volume slider.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
@@ -2164,6 +2164,14 @@
       if (getTwitchPlayerControlsRoot()?.contains?.(target)) return false;
       return true;
     }
+    function isTwitchVideoSurfaceClick(event) {
+      const target = event.target;
+      const player = getPlayerContainer();
+      if (!target || !player?.contains?.(target)) return false;
+      return !target.closest?.(
+        '[data-a-target="player-controls"], button, a, input, select, textarea, [role="button"], [role="slider"], [role="menuitem"]'
+      );
+    }
     function releaseTwitchControlsVisibility() {
       const controlsRoot = getTwitchPlayerControlsRoot();
       const controlsShell = getTwitchPlayerControlsShell();
@@ -2204,6 +2212,7 @@
       if (isNativeSettingsMenuOpen()) return;
       clearPostCloseControlsHold();
       keepTwitchControlsVisible();
+      ensureOptionsControlsHoldObserver();
       optionsPostCloseControlsTimer = window.setTimeout(() => {
         endPostCloseControlsHold(!isPointerOverTwitchPlayerArea());
       }, TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS);
@@ -2213,6 +2222,10 @@
         endPostCloseControlsHold(true);
       };
       document.addEventListener("click", optionsPostCloseOutsideHandler, true);
+    }
+    function markTwitchVolumeInteraction(overlay) {
+      markVolumeChangedWhileExpanded(overlay);
+      startPostCloseControlsHold();
     }
     function openVolumeOptionsPopup() {
       clearPostCloseControlsHold();
@@ -2345,7 +2358,7 @@
       disconnectOptionsControlsHoldObserver();
       optionsControlsHoldTargetKey = targetKey;
       optionsControlsHoldObserver = new MutationObserver(() => {
-        if (areTwitchControlsHidden() && isOptionsPopupOpen()) {
+        if (areTwitchControlsHidden() && (isOptionsPopupOpen() || optionsPostCloseControlsTimer)) {
           keepTwitchControlsVisible();
         }
       });
@@ -2426,6 +2439,12 @@
         collapseOverlayIfIdle(overlay);
         updateOverlayOpacity(overlay);
       });
+      const collapseHeldSliderOnVideoClick = (event) => {
+        if (overlay.dataset.tmKeepExpanded !== "true" || !isTwitchVideoSurfaceClick(event)) return;
+        clearExpandedHold(overlay);
+        setOverlayExpanded(overlay, false);
+      };
+      document.addEventListener("click", collapseHeldSliderOnVideoClick, true);
       const iconCell = document.createElement("button");
       iconCell.type = "button";
       iconCell.className = "tm-volume-icon-cell";
@@ -2440,7 +2459,7 @@
         toggleMute(video);
         saveMute(isMuted(video));
         setSliderFromPlayer(slider, label, video);
-        markVolumeChangedWhileExpanded(overlay);
+        markTwitchVolumeInteraction(overlay);
       });
       const panelBg = document.createElement("div");
       panelBg.className = "tm-volume-panel-bg";
@@ -2516,7 +2535,7 @@
         updateSliderBar(slider);
         updateVolumeIndicator(overlay, value, isMuted(video));
         scheduleSaveVolume(value);
-        markVolumeChangedWhileExpanded(overlay);
+        markTwitchVolumeInteraction(overlay);
       };
       const snapDirectClickIfNeeded = () => {
         const currentValue = Number(slider.value) || 0;
@@ -2577,7 +2596,6 @@
         applySliderValue(readSnappedSliderValue(slider));
         cancelScheduledSaveVolume();
         saveVolume(Number(slider.value) || 0);
-        markVolumeChangedWhileExpanded(overlay);
       });
       const onVideoVolumeChange = () => {
         if (Date.now() <= startupLockUntil) {
@@ -2655,8 +2673,10 @@
         window.removeEventListener("blur", finishSliderInteraction);
         window.removeEventListener("resize", onLayoutChange);
         window.removeEventListener("pointermove", markPointerIntent, true);
+        document.removeEventListener("click", collapseHeldSliderOnVideoClick, true);
         controlsObserver.disconnect();
         detachmentObserver.disconnect();
+        clearPostCloseControlsHold();
         clearExpandedHold(overlay);
       };
       overlayLifecycle.set(overlay, cleanup);
