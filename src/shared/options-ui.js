@@ -5,7 +5,8 @@ export function createOptionsUi(dependencies) {
     isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
     setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
-    getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent
+    getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
+    getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent
   } = dependencies;
 
     function getEnabledRadios(group) {
@@ -332,6 +333,28 @@ export function createOptionsUi(dependencies) {
         return section;
     }
 
+    function createThicknessSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+        section.id = 'tm-volume-options-thickness-section';
+        section.appendChild(createOptionsSectionLabel('Bar thickness'));
+
+        section.appendChild(createRangeSettingRow({
+            label: 'Thickness',
+            ariaLabel: 'Bar thickness',
+            resetAriaLabel: 'Reset bar thickness',
+            min: 25,
+            max: 125,
+            step: 5,
+            fallback: 50,
+            getValue: getSavedSliderThicknessPercent,
+            setValue: setSavedSliderThicknessPercent,
+            resetValue: resetSavedSliderThicknessPercent,
+            getFillPercent: (pct) => pct - 25
+        }));
+        return section;
+    }
+
     function buildOptionsPopup() {
         const popup = document.createElement('div');
         popup.id = OPTIONS_POPUP_ID;
@@ -351,6 +374,7 @@ export function createOptionsUi(dependencies) {
         body.appendChild(createModeSection());
         body.appendChild(createPlacementSection());
         body.appendChild(createBehaviorSection());
+        body.appendChild(createThicknessSection());
         body.appendChild(createOpacitySection());
         body.appendChild(createSizeSection());
 

@@ -5,8 +5,8 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', sizeKey:'tm-yt-volume-slider-size' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', sizeKey:'tm-twitch-volume-slider-size' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', sizeKey:'tm-yt-volume-slider-size', thicknessKey:'tm-yt-volume-slider-thickness' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', sizeKey:'tm-twitch-volume-slider-size', thicknessKey:'tm-twitch-volume-slider-thickness' }
 ];
 
 async function openOptions(config, mode = 'on', location = 'controls') {
@@ -29,7 +29,9 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
   assert.equal(hiddenOpacity.style.display,'none');
   const hiddenSize=popup.querySelector('#tm-volume-options-size-section');
   assert.equal(hiddenSize.style.display,'none');
-  const lastVisible=popup.querySelector('#tm-volume-options-location-video');
+  const thicknessSection=popup.querySelector('#tm-volume-options-thickness-section');
+  assert.equal(thicknessSection.style.display,'');
+  const lastVisible=popup.querySelector('#tm-volume-options-thickness-section button');
   lastVisible.focus();
   const forward=new runtime.window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true});
   runtime.document.dispatchEvent(forward);
@@ -43,6 +45,22 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
 
   runtime.document.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
   assert.equal(popup.hidden,true); assert.equal(runtime.document.activeElement,button);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: bar thickness option updates only the visual track`,async()=>{
+  const {runtime,popup}=await openOptions(config);
+  const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  assert.equal(slider.value,'50');
+  slider.value='125';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const row=runtime.document.querySelector('.tm-volume-slider-row');
+  const volumeSlider=runtime.document.getElementById('tm-volume-slider-range');
+  assert.equal(runtime.window.localStorage.getItem(config.thicknessKey),'125');
+  assert.equal(overlay.style.getPropertyValue('--tm-visual-track-h'),'13.75px');
+  assert.equal(row.style.getPropertyValue('--tm-visual-track-h'),'13.75px');
+  assert.equal(volumeSlider.style.height,'');
   runtime.close();
 });
 
