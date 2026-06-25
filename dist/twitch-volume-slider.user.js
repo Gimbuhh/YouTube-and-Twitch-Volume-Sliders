@@ -30,20 +30,34 @@
       arcTrack: VOLUME_ARC_TRACK,
       expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
     } = dependencies;
+    const VISUAL_THUMB_SIZE_PX = 22;
     function updateSliderBar(slider) {
       const value = Number(slider.value) || 0;
       const pct = Math.min(Math.max(value, 0), 100);
       const fadeStart = Math.max(0, pct - 1);
       const fadeEnd = Math.min(100, pct + 1);
-      slider.style.background = `linear-gradient(to right,
+      const background = `linear-gradient(to right,
             ${VOLUME_ACCENT_LIGHT} 0%,
-            ${VOLUME_ACCENT_DARK} ${fadeStart}%,
-            ${VOLUME_ACCENT_MID} ${pct}%,
-            rgba(255, 255, 255, 0.15) ${fadeEnd}%,
+            ${VOLUME_ACCENT_DARK} ${getThumbAlignedTrackStop(fadeStart)},
+            ${VOLUME_ACCENT_MID} ${getThumbAlignedTrackStop(pct)},
+            rgba(255, 255, 255, 0.15) ${getThumbAlignedTrackStop(fadeEnd)},
             rgba(255, 255, 255, 0.15) 100%)`;
-      slider.style.backgroundSize = "calc(100% - var(--tm-thumb-size, 22px)) var(--tm-active-track-h, 9px)";
-      slider.style.backgroundPosition = "center";
-      slider.style.backgroundRepeat = "no-repeat";
+      const track = slider.parentElement?.querySelector?.(".tm-slider-track");
+      if (track) {
+        track.style.background = background;
+        slider.style.background = "transparent";
+      } else {
+        slider.style.background = background;
+        slider.style.backgroundSize = "100% 100%";
+        slider.style.backgroundPosition = "center";
+        slider.style.backgroundRepeat = "no-repeat";
+      }
+    }
+    function getThumbAlignedTrackStop(pct) {
+      if (pct <= 0) return "0%";
+      if (pct >= 100) return "100%";
+      const thumbOffset = VISUAL_THUMB_SIZE_PX * (0.5 - pct / 100);
+      return `calc(${pct}% + ${thumbOffset.toFixed(2)}px)`;
     }
     function updateVolumeIndicator(overlay, value, muted) {
       if (!overlay) return;
@@ -1051,17 +1065,15 @@
 #${OVERLAY_ID} input[type=range] {
   -webkit-appearance: none;
   appearance: none;
-  background: linear-gradient(to right, ${VOLUME_ACCENT_LIGHT} 0%, ${VOLUME_ACCENT_DARK} 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 100%);
-  --tm-active-track-h: 11px;
-  --tm-thumb-size: 22px;
+  background: transparent;
   height: 42px;
-  border-radius: 12px;
+  border: none;
+  border-radius: 999px;
+  box-sizing: border-box;
   outline: none;
   position: relative;
-  background-size: calc(100% - var(--tm-thumb-size, 22px)) var(--tm-active-track-h, 9px);
-  background-position: center;
-  background-repeat: no-repeat;
   transition: all 0.2s ease;
+  z-index: 2;
   overflow: visible;
 }
 
@@ -1069,7 +1081,7 @@
   border: none;
   background: transparent;
   height: var(--tm-active-track-h, 9px);
-  border-radius: 12px;
+  border-radius: var(--tm-track-radius);
 }
 
 #${OVERLAY_ID} input[type=range]::-webkit-slider-thumb {
@@ -1120,7 +1132,7 @@
 #${OVERLAY_ID} input[type=range]::-moz-range-track {
   background: transparent;
   height: var(--tm-active-track-h, 9px);
-  border-radius: 12px;
+  border-radius: var(--tm-track-radius);
   border: none;
   outline: none;
 }
@@ -1226,17 +1238,13 @@
 #${OVERLAY_ID} .tm-volume-controls {
   position: relative;
   z-index: 2;
-  transition: opacity 0.12s ease 0.04s;
 }
 
 #${OVERLAY_ID}.tm-collapsed .tm-volume-controls {
-  opacity: 0;
   pointer-events: none;
-  transition-delay: 0s;
 }
 
 #${OVERLAY_ID}.tm-expanded .tm-volume-controls {
-  opacity: 1;
   pointer-events: auto;
 }
 
@@ -1259,9 +1267,25 @@
 }
 
 #${OVERLAY_ID} .tm-volume-slider-row {
+  --tm-active-track-h: 11px;
+  --tm-thumb-size: 22px;
+  --tm-track-radius: calc(var(--tm-active-track-h, 9px) / 2);
   flex: 1 1 auto;
   min-width: 180px;
   height: 40px;
+}
+
+#${OVERLAY_ID} .tm-slider-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: var(--tm-active-track-h, 9px);
+  border-radius: 999px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
 }
 
 #${OVERLAY_ID} .tm-slider-ticks {
@@ -1276,6 +1300,7 @@
   background-size: 100% 100%;
   opacity: 0;
   transition: opacity 0.2s ease;
+  z-index: 1;
 }
 #${OVERLAY_ID}.tm-expanded .tm-slider-ticks,
 #${OVERLAY_ID}:hover .tm-slider-ticks {
@@ -2358,6 +2383,8 @@
       sliderWrap.style.alignItems = "center";
       const tickOverlay = document.createElement("div");
       tickOverlay.className = "tm-slider-ticks";
+      const sliderTrack = document.createElement("div");
+      sliderTrack.className = "tm-slider-track";
       const slider = document.createElement("input");
       slider.id = SLIDER_ID;
       slider.type = "range";
@@ -2368,7 +2395,6 @@
       slider.style.display = "block";
       slider.style.margin = "0";
       slider.style.cursor = "pointer";
-      slider.style.backgroundSize = "calc(100% - var(--tm-thumb-size, 22px)) 100%";
       slider.setAttribute("aria-label", "Volume");
       slider.setAttribute("aria-describedby", VALUE_LABEL_ID);
       const initVol = getSavedVolume();
@@ -2506,6 +2532,7 @@
       if (controlsForLayout) {
         controlsObserver.observe(controlsForLayout, { attributes: true, attributeFilter: ["class", "aria-hidden", "style"] });
       }
+      sliderWrap.appendChild(sliderTrack);
       sliderWrap.appendChild(slider);
       sliderWrap.appendChild(tickOverlay);
       overlay.appendChild(panelBg);

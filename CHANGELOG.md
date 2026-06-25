@@ -2,6 +2,11 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## Unreleased
+
+- Refined the expanded volume slider into a smooth rounded pill track with thumb-aligned fill at low and high values.
+- Removed the slider and percentage fade-in during expansion so the control reveals cleanly without blinking.
+
 ## 2.4.6 - 2026-06-24
 
 - Fixed Twitch's on-video slider so deliberate hover expands it even while Twitch keeps the native player controls hidden.
