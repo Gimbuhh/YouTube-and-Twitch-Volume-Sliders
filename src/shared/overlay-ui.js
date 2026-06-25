@@ -6,20 +6,36 @@ export function createOverlayUi(dependencies) {
     arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
   } = dependencies;
 
+    const VISUAL_THUMB_SIZE_PX = 22;
+
     function updateSliderBar(slider) {
         const value = Number(slider.value) || 0;
         const pct = Math.min(Math.max(value, 0), 100);
         const fadeStart = Math.max(0, pct - 1);
         const fadeEnd = Math.min(100, pct + 1);
-        slider.style.background = `linear-gradient(to right,
+        const background = `linear-gradient(to right,
             ${VOLUME_ACCENT_LIGHT} 0%,
-            ${VOLUME_ACCENT_DARK} ${fadeStart}%,
-            ${VOLUME_ACCENT_MID} ${pct}%,
-            rgba(255, 255, 255, 0.15) ${fadeEnd}%,
+            ${VOLUME_ACCENT_DARK} ${getThumbAlignedTrackStop(fadeStart)},
+            ${VOLUME_ACCENT_MID} ${getThumbAlignedTrackStop(pct)},
+            rgba(255, 255, 255, 0.15) ${getThumbAlignedTrackStop(fadeEnd)},
             rgba(255, 255, 255, 0.15) 100%)`;
-        slider.style.backgroundSize = 'calc(100% - var(--tm-thumb-size, 22px)) var(--tm-active-track-h, 9px)';
-        slider.style.backgroundPosition = 'center';
-        slider.style.backgroundRepeat = 'no-repeat';
+        const track = slider.parentElement?.querySelector?.('.tm-slider-track');
+        if (track) {
+            track.style.background = background;
+            slider.style.background = 'transparent';
+        } else {
+            slider.style.background = background;
+            slider.style.backgroundSize = '100% 100%';
+            slider.style.backgroundPosition = 'center';
+            slider.style.backgroundRepeat = 'no-repeat';
+        }
+    }
+
+    function getThumbAlignedTrackStop(pct) {
+        if (pct <= 0) return '0%';
+        if (pct >= 100) return '100%';
+        const thumbOffset = VISUAL_THUMB_SIZE_PX * (0.5 - (pct / 100));
+        return `calc(${pct}% + ${thumbOffset.toFixed(2)}px)`;
     }
 
     function updateVolumeIndicator(overlay, value, muted) {
