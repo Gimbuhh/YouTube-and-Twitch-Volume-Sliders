@@ -45,8 +45,6 @@ await mkdir(resolve(root, 'release-notes'), { recursive: true });
 for (const version of versions) {
   const release = releases.get(version);
   const sections = [
-    `# Volume Sliders ${version}`,
-    '',
     `> Historical release. The exact original release date was not recorded; this version was archived by ${archivedBy}.`,
   ];
   for (const platform of release.platforms) {
