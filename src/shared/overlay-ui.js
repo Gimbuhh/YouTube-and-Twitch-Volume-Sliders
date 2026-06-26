@@ -48,13 +48,13 @@ export function createOverlayUi(dependencies) {
     function updateVolumeIndicator(overlay, value, muted) {
         if (!overlay) return;
         const pct = muted ? 0 : Math.min(Math.max(Number(value) || 0, 0), 100);
-        overlay.title = muted ? 'Muted' : `Volume ${Math.round(pct)}%`;
-        overlay.setAttribute('aria-label', overlay.title);
+        overlay.removeAttribute('title');
+        overlay.setAttribute('aria-label', muted ? 'Muted' : `Volume ${Math.round(pct)}%`);
         const muteButton = overlay.querySelector('.tm-volume-icon-cell');
         if (muteButton) {
             const action = muted ? 'Unmute' : 'Mute';
             muteButton.setAttribute('aria-label', action);
-            muteButton.title = action;
+            muteButton.removeAttribute('title');
         }
 
         const indicator = overlay.querySelector('.tm-volume-indicator');

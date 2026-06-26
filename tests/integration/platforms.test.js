@@ -27,6 +27,8 @@ for(const config of platforms){
     });
     assert.equal(fixture.state.muted,true);
     const slider=runtime.document.getElementById('tm-volume-slider-range');
+    const label=runtime.document.getElementById('tm-volume-slider-value');
+    assert.equal(label.textContent,'Muted');
     assert.ok(slider); slider.value='60'; slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
     assert.equal(fixture.state.muted,false); assert.equal(fixture.state.volume,config.file==='youtube'?60:.6);
     runtime.close();
@@ -51,6 +53,7 @@ for(const config of platforms){
     const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const mute=overlay.querySelector('button.tm-volume-icon-cell');
     assert.equal(overlay.hasAttribute('tabindex'),false); assert.equal(mute.getAttribute('aria-label'),'Mute');
+    assert.equal(overlay.hasAttribute('title'),false); assert.equal(mute.hasAttribute('title'),false);
     overlay.remove(); await new Promise(resolve=>runtime.window.setTimeout(resolve,50));
     assert.equal(runtime.document.querySelectorAll('#tm-volume-slider-overlay').length,1);
     runtime.close();
@@ -78,6 +81,32 @@ for(const config of platforms){
     assert.ok(overlay.classList.contains('tm-expanded'));
     assert.equal(overlay.style.width,'var(--tm-pill-expanded-width)');
     assert.equal(overlay.style.transform,'translateX(-50%) scale(var(--tm-overlay-scale, 1))');
+    runtime.close();
+  });
+
+  test(`${config.name}: volume percentage label matches native YouTube control text sizing`,async()=>{
+    const {runtime}=await loadPlatform(config);
+    const label=runtime.document.getElementById('tm-volume-slider-value');
+    const style=runtime.window.getComputedStyle(label);
+    assert.equal(style.fontSize,'14px');
+    assert.equal(style.fontWeight,'500');
+    assert.equal(style.lineHeight,'40px');
+    assert.match(style.fontFamily,/YouTube Noto/);
+    runtime.close();
+  });
+
+  test(`${config.name}: volume percentage label stays centered in a compact slot`,async()=>{
+    const {runtime}=await loadPlatform(config);
+    const row=runtime.document.querySelector('.tm-volume-top-row');
+    const label=runtime.document.getElementById('tm-volume-slider-value');
+    const rowStyle=runtime.window.getComputedStyle(row);
+    const labelStyle=runtime.window.getComputedStyle(label);
+    assert.equal(rowStyle.width,'96px');
+    assert.equal(labelStyle.left,'36px');
+    assert.equal(labelStyle.width,'58px');
+    assert.equal(labelStyle.textAlign,'center');
+    assert.equal(labelStyle.textShadow,'0 0 2px rgb(0, 0, 0)');
+    assert.equal(labelStyle.transform,'translateY(-50%)');
     runtime.close();
   });
 }
