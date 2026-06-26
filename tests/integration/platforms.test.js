@@ -53,6 +53,7 @@ for(const config of platforms){
     const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const mute=overlay.querySelector('button.tm-volume-icon-cell');
     assert.equal(overlay.hasAttribute('tabindex'),false); assert.equal(mute.getAttribute('aria-label'),'Mute');
+    assert.equal(overlay.hasAttribute('title'),false); assert.equal(mute.hasAttribute('title'),false);
     overlay.remove(); await new Promise(resolve=>runtime.window.setTimeout(resolve,50));
     assert.equal(runtime.document.querySelectorAll('#tm-volume-slider-overlay').length,1);
     runtime.close();
@@ -99,8 +100,8 @@ for(const config of platforms){
     const label=runtime.document.getElementById('tm-volume-slider-value');
     const rowStyle=runtime.window.getComputedStyle(row);
     const labelStyle=runtime.window.getComputedStyle(label);
-    assert.equal(rowStyle.width,'92px');
-    assert.equal(labelStyle.left,'45px');
+    assert.equal(rowStyle.width,'84px');
+    assert.equal(labelStyle.left,'41px');
     assert.equal(labelStyle.width,'42px');
     runtime.close();
   });

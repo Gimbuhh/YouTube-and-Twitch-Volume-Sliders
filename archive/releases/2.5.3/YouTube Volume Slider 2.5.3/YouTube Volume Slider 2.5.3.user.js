@@ -69,13 +69,13 @@
     function updateVolumeIndicator(overlay, value, muted) {
       if (!overlay) return;
       const pct = muted ? 0 : Math.min(Math.max(Number(value) || 0, 0), 100);
-      overlay.title = muted ? "Muted" : `Volume ${Math.round(pct)}%`;
-      overlay.setAttribute("aria-label", overlay.title);
+      overlay.removeAttribute("title");
+      overlay.setAttribute("aria-label", muted ? "Muted" : `Volume ${Math.round(pct)}%`);
       const muteButton = overlay.querySelector(".tm-volume-icon-cell");
       if (muteButton) {
         const action = muted ? "Unmute" : "Mute";
         muteButton.setAttribute("aria-label", action);
-        muteButton.title = action;
+        muteButton.removeAttribute("title");
       }
       const indicator = overlay.querySelector(".tm-volume-indicator");
       if (indicator) {
@@ -1446,7 +1446,7 @@
 #${OVERLAY_ID} .tm-volume-top-row {
   flex: 0 0 auto;
   position: relative;
-  width: 92px;
+  width: 84px;
   height: 40px;
   box-sizing: border-box;
   pointer-events: none !important;
@@ -1454,7 +1454,7 @@
 
 #${OVERLAY_ID} #${VALUE_LABEL_ID} {
   position: absolute;
-  left: 45px;
+  left: 41px;
   top: 50%;
   width: 42px;
   transform: translateY(-50%);
@@ -1471,8 +1471,8 @@
   --tm-visual-track-h: 5px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-visual-track-h, 5px) / 2);
-  flex: 0 0 calc(var(--tm-pill-expanded-width) - 104px);
-  width: calc(var(--tm-pill-expanded-width) - 104px);
+  flex: 0 0 calc(var(--tm-pill-expanded-width) - 96px);
+  width: calc(var(--tm-pill-expanded-width) - 96px);
   min-width: 0;
   height: 40px;
 }
