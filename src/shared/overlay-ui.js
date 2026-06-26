@@ -6,18 +6,19 @@ export function createOverlayUi(dependencies) {
     arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
   } = dependencies;
 
-    const VISUAL_THUMB_SIZE_PX = 22;
+    const DEFAULT_VISUAL_THUMB_SIZE_PX = 22;
 
     function updateSliderBar(slider) {
         const value = Number(slider.value) || 0;
         const pct = Math.min(Math.max(value, 0), 100);
         const fadeStart = Math.max(0, pct - 1);
         const fadeEnd = Math.min(100, pct + 1);
+        const thumbSize = getSliderThumbSize(slider);
         const background = `linear-gradient(to right,
             ${VOLUME_ACCENT_LIGHT} 0%,
-            ${VOLUME_ACCENT_DARK} ${getThumbAlignedTrackStop(fadeStart)},
-            ${VOLUME_ACCENT_MID} ${getThumbAlignedTrackStop(pct)},
-            rgba(255, 255, 255, 0.15) ${getThumbAlignedTrackStop(fadeEnd)},
+            ${VOLUME_ACCENT_DARK} ${getThumbAlignedTrackStop(fadeStart, thumbSize)},
+            ${VOLUME_ACCENT_MID} ${getThumbAlignedTrackStop(pct, thumbSize)},
+            rgba(255, 255, 255, 0.15) ${getThumbAlignedTrackStop(fadeEnd, thumbSize)},
             rgba(255, 255, 255, 0.15) 100%)`;
         const track = slider.parentElement?.querySelector?.('.tm-slider-track');
         if (track) {
@@ -31,10 +32,16 @@ export function createOverlayUi(dependencies) {
         }
     }
 
-    function getThumbAlignedTrackStop(pct) {
+    function getSliderThumbSize(slider) {
+        const style = window.getComputedStyle?.(slider.parentElement || slider);
+        const parsed = Number.parseFloat(style?.getPropertyValue('--tm-thumb-size'));
+        return Number.isFinite(parsed) ? parsed : DEFAULT_VISUAL_THUMB_SIZE_PX;
+    }
+
+    function getThumbAlignedTrackStop(pct, thumbSize = DEFAULT_VISUAL_THUMB_SIZE_PX) {
         if (pct <= 0) return '0%';
         if (pct >= 100) return '100%';
-        const thumbOffset = VISUAL_THUMB_SIZE_PX * (0.5 - (pct / 100));
+        const thumbOffset = thumbSize * (0.5 - (pct / 100));
         return `calc(${pct}% + ${thumbOffset.toFixed(2)}px)`;
     }
 
@@ -63,9 +70,9 @@ export function createOverlayUi(dependencies) {
         }
     }
 
-    function setOverlayExpanded(overlay, expanded, force = false) {
+    function setOverlayExpanded(overlay, expanded, force = false, options = {}) {
         if (!overlay) return;
-        if (!expanded && isAlwaysExpandedEnabled()) {
+        if (!expanded && isAlwaysExpandedEnabled() && !options.ignoreAlwaysExpanded) {
             expanded = true;
         }
         if (!force && (
@@ -107,8 +114,8 @@ export function createOverlayUi(dependencies) {
             justifyContent: 'flex-start',
             gap: '0',
             background: 'transparent',
-            transform: onVideo ? 'translateX(-20px) scale(var(--tm-overlay-scale, 1))' : 'translateY(0)',
-            transformOrigin: onVideo ? 'left bottom' : 'center center'
+            transform: onVideo ? 'translateX(-50%) scale(var(--tm-overlay-scale, 1))' : 'translateY(0)',
+            transformOrigin: onVideo ? 'center bottom' : 'center center'
         };
 
         if (expanded) {

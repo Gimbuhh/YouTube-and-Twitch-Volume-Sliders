@@ -63,21 +63,21 @@ for(const config of platforms){
     runtime.close();
   });
 
-  test(`${config.name}: on-video slider expands from a stable icon anchor`,async()=>{
+  test(`${config.name}: on-video slider uses the version 2.5 centered expansion`,async()=>{
     const {runtime}=await loadPlatform(config,current=>{
       current.window.localStorage.setItem(config.locationKey,'video');
     });
     const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     assert.ok(overlay.classList.contains('tm-on-video'));
     assert.equal(overlay.style.left,'50%');
-    assert.equal(overlay.style.transform,'translateX(-20px) scale(var(--tm-overlay-scale, 1))');
-    assert.equal(overlay.style.transformOrigin,'left bottom');
+    assert.equal(overlay.style.transform,'translateX(-50%) scale(var(--tm-overlay-scale, 1))');
+    assert.equal(overlay.style.transformOrigin,'center bottom');
 
     runtime.window.dispatchEvent(new runtime.window.MouseEvent('pointermove',{bubbles:true}));
     overlay.dispatchEvent(new runtime.window.MouseEvent('mouseenter'));
     assert.ok(overlay.classList.contains('tm-expanded'));
     assert.equal(overlay.style.width,'var(--tm-pill-expanded-width)');
-    assert.equal(overlay.style.transform,'translateX(-20px) scale(var(--tm-overlay-scale, 1))');
+    assert.equal(overlay.style.transform,'translateX(-50%) scale(var(--tm-overlay-scale, 1))');
     runtime.close();
   });
 }
