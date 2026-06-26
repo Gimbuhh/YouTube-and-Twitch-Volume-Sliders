@@ -430,7 +430,7 @@ export function startYouTubeVolumeSlider() {
 #${OVERLAY_ID} .tm-volume-top-row {
   flex: 0 0 auto;
   position: relative;
-  width: 92px;
+  width: 96px;
   height: 40px;
   box-sizing: border-box;
   pointer-events: none !important;
@@ -438,9 +438,9 @@ export function startYouTubeVolumeSlider() {
 
 #${OVERLAY_ID} #${VALUE_LABEL_ID} {
   position: absolute;
-  left: 42px;
+  left: 36px;
   top: 50%;
-  width: 46px;
+  width: 58px;
   transform: translateY(-50%);
   white-space: nowrap;
   font: 500 14px/40px "YouTube Noto", Roboto, Arial, Helvetica, sans-serif;
@@ -456,8 +456,8 @@ export function startYouTubeVolumeSlider() {
   --tm-visual-track-h: 5px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-visual-track-h, 5px) / 2);
-  flex: 0 0 calc(var(--tm-pill-expanded-width) - 104px);
-  width: calc(var(--tm-pill-expanded-width) - 104px);
+  flex: 0 0 calc(var(--tm-pill-expanded-width) - 108px);
+  width: calc(var(--tm-pill-expanded-width) - 108px);
   min-width: 0;
   height: 40px;
 }
@@ -673,7 +673,7 @@ export function startYouTubeVolumeSlider() {
         const displayValue = getVolume(video);
         slider.value = String(displayValue);
         if (label) {
-            label.textContent = muted ? 'M' : `${displayValue}%`;
+            label.textContent = muted ? 'Muted' : `${displayValue}%`;
         }
         updateSliderBar(slider);
         updateVolumeIndicator(document.getElementById(OVERLAY_ID), displayValue, muted);
