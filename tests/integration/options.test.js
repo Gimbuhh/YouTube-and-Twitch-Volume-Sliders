@@ -26,6 +26,25 @@ function waitForTimers(runtime) {
   return new Promise((resolve)=>runtime.window.setTimeout(resolve,0));
 }
 
+function hideAndRevealControls(runtime, config) {
+  if (config.file === 'youtube') {
+    const player=runtime.document.getElementById('movie_player');
+    player.classList.add('ytp-autohide');
+    return waitForTimers(runtime).then(()=>{
+      player.classList.remove('ytp-autohide','ytp-hide-controls');
+      return waitForTimers(runtime);
+    });
+  }
+  const controls=runtime.document.querySelector('[data-a-target="player-controls"]');
+  controls.setAttribute('data-a-visible','false');
+  controls.setAttribute('aria-hidden','true');
+  return waitForTimers(runtime).then(()=>{
+    controls.setAttribute('data-a-visible','true');
+    controls.setAttribute('aria-hidden','false');
+    return waitForTimers(runtime);
+  });
+}
+
 for (const config of platforms) test(`${config.name}: options dialog contains focus and restores it on Escape`,async()=>{
   const {runtime,button,popup}=await openOptions(config);
   assert.equal(popup.hidden,false); assert.equal(popup.contains(runtime.document.activeElement),true);
@@ -80,6 +99,22 @@ for (const config of platforms) test(`${config.name}: thickness drag previews ex
   slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
   assert.equal(overlay.classList.contains('tm-expanded'),true);
   runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: thickness input starts preview when first hold begins after controls reveal`,async()=>{
+  const {runtime,popup}=await openOptions(config,'on','video');
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  await hideAndRevealControls(runtime, config);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+
+  slider.value='80';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  slider.dispatchEvent(new runtime.window.Event('change',{bubbles:true}));
   await waitForTimers(runtime);
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
   runtime.close();

@@ -517,15 +517,39 @@
         slider.addEventListener(type, (event) => event.stopPropagation());
       });
       let previewActive = false;
+      let previewRetryTimer = 0;
+      const hasPreview = !!(onPreviewStart || onPreviewEnd);
+      const view = document2.defaultView;
+      const clearPreviewRetry = () => {
+        if (!previewRetryTimer) return;
+        view?.clearTimeout?.(previewRetryTimer);
+        previewRetryTimer = 0;
+      };
+      const runPreviewStart = () => onPreviewStart?.();
+      const schedulePreviewRetry = () => {
+        clearPreviewRetry();
+        if (!view) return;
+        previewRetryTimer = view.setTimeout(() => {
+          previewRetryTimer = 0;
+          if (previewActive) runPreviewStart();
+        }, 0);
+      };
       const startPreview = (event) => {
+        if (!hasPreview) return;
         if (event?.type === "mousedown" && event.button !== 0) return;
-        if (previewActive) return;
+        if (previewActive) {
+          runPreviewStart();
+          return;
+        }
         previewActive = true;
-        onPreviewStart?.();
+        runPreviewStart();
+        schedulePreviewRetry();
       };
       const endPreview = () => {
+        if (!hasPreview) return;
         if (!previewActive) return;
         previewActive = false;
+        clearPreviewRetry();
         onPreviewEnd?.();
       };
       ["pointerdown", "mousedown", "touchstart"].forEach((type) => {
@@ -536,12 +560,14 @@
       });
       slider.addEventListener("blur", endPreview);
       slider.addEventListener("input", () => {
+        startPreview();
         const value = Number(slider.value);
         const pct = Number.isFinite(value) ? value : fallback;
         slider.style.setProperty("--tm-opacity-fill", `${getFillPercent(pct)}%`);
         valueEl.textContent = `${Math.round(pct)}%`;
         setValue(pct);
       });
+      slider.addEventListener("change", endPreview);
       resetBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
