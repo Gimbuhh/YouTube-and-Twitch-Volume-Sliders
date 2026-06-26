@@ -441,17 +441,11 @@ export function startYouTubeVolumeSlider() {
   left: 42px;
   top: 50%;
   width: 46px;
-  height: 28px;
   transform: translateY(-50%);
   white-space: nowrap;
   font: 400 14px/16px "YouTube Noto", Roboto, Arial, sans-serif;
   font-variant-numeric: tabular-nums;
   color: #fff;
-  background: rgba(0, 0, 0, 0.28);
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   text-align: center;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
   user-select: none;

@@ -103,8 +103,6 @@ for(const config of platforms){
     assert.equal(rowStyle.width,'92px');
     assert.equal(labelStyle.left,'42px');
     assert.equal(labelStyle.width,'46px');
-    assert.equal(labelStyle.height,'28px');
-    assert.equal(labelStyle.backgroundColor,'rgba(0, 0, 0, 0.28)');
     assert.equal(labelStyle.textAlign,'center');
     assert.equal(labelStyle.textShadow,'0 1px 2px rgba(0, 0, 0, 0.45)');
     assert.equal(labelStyle.transform,'translateY(-50%)');
