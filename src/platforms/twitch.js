@@ -526,8 +526,14 @@ export function startTwitchVolumeSlider() {
   left: 42px;
   top: 50%;
   width: 46px;
+  height: 28px;
   transform: translateY(-50%);
   white-space: nowrap;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #${OVERLAY_ID} .tm-volume-slider-row {
@@ -1776,13 +1782,20 @@ export function startTwitchVolumeSlider() {
             font: '400 14px/16px "YouTube Noto", Roboto, Arial, sans-serif',
             fontVariantNumeric: 'tabular-nums',
             color: '#fff',
+            background: 'rgba(0, 0, 0, 0.28)',
+            borderRadius: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             textAlign: 'center',
+            textShadow: '0 1px 2px rgba(0, 0, 0, 0.45)',
             userSelect: 'none',
             letterSpacing: '0',
             position: 'absolute',
             left: '42px',
             top: '50%',
             width: '46px',
+            height: '28px',
             transform: 'translateY(-50%)',
             whiteSpace: 'nowrap'
         });

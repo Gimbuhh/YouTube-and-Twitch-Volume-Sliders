@@ -4,4 +4,5 @@
 - Reduced the empty spacing around the custom volume percentage label and shortened the muted label to "M".
 - Removed redundant hover tooltips from the custom volume slider controls.
 - Centered the volume label in a compact fixed-width slot so short and long values stay visually balanced before the bar.
+- Added a native-style text shadow and subtle dark label background to improve readability over video.
 - Kept native player settings clicks responsive while the volume options popup is open.
