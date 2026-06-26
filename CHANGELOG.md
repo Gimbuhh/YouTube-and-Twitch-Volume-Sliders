@@ -2,6 +2,15 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.5.2 - 2026-06-26
+
+- Changed the default Bar thickness setting from 50% to 75%.
+- Kept the volume slider grabber visually balanced with the selected bar thickness and synced its size changes with the bar preview.
+- Expanded the volume slider while Bar thickness is being dragged when Always expanded is off, then restored the normal collapsed state on release.
+- Added on-video opacity previews so Idle shows the collapsed slider and Active shows the expanded slider while dragging.
+- Restored the Show on video expand/collapse animation to the centered version 2.5 behavior.
+- Fixed the first settings-slider hold after video controls hide and reappear so the volume slider expands immediately instead of only on later drags.
+
 ## 2.5.1 - 2026-06-26
 
 - Fixed Twitch's on-video slider so clicking the video after a slider interaction keeps Twitch's native controls open long enough for the click to behave normally.
