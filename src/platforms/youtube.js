@@ -28,7 +28,7 @@ export function startYouTubeVolumeSlider() {
     const DEFAULT_OVERLAY_OPACITY_IDLE = 45;
     const DEFAULT_OVERLAY_OPACITY_ACTIVE = 95;
     const DEFAULT_OVERLAY_SIZE = 100;
-    const DEFAULT_SLIDER_THICKNESS = 50;
+    const DEFAULT_SLIDER_THICKNESS = 75;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
     const NAV_REATTACH_DELAY_MS = 700;
@@ -58,7 +58,7 @@ export function startYouTubeVolumeSlider() {
         overlayOpacityFocused: 'saved',
         // On-video slider size: 'saved' or 100-200 as a percentage. Default: 100
         overlaySize: 'saved',
-        // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 50
+        // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 75
         sliderThickness: 'saved'
     };
 
@@ -81,14 +81,14 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage: localStorage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
         keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
         onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
         clearExpandedHold: (overlay) => clearExpandedHold(overlay),
-        setOverlayExpanded: (overlay, expanded) => setOverlayExpanded(overlay, expanded),
+        setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
         collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force)
     });
     const { getSavedVolume, readSnappedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
@@ -1153,7 +1153,9 @@ export function startYouTubeVolumeSlider() {
         isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
         setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
         getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
-        getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent
+        getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent,
+        beginThicknessSliderPreview, endThicknessSliderPreview,
+        beginOpacitySliderPreview, endOpacitySliderPreview
     });
 
 
