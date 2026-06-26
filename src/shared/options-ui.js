@@ -264,23 +264,10 @@ export function createOptionsUi(dependencies) {
             slider.addEventListener(type, (event) => event.stopPropagation());
         });
         let previewActive = false;
-        let previewRetryTimer = 0;
         const hasPreview = !!(onPreviewStart || onPreviewEnd);
         const view = document.defaultView;
-        const clearPreviewRetry = () => {
-            if (!previewRetryTimer) return;
-            view?.clearTimeout?.(previewRetryTimer);
-            previewRetryTimer = 0;
-        };
         const runPreviewStart = () => onPreviewStart?.();
-        const schedulePreviewRetry = () => {
-            clearPreviewRetry();
-            if (!view) return;
-            previewRetryTimer = view.setTimeout(() => {
-                previewRetryTimer = 0;
-                if (previewActive) runPreviewStart();
-            }, 0);
-        };
+        const isSliderEvent = (event) => event?.target === slider || event?.composedPath?.().includes(slider);
         const startPreview = (event) => {
             if (!hasPreview) return;
             if (event?.type === 'mousedown' && event.button !== 0) return;
@@ -290,17 +277,22 @@ export function createOptionsUi(dependencies) {
             }
             previewActive = true;
             runPreviewStart();
-            schedulePreviewRetry();
+        };
+        const startPreviewFromCapture = (event) => {
+            if (isSliderEvent(event)) startPreview(event);
         };
         const endPreview = () => {
             if (!hasPreview) return;
             if (!previewActive) return;
             previewActive = false;
-            clearPreviewRetry();
             onPreviewEnd?.();
         };
         ['pointerdown', 'mousedown', 'touchstart'].forEach((type) => {
             slider.addEventListener(type, startPreview);
+        });
+        [document, view].filter(Boolean).forEach((target) => {
+            ['pointerdown', 'mousedown', 'touchstart']
+                .forEach((type) => target.addEventListener(type, startPreviewFromCapture, true));
         });
         [document, document.defaultView].filter(Boolean).forEach((target) => {
             ['pointerup', 'pointercancel', 'mouseup', 'touchend', 'touchcancel', 'blur']

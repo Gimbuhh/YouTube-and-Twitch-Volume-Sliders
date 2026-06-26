@@ -120,6 +120,22 @@ for (const config of platforms) test(`${config.name}: thickness input starts pre
   runtime.close();
 });
 
+for (const config of platforms) test(`${config.name}: thickness hold starts preview before reveal handlers can swallow it`,async()=>{
+  const {runtime,popup}=await openOptions(config,'on','video');
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  await hideAndRevealControls(runtime, config);
+  popup.addEventListener('pointerdown',(event)=>event.stopImmediatePropagation(),true);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+
+  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true,composed:true}));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  runtime.close();
+});
+
 for (const config of platforms) test(`${config.name}: thickness drag preview works on the first hold when overlay is recreated`,async()=>{
   const {runtime,popup}=await openOptions(config);
   const originalOverlay=runtime.document.getElementById('tm-volume-slider-overlay');

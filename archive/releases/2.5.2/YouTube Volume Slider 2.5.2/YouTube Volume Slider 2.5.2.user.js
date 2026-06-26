@@ -517,23 +517,10 @@
         slider.addEventListener(type, (event) => event.stopPropagation());
       });
       let previewActive = false;
-      let previewRetryTimer = 0;
       const hasPreview = !!(onPreviewStart || onPreviewEnd);
       const view = document2.defaultView;
-      const clearPreviewRetry = () => {
-        if (!previewRetryTimer) return;
-        view?.clearTimeout?.(previewRetryTimer);
-        previewRetryTimer = 0;
-      };
       const runPreviewStart = () => onPreviewStart?.();
-      const schedulePreviewRetry = () => {
-        clearPreviewRetry();
-        if (!view) return;
-        previewRetryTimer = view.setTimeout(() => {
-          previewRetryTimer = 0;
-          if (previewActive) runPreviewStart();
-        }, 0);
-      };
+      const isSliderEvent = (event) => event?.target === slider || event?.composedPath?.().includes(slider);
       const startPreview = (event) => {
         if (!hasPreview) return;
         if (event?.type === "mousedown" && event.button !== 0) return;
@@ -543,17 +530,21 @@
         }
         previewActive = true;
         runPreviewStart();
-        schedulePreviewRetry();
+      };
+      const startPreviewFromCapture = (event) => {
+        if (isSliderEvent(event)) startPreview(event);
       };
       const endPreview = () => {
         if (!hasPreview) return;
         if (!previewActive) return;
         previewActive = false;
-        clearPreviewRetry();
         onPreviewEnd?.();
       };
       ["pointerdown", "mousedown", "touchstart"].forEach((type) => {
         slider.addEventListener(type, startPreview);
+      });
+      [document2, view].filter(Boolean).forEach((target) => {
+        ["pointerdown", "mousedown", "touchstart"].forEach((type) => target.addEventListener(type, startPreviewFromCapture, true));
       });
       [document2, document2.defaultView].filter(Boolean).forEach((target) => {
         ["pointerup", "pointercancel", "mouseup", "touchend", "touchcancel", "blur"].forEach((type) => target.addEventListener(type, endPreview, true));
@@ -1281,7 +1272,7 @@
   box-sizing: border-box;
   outline: none;
   position: relative;
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
   z-index: 2;
   overflow: visible;
 }
@@ -1303,7 +1294,7 @@
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
   margin-top: calc((var(--tm-active-track-h, 9px) - var(--tm-thumb-size, 22px)) / 2);
 }
 
@@ -1325,7 +1316,7 @@
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 #${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {

@@ -336,7 +336,7 @@ export function startTwitchVolumeSlider() {
   box-sizing: border-box;
   outline: none;
   position: relative;
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
   z-index: 2;
   overflow: visible;
 }
@@ -358,7 +358,7 @@ export function startTwitchVolumeSlider() {
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
   margin-top: calc((var(--tm-active-track-h, 9px) - var(--tm-thumb-size, 22px)) / 2);
 }
 
@@ -380,7 +380,7 @@ export function startTwitchVolumeSlider() {
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 #${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {
