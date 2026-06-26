@@ -84,11 +84,13 @@ export function createVolumeSettings({
   onModeChanged,
   clearExpandedHold,
   setOverlayExpanded,
-  collapseOverlayIfIdle
+  collapseOverlayIfIdle,
+  ensureOverlay
 }) {
   const read = (key) => { try { return storage.getItem(key); } catch { return null; } };
   const write = (key, value) => { try { storage.setItem(key, value); } catch { /* storage may be unavailable */ } };
   const remove = (key) => { try { storage.removeItem(key); } catch { /* storage may be unavailable */ } };
+  const getOverlay = () => ensureOverlay?.() || document.getElementById(overlayId);
 
   function getSavedVolumeSliderMode() {
     return normalizeVolumeSliderMode(read(keys.mode)) || 'on';
@@ -134,7 +136,7 @@ export function createVolumeSettings({
 
   function setAlwaysExpandedEnabled(enabled) {
     write(keys.expanded, enabled ? 'true' : 'false');
-    const overlay = document.getElementById(overlayId);
+    const overlay = getOverlay();
     if (!overlay) return;
     clearExpandedHold(overlay);
     if (enabled) setOverlayExpanded(overlay, true);
@@ -159,12 +161,12 @@ export function createVolumeSettings({
   function setSavedOverlayOpacityPercent(focused, value) {
     const fallback = focused ? defaults.activeOpacity : defaults.idleOpacity;
     write(focused ? keys.activeOpacity : keys.idleOpacity, String(normalizeOpacityPercent(value, fallback)));
-    updateOverlayOpacity(document.getElementById(overlayId));
+    updateOverlayOpacity(getOverlay());
   }
 
   function resetSavedOverlayOpacityPercent(focused) {
     remove(focused ? keys.activeOpacity : keys.idleOpacity);
-    updateOverlayOpacity(document.getElementById(overlayId));
+    updateOverlayOpacity(getOverlay());
   }
 
   function getSavedOverlaySizePercent() {
@@ -182,12 +184,12 @@ export function createVolumeSettings({
 
   function setSavedOverlaySizePercent(value) {
     write(keys.overlaySize, String(normalizeOverlaySizePercent(value, defaults.overlaySize)));
-    updateOverlaySize(document.getElementById(overlayId));
+    updateOverlaySize(getOverlay());
   }
 
   function resetSavedOverlaySizePercent() {
     remove(keys.overlaySize);
-    updateOverlaySize(document.getElementById(overlayId));
+    updateOverlaySize(getOverlay());
   }
 
   function getSavedSliderThicknessPercent() {
@@ -200,24 +202,71 @@ export function createVolumeSettings({
   function updateSliderThickness(overlay) {
     if (!overlay) return;
     const pct = getSavedSliderThicknessPercent();
-    const thickness = `${(pct * 0.11).toFixed(2)}px`;
+    const trackPx = pct * 0.11;
+    const thumbPx = Math.min(28, Math.max(14, trackPx * 2));
+    const thickness = `${trackPx.toFixed(2)}px`;
+    const thumbSize = `${thumbPx.toFixed(2)}px`;
     overlay.style.setProperty('--tm-visual-track-h', thickness);
+    overlay.style.setProperty('--tm-thumb-size', thumbSize);
     overlay.querySelectorAll?.('.tm-volume-slider-row')
-      .forEach((row) => row.style.setProperty('--tm-visual-track-h', thickness));
+      .forEach((row) => {
+        row.style.setProperty('--tm-visual-track-h', thickness);
+        row.style.setProperty('--tm-thumb-size', thumbSize);
+      });
+  }
+
+  function restoreOverlayPreview(overlay) {
+    if (!overlay) return;
+    delete overlay.dataset.tmOptionsPreview;
+    if (isAlwaysExpandedEnabled()) setOverlayExpanded(overlay, true, true);
+    else collapseOverlayIfIdle(overlay, true);
+    updateOverlayOpacity(overlay);
   }
 
   function setSavedSliderThicknessPercent(value) {
     write(keys.sliderThickness, String(normalizeSliderThicknessPercent(value, defaults.sliderThickness)));
-    updateSliderThickness(document.getElementById(overlayId));
+    updateSliderThickness(getOverlay());
   }
 
   function resetSavedSliderThicknessPercent() {
     remove(keys.sliderThickness);
-    updateSliderThickness(document.getElementById(overlayId));
+    updateSliderThickness(getOverlay());
+  }
+
+  function beginThicknessSliderPreview() {
+    const overlay = getOverlay();
+    if (!overlay || isAlwaysExpandedEnabled()) return;
+    overlay.dataset.tmOptionsPreview = 'thickness';
+    clearExpandedHold(overlay);
+    setOverlayExpanded(overlay, true, true);
+    updateOverlayOpacity(overlay);
+  }
+
+  function endThicknessSliderPreview() {
+    const overlay = document.getElementById(overlayId);
+    if (overlay?.dataset.tmOptionsPreview !== 'thickness') return;
+    restoreOverlayPreview(overlay);
+  }
+
+  function beginOpacitySliderPreview(focused) {
+    const overlay = getOverlay();
+    if (!overlay) return;
+    overlay.dataset.tmOptionsPreview = focused ? 'opacity-active' : 'opacity-idle';
+    clearExpandedHold(overlay);
+    setOverlayExpanded(overlay, focused, true, focused ? {} : { ignoreAlwaysExpanded: true });
+    updateOverlayOpacity(overlay);
+  }
+
+  function endOpacitySliderPreview() {
+    const overlay = document.getElementById(overlayId);
+    if (!overlay?.dataset.tmOptionsPreview?.startsWith('opacity-')) return;
+    restoreOverlayPreview(overlay);
   }
 
   function isOverlayInteractionFocused(overlay) {
-    return overlay?.dataset.tmDragging === 'true' ||
+    return overlay?.dataset.tmOptionsPreview === 'thickness' ||
+      overlay?.dataset.tmOptionsPreview === 'opacity-active' ||
+      overlay?.dataset.tmDragging === 'true' ||
       overlay?.dataset.tmHovering === 'true' ||
       overlay?.matches?.(':hover') ||
       overlay?.contains?.(document.activeElement);
@@ -240,6 +289,7 @@ export function createVolumeSettings({
     getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
     getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
     getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent,
+    beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview,
     updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode,
     isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot
   };

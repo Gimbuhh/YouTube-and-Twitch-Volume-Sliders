@@ -5,20 +5,44 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', sizeKey:'tm-yt-volume-slider-size', thicknessKey:'tm-yt-volume-slider-thickness' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', sizeKey:'tm-twitch-volume-slider-size', thicknessKey:'tm-twitch-volume-slider-thickness' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', sizeKey:'tm-yt-volume-slider-size', thicknessKey:'tm-yt-volume-slider-thickness' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', sizeKey:'tm-twitch-volume-slider-size', thicknessKey:'tm-twitch-volume-slider-thickness' }
 ];
 
-async function openOptions(config, mode = 'on', location = 'controls') {
+async function openOptions(config, mode = 'on', location = 'controls', setup = () => {}) {
   const runtime=createRuntime(config.url,{runScripts:'outside-only'});
   config.fixture(runtime.document);
   runtime.window.localStorage.setItem(config.modeKey, mode);
   runtime.window.localStorage.setItem(config.locationKey, location);
+  setup(runtime.window.localStorage);
   runtime.window.eval(await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`,import.meta.url),'utf8'));
   const button=runtime.document.getElementById('tm-volume-options-button');
   button.focus(); button.click();
   const popup=runtime.document.getElementById('tm-volume-options-popup');
   return { runtime, button, popup };
+}
+
+function waitForTimers(runtime) {
+  return new Promise((resolve)=>runtime.window.setTimeout(resolve,0));
+}
+
+function hideAndRevealControls(runtime, config) {
+  if (config.file === 'youtube') {
+    const player=runtime.document.getElementById('movie_player');
+    player.classList.add('ytp-autohide');
+    return waitForTimers(runtime).then(()=>{
+      player.classList.remove('ytp-autohide','ytp-hide-controls');
+      return waitForTimers(runtime);
+    });
+  }
+  const controls=runtime.document.querySelector('[data-a-target="player-controls"]');
+  controls.setAttribute('data-a-visible','false');
+  controls.setAttribute('aria-hidden','true');
+  return waitForTimers(runtime).then(()=>{
+    controls.setAttribute('data-a-visible','true');
+    controls.setAttribute('aria-hidden','false');
+    return waitForTimers(runtime);
+  });
 }
 
 for (const config of platforms) test(`${config.name}: options dialog contains focus and restores it on Escape`,async()=>{
@@ -51,7 +75,7 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
 for (const config of platforms) test(`${config.name}: bar thickness option updates only the visual track`,async()=>{
   const {runtime,popup}=await openOptions(config);
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
-  assert.equal(slider.value,'50');
+  assert.equal(slider.value,'75');
   slider.value='125';
   slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
@@ -59,8 +83,113 @@ for (const config of platforms) test(`${config.name}: bar thickness option updat
   const volumeSlider=runtime.document.getElementById('tm-volume-slider-range');
   assert.equal(runtime.window.localStorage.getItem(config.thicknessKey),'125');
   assert.equal(overlay.style.getPropertyValue('--tm-visual-track-h'),'13.75px');
+  assert.equal(overlay.style.getPropertyValue('--tm-thumb-size'),'27.50px');
   assert.equal(row.style.getPropertyValue('--tm-visual-track-h'),'13.75px');
+  assert.equal(row.style.getPropertyValue('--tm-thumb-size'),'27.50px');
   assert.equal(volumeSlider.style.height,'');
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: thickness drag previews expansion only when not always expanded`,async()=>{
+  const {runtime,popup}=await openOptions(config);
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+
+  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: thickness hold ignores transient blur after controls reveal`,async()=>{
+  const {runtime,popup}=await openOptions(config,'on','video');
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  const reset=popup.querySelector('#tm-volume-options-thickness-section button');
+  await hideAndRevealControls(runtime, config);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+
+  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  runtime.window.dispatchEvent(new runtime.window.Event('blur'));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  slider.dispatchEvent(new runtime.window.FocusEvent('blur',{relatedTarget:reset}));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+
+  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: thickness blur ends preview when focus leaves options`,async()=>{
+  const {runtime,popup}=await openOptions(config,'on','video');
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  const outside=runtime.document.createElement('button');
+  runtime.document.body.appendChild(outside);
+
+  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  slider.dispatchEvent(new runtime.window.FocusEvent('blur',{relatedTarget:outside}));
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: thickness drag preview works on the first hold when overlay is recreated`,async()=>{
+  const {runtime,popup}=await openOptions(config);
+  const originalOverlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  originalOverlay.remove();
+
+  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  assert.ok(overlay);
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: thickness drag does not collapse always-expanded slider`,async()=>{
+  const {runtime,popup}=await openOptions(config,'on','controls',(storage)=>storage.setItem(config.expandedKey,'true'));
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+
+  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: on-video opacity drags preview idle and active states`,async()=>{
+  const {runtime,popup}=await openOptions(config,'on','video',(storage)=>storage.setItem(config.expandedKey,'true'));
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const [idleSlider, activeSlider]=popup.querySelectorAll('#tm-volume-options-opacity-section input[type="range"]');
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+
+  idleSlider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+
+  runtime.document.getElementById('tm-volume-options-always-expanded').click();
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+
+  activeSlider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
   runtime.close();
 });
 

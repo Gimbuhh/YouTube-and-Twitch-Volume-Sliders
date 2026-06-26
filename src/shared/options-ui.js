@@ -6,7 +6,9 @@ export function createOptionsUi(dependencies) {
     isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
     setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
     getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
-    getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent
+    getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent,
+    beginThicknessSliderPreview, endThicknessSliderPreview,
+    beginOpacitySliderPreview, endOpacitySliderPreview
   } = dependencies;
 
     function getEnabledRadios(group) {
@@ -219,6 +221,8 @@ export function createOptionsUi(dependencies) {
         getValue,
         setValue,
         resetValue,
+        onPreviewStart,
+        onPreviewEnd,
         getFillPercent = (value) => value
     }) {
         const row = document.createElement('div');
@@ -259,6 +263,38 @@ export function createOptionsUi(dependencies) {
         ['click', 'mousedown', 'pointerdown', 'keydown'].forEach((type) => {
             slider.addEventListener(type, (event) => event.stopPropagation());
         });
+        let previewActive = false;
+        const hasPreview = !!(onPreviewStart || onPreviewEnd);
+        const view = document.defaultView;
+        const runPreviewStart = () => onPreviewStart?.();
+        const isFocusInOptionsPopup = (target) => !!target && !!document.getElementById(OPTIONS_POPUP_ID)?.contains(target);
+        const startPreview = (event) => {
+            if (!hasPreview) return;
+            if (event?.type === 'mousedown' && event.button !== 0) return;
+            if (previewActive) {
+                runPreviewStart();
+                return;
+            }
+            previewActive = true;
+            runPreviewStart();
+        };
+        const endPreview = () => {
+            if (!hasPreview) return;
+            if (!previewActive) return;
+            previewActive = false;
+            onPreviewEnd?.();
+        };
+        ['pointerdown', 'mousedown', 'touchstart'].forEach((type) => {
+            slider.addEventListener(type, startPreview);
+        });
+        [document, view].filter(Boolean).forEach((target) => {
+            ['pointerup', 'pointercancel', 'mouseup', 'touchend', 'touchcancel']
+                .forEach((type) => target.addEventListener(type, endPreview, true));
+        });
+        slider.addEventListener('blur', (event) => {
+            if (isFocusInOptionsPopup(event.relatedTarget)) return;
+            endPreview();
+        });
         slider.addEventListener('input', () => {
             const value = Number(slider.value);
             const pct = Number.isFinite(value) ? value : fallback;
@@ -297,7 +333,9 @@ export function createOptionsUi(dependencies) {
             fallback: 0,
             getValue: () => getSavedOverlayOpacityPercent(focused),
             setValue: (pct) => setSavedOverlayOpacityPercent(focused, pct),
-            resetValue: () => resetSavedOverlayOpacityPercent(focused)
+            resetValue: () => resetSavedOverlayOpacityPercent(focused),
+            onPreviewStart: () => beginOpacitySliderPreview?.(focused),
+            onPreviewEnd: endOpacitySliderPreview
         });
     }
 
@@ -346,10 +384,12 @@ export function createOptionsUi(dependencies) {
             min: 25,
             max: 125,
             step: 5,
-            fallback: 50,
+            fallback: 75,
             getValue: getSavedSliderThicknessPercent,
             setValue: setSavedSliderThicknessPercent,
             resetValue: resetSavedSliderThicknessPercent,
+            onPreviewStart: beginThicknessSliderPreview,
+            onPreviewEnd: endThicknessSliderPreview,
             getFillPercent: (pct) => pct - 25
         }));
         return section;
