@@ -1446,7 +1446,7 @@
 #${OVERLAY_ID} .tm-volume-top-row {
   flex: 0 0 auto;
   position: relative;
-  width: 84px;
+  width: 92px;
   height: 40px;
   box-sizing: border-box;
   pointer-events: none !important;
@@ -1454,14 +1454,15 @@
 
 #${OVERLAY_ID} #${VALUE_LABEL_ID} {
   position: absolute;
-  left: 41px;
+  right: 10px;
   top: 50%;
-  width: 42px;
+  width: max-content;
   transform: translateY(-50%);
   white-space: nowrap;
   font: 400 14px/16px "YouTube Noto", Roboto, Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
   color: #fff;
-  text-align: center;
+  text-align: right;
   user-select: none;
   letter-spacing: 0;
 }
@@ -1471,8 +1472,8 @@
   --tm-visual-track-h: 5px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-visual-track-h, 5px) / 2);
-  flex: 0 0 calc(var(--tm-pill-expanded-width) - 96px);
-  width: calc(var(--tm-pill-expanded-width) - 96px);
+  flex: 0 0 calc(var(--tm-pill-expanded-width) - 104px);
+  width: calc(var(--tm-pill-expanded-width) - 104px);
   min-width: 0;
   height: 40px;
 }
@@ -2210,6 +2211,10 @@
         optionsPopupOutsideHandler = (event) => {
           const btn = document.getElementById(OPTIONS_BUTTON_ID);
           if (popup.contains(event.target) || btn?.contains(event.target)) return;
+          if (event.target?.closest?.(".ytp-settings-button")) {
+            window.setTimeout(() => closeVolumeOptionsPopup(), 0);
+            return;
+          }
           const clickedOutsidePlayer = !getPlayerContainer()?.contains?.(event.target);
           const clickedVideoSurface = isYouTubeVideoSurfaceClick(event);
           closeVolumeOptionsPopup();
@@ -2284,7 +2289,7 @@
       window.__tmYtVolumeNativeSettingsCloseBound = true;
       document.addEventListener("click", (event) => {
         if (event.target?.closest?.(".ytp-settings-button")) {
-          closeVolumeOptionsPopup();
+          window.setTimeout(() => closeVolumeOptionsPopup(), 0);
         }
       }, false);
     }

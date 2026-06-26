@@ -94,15 +94,16 @@ for(const config of platforms){
     runtime.close();
   });
 
-  test(`${config.name}: volume percentage label uses a compact symmetric slot`,async()=>{
+  test(`${config.name}: volume percentage label uses a fixed right edge before the bar`,async()=>{
     const {runtime}=await loadPlatform(config);
     const row=runtime.document.querySelector('.tm-volume-top-row');
     const label=runtime.document.getElementById('tm-volume-slider-value');
     const rowStyle=runtime.window.getComputedStyle(row);
     const labelStyle=runtime.window.getComputedStyle(label);
-    assert.equal(rowStyle.width,'84px');
-    assert.equal(labelStyle.left,'41px');
-    assert.equal(labelStyle.width,'42px');
+    assert.equal(rowStyle.width,'92px');
+    assert.equal(labelStyle.right,'10px');
+    assert.equal(labelStyle.width,'max-content');
+    assert.equal(labelStyle.transform,'translateY(-50%)');
     runtime.close();
   });
 }

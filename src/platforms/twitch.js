@@ -515,7 +515,7 @@ export function startTwitchVolumeSlider() {
 #${OVERLAY_ID} .tm-volume-top-row {
   flex: 0 0 auto;
   position: relative;
-  width: 84px;
+  width: 92px;
   height: 40px;
   box-sizing: border-box;
   pointer-events: none;
@@ -523,9 +523,9 @@ export function startTwitchVolumeSlider() {
 
 #${OVERLAY_ID} #${VALUE_LABEL_ID} {
   position: absolute;
-  left: 41px;
+  right: 10px;
   top: 50%;
-  width: 42px;
+  width: max-content;
   transform: translateY(-50%);
   white-space: nowrap;
 }
@@ -535,8 +535,8 @@ export function startTwitchVolumeSlider() {
   --tm-visual-track-h: 5px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-visual-track-h, 5px) / 2);
-  flex: 0 0 calc(var(--tm-pill-expanded-width) - 96px);
-  width: calc(var(--tm-pill-expanded-width) - 96px);
+  flex: 0 0 calc(var(--tm-pill-expanded-width) - 104px);
+  width: calc(var(--tm-pill-expanded-width) - 104px);
   min-width: 0;
   height: 40px;
 }
@@ -1518,6 +1518,10 @@ export function startTwitchVolumeSlider() {
             optionsPopupOutsideHandler = (event) => {
                 const btn = document.getElementById(OPTIONS_BUTTON_ID);
                 if (popup.contains(event.target) || btn?.contains(event.target)) return;
+                if (event.target?.closest?.(TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR)) {
+                    window.setTimeout(() => closeVolumeOptionsPopup(), 0);
+                    return;
+                }
                 const clickedOutsideControls = !getTwitchPlayerControlsRoot()?.contains?.(event.target);
                 closeVolumeOptionsPopup();
                 if (clickedOutsideControls) startPostCloseControlsHold();
@@ -1590,7 +1594,7 @@ export function startTwitchVolumeSlider() {
         window.__tmTwitchVolumeNativeSettingsCloseBound = true;
         document.addEventListener('click', (event) => {
             if (event.target?.closest?.(TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR)) {
-                closeVolumeOptionsPopup();
+                window.setTimeout(() => closeVolumeOptionsPopup(), 0);
             }
         }, false);
         ensureNativeSettingsHoldIsolation();
@@ -1762,7 +1766,7 @@ export function startTwitchVolumeSlider() {
         topRow.style.gap = '0';
         topRow.style.flex = '0 0 auto';
         topRow.style.position = 'relative';
-        topRow.style.width = '84px';
+        topRow.style.width = '92px';
         topRow.style.height = '40px';
         topRow.style.boxSizing = 'border-box';
 
@@ -1770,14 +1774,15 @@ export function startTwitchVolumeSlider() {
         label.id = VALUE_LABEL_ID;
         Object.assign(label.style, {
             font: '400 14px/16px "YouTube Noto", Roboto, Arial, sans-serif',
+            fontVariantNumeric: 'tabular-nums',
             color: '#fff',
-            textAlign: 'center',
+            textAlign: 'right',
             userSelect: 'none',
             letterSpacing: '0',
             position: 'absolute',
-            left: '41px',
+            right: '10px',
             top: '50%',
-            width: '42px',
+            width: 'max-content',
             transform: 'translateY(-50%)',
             whiteSpace: 'nowrap'
         });
