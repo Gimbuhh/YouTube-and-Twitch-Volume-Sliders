@@ -2,6 +2,12 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.5.1 - 2026-06-26
+
+- Fixed Twitch's on-video slider so clicking the video after a slider interaction keeps Twitch's native controls open long enough for the click to behave normally.
+- Made the visible slider bar thinner while keeping the larger click and drag target.
+- Added a Bar thickness preference from 25% to 125%, where 100% matches the version 2.5 bar thickness and the default is 50%.
+
 ## 2.5 - 2026-06-25
 
 - Added an on-video size control for YouTube and Twitch, allowing the floating slider to scale from 100% to 200%.
