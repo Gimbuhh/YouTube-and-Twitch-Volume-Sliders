@@ -32,6 +32,10 @@ export function startTwitchVolumeSlider() {
     const DEFAULT_SLIDER_THICKNESS = 75;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
+    const VOLUME_LABEL_ROW_WIDTH_PX = 96;
+    const VOLUME_LABEL_LEFT_PX = 36;
+    const VOLUME_LABEL_WIDTH_PX = 58;
+    const VOLUME_SLIDER_ROW_OFFSET_PX = VOLUME_LABEL_ROW_WIDTH_PX + 12;
     const TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS = 5000;
     const TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR =
         '[data-a-target="player-settings-button"], button[aria-label="Settings"]';
@@ -515,7 +519,7 @@ export function startTwitchVolumeSlider() {
 #${OVERLAY_ID} .tm-volume-top-row {
   flex: 0 0 auto;
   position: relative;
-  width: 96px;
+  width: ${VOLUME_LABEL_ROW_WIDTH_PX}px;
   height: 40px;
   box-sizing: border-box;
   pointer-events: none;
@@ -523,9 +527,9 @@ export function startTwitchVolumeSlider() {
 
 #${OVERLAY_ID} #${VALUE_LABEL_ID} {
   position: absolute;
-  left: 36px;
+  left: ${VOLUME_LABEL_LEFT_PX}px;
   top: 50%;
-  width: 58px;
+  width: ${VOLUME_LABEL_WIDTH_PX}px;
   transform: translateY(-50%);
   white-space: nowrap;
 }
@@ -535,8 +539,8 @@ export function startTwitchVolumeSlider() {
   --tm-visual-track-h: 5px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-visual-track-h, 5px) / 2);
-  flex: 0 0 calc(var(--tm-pill-expanded-width) - 108px);
-  width: calc(var(--tm-pill-expanded-width) - 108px);
+  flex: 0 0 calc(var(--tm-pill-expanded-width) - ${VOLUME_SLIDER_ROW_OFFSET_PX}px);
+  width: calc(var(--tm-pill-expanded-width) - ${VOLUME_SLIDER_ROW_OFFSET_PX}px);
   min-width: 0;
   height: 40px;
 }
@@ -1766,7 +1770,7 @@ export function startTwitchVolumeSlider() {
         topRow.style.gap = '0';
         topRow.style.flex = '0 0 auto';
         topRow.style.position = 'relative';
-        topRow.style.width = '96px';
+        topRow.style.width = `${VOLUME_LABEL_ROW_WIDTH_PX}px`;
         topRow.style.height = '40px';
         topRow.style.boxSizing = 'border-box';
 
@@ -1780,9 +1784,9 @@ export function startTwitchVolumeSlider() {
             userSelect: 'none',
             letterSpacing: '0',
             position: 'absolute',
-            left: '36px',
+            left: `${VOLUME_LABEL_LEFT_PX}px`,
             top: '50%',
-            width: '58px',
+            width: `${VOLUME_LABEL_WIDTH_PX}px`,
             transform: 'translateY(-50%)',
             whiteSpace: 'nowrap'
         });
