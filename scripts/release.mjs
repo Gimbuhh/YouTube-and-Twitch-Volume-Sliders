@@ -82,6 +82,10 @@ async function preflight(version,destination){
   await assertDestinationMissing(destination,version);
   const notesFile=resolve(root,`release-notes/${version}.md`);
   const notes=await readFile(notesFile,'utf8').catch(()=>{throw new Error(`Missing release notes: release-notes/${version}.md`);});
+  const firstNotesLine=notes.split(/\r?\n/u).find(line=>line.trim().length>0)?.trim();
+  if(firstNotesLine===`# Volume Sliders ${version}`){
+    throw new Error(`release-notes/${version}.md should not start with the GitHub Release title; start with the first content section instead`);
+  }
   const packageFile=resolve(root,'package.json');
   const packageSource=await readFile(packageFile,'utf8');
   const packageData=JSON.parse(packageSource);
