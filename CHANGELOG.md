@@ -6,6 +6,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 - Matched the custom volume label to YouTube's native control text size, line height, font stack, weight, and text shadow.
 - Reduced empty spacing around the custom volume label while keeping short values, long values, and the muted state visually balanced.
+- Kept the muted state readable as "Muted".
 - Removed redundant hover tooltips from the custom volume slider controls while preserving accessible labels.
 - Kept native player settings clicks responsive while the volume options popup is open.
 
