@@ -443,11 +443,10 @@ export function startYouTubeVolumeSlider() {
   width: 46px;
   transform: translateY(-50%);
   white-space: nowrap;
-  font: 400 14px/16px "YouTube Noto", Roboto, Arial, sans-serif;
-  font-variant-numeric: tabular-nums;
+  font: 500 14px/40px "YouTube Noto", Roboto, Arial, Helvetica, sans-serif;
   color: #fff;
   text-align: center;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  text-shadow: 0 0 2px rgb(0, 0, 0);
   user-select: none;
   letter-spacing: 0;
 }

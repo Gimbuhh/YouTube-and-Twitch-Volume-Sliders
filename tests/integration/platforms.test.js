@@ -89,7 +89,8 @@ for(const config of platforms){
     const label=runtime.document.getElementById('tm-volume-slider-value');
     const style=runtime.window.getComputedStyle(label);
     assert.equal(style.fontSize,'14px');
-    assert.equal(style.fontWeight,'400');
+    assert.equal(style.fontWeight,'500');
+    assert.equal(style.lineHeight,'40px');
     assert.match(style.fontFamily,/YouTube Noto/);
     runtime.close();
   });
@@ -104,7 +105,7 @@ for(const config of platforms){
     assert.equal(labelStyle.left,'42px');
     assert.equal(labelStyle.width,'46px');
     assert.equal(labelStyle.textAlign,'center');
-    assert.equal(labelStyle.textShadow,'0 1px 2px rgba(0, 0, 0, 0.45)');
+    assert.equal(labelStyle.textShadow,'0 0 2px rgb(0, 0, 0)');
     assert.equal(labelStyle.transform,'translateY(-50%)');
     runtime.close();
   });
