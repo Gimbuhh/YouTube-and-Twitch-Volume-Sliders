@@ -523,9 +523,9 @@ export function startTwitchVolumeSlider() {
 
 #${OVERLAY_ID} #${VALUE_LABEL_ID} {
   position: absolute;
-  right: 10px;
+  left: 42px;
   top: 50%;
-  width: max-content;
+  width: 46px;
   transform: translateY(-50%);
   white-space: nowrap;
 }
@@ -1776,13 +1776,13 @@ export function startTwitchVolumeSlider() {
             font: '400 14px/16px "YouTube Noto", Roboto, Arial, sans-serif',
             fontVariantNumeric: 'tabular-nums',
             color: '#fff',
-            textAlign: 'right',
+            textAlign: 'center',
             userSelect: 'none',
             letterSpacing: '0',
             position: 'absolute',
-            right: '10px',
+            left: '42px',
             top: '50%',
-            width: 'max-content',
+            width: '46px',
             transform: 'translateY(-50%)',
             whiteSpace: 'nowrap'
         });

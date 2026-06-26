@@ -438,15 +438,15 @@ export function startYouTubeVolumeSlider() {
 
 #${OVERLAY_ID} #${VALUE_LABEL_ID} {
   position: absolute;
-  right: 10px;
+  left: 42px;
   top: 50%;
-  width: max-content;
+  width: 46px;
   transform: translateY(-50%);
   white-space: nowrap;
   font: 400 14px/16px "YouTube Noto", Roboto, Arial, sans-serif;
   font-variant-numeric: tabular-nums;
   color: #fff;
-  text-align: right;
+  text-align: center;
   user-select: none;
   letter-spacing: 0;
 }
