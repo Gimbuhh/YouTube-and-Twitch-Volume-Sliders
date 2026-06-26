@@ -80,6 +80,16 @@ for(const config of platforms){
     assert.equal(overlay.style.transform,'translateX(-50%) scale(var(--tm-overlay-scale, 1))');
     runtime.close();
   });
+
+  test(`${config.name}: volume percentage label matches native YouTube control text sizing`,async()=>{
+    const {runtime}=await loadPlatform(config);
+    const label=runtime.document.getElementById('tm-volume-slider-value');
+    const style=runtime.window.getComputedStyle(label);
+    assert.equal(style.fontSize,'14px');
+    assert.equal(style.fontWeight,'400');
+    assert.match(style.fontFamily,/YouTube Noto/);
+    runtime.close();
+  });
 }
 
 test('YouTube: mounting beneath a stationary pointer does not expand the slider',async()=>{

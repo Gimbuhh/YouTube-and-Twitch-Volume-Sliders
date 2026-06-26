@@ -1,0 +1,3 @@
+## Changed
+
+- Matched the custom volume percentage label to YouTube's native control text size and font weight.

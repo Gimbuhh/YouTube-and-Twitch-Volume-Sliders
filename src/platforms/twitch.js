@@ -1769,9 +1769,8 @@ export function startTwitchVolumeSlider() {
         const label = document.createElement('div');
         label.id = VALUE_LABEL_ID;
         Object.assign(label.style, {
-            fontSize: '18px',
-            fontWeight: '500',
-            color: 'rgba(255, 255, 255, 0.95)',
+            font: '400 14px/16px "YouTube Noto", Roboto, Arial, sans-serif',
+            color: '#fff',
             textAlign: 'center',
             userSelect: 'none',
             letterSpacing: '0',
