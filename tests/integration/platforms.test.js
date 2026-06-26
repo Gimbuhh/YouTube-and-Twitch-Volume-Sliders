@@ -27,6 +27,8 @@ for(const config of platforms){
     });
     assert.equal(fixture.state.muted,true);
     const slider=runtime.document.getElementById('tm-volume-slider-range');
+    const label=runtime.document.getElementById('tm-volume-slider-value');
+    assert.equal(label.textContent,'M');
     assert.ok(slider); slider.value='60'; slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
     assert.equal(fixture.state.muted,false); assert.equal(fixture.state.volume,config.file==='youtube'?60:.6);
     runtime.close();
@@ -88,6 +90,18 @@ for(const config of platforms){
     assert.equal(style.fontSize,'14px');
     assert.equal(style.fontWeight,'400');
     assert.match(style.fontFamily,/YouTube Noto/);
+    runtime.close();
+  });
+
+  test(`${config.name}: volume percentage label uses a compact symmetric slot`,async()=>{
+    const {runtime}=await loadPlatform(config);
+    const row=runtime.document.querySelector('.tm-volume-top-row');
+    const label=runtime.document.getElementById('tm-volume-slider-value');
+    const rowStyle=runtime.window.getComputedStyle(row);
+    const labelStyle=runtime.window.getComputedStyle(label);
+    assert.equal(rowStyle.width,'92px');
+    assert.equal(labelStyle.left,'45px');
+    assert.equal(labelStyle.width,'42px');
     runtime.close();
   });
 }

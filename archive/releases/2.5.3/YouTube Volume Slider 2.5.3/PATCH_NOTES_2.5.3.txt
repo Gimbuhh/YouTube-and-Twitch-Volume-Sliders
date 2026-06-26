@@ -1,3 +1,4 @@
 ## Changed
 
 - Matched the custom volume percentage label to YouTube's native control text size and font weight.
+- Reduced the empty spacing around the custom volume percentage label and shortened the muted label to "M".
