@@ -72,6 +72,38 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
   runtime.close();
 });
 
+test('YouTube: native settings click is not swallowed while volume options are open',async()=>{
+  const {runtime,popup}=await openOptions(platforms[0]);
+  const settingsButton=runtime.document.querySelector('.ytp-settings-button');
+  let nativeHandlerSawOptionsOpen=false;
+  runtime.document.addEventListener('click',(event)=>{
+    if(event.target===settingsButton) nativeHandlerSawOptionsOpen=!popup.hidden;
+  });
+
+  settingsButton.click();
+
+  assert.equal(nativeHandlerSawOptionsOpen,true);
+  await waitForTimers(runtime);
+  assert.equal(popup.hidden,true);
+  runtime.close();
+});
+
+test('Twitch: native settings click is not swallowed while volume options are open',async()=>{
+  const {runtime,popup}=await openOptions(platforms[1]);
+  const settingsButton=runtime.document.querySelector('[data-a-target="player-settings-button"]');
+  let nativeHandlerSawOptionsOpen=false;
+  runtime.document.addEventListener('click',(event)=>{
+    if(event.target===settingsButton) nativeHandlerSawOptionsOpen=!popup.hidden;
+  });
+
+  settingsButton.click();
+
+  assert.equal(nativeHandlerSawOptionsOpen,true);
+  await waitForTimers(runtime);
+  assert.equal(popup.hidden,true);
+  runtime.close();
+});
+
 for (const config of platforms) test(`${config.name}: bar thickness option updates only the visual track`,async()=>{
   const {runtime,popup}=await openOptions(config);
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
