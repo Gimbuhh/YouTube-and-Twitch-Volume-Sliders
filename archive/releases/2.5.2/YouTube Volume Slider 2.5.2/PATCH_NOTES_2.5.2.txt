@@ -6,3 +6,5 @@
 - Scales the slider grabber with the selected bar thickness so it stays visually balanced at thinner and thicker settings.
 - Expands the volume slider while the Bar thickness setting is being dragged, then restores the normal collapsed state when Always expanded is off.
 - Previews on-video opacity settings while dragging: Idle shows the collapsed slider and Active shows the expanded slider.
+- Restores the Show on video expand/collapse animation to the centered version 2.5 behavior.
+- Fixes the first settings-slider hold so the volume slider expands immediately instead of only on later drags.

@@ -114,8 +114,8 @@ export function createOverlayUi(dependencies) {
             justifyContent: 'flex-start',
             gap: '0',
             background: 'transparent',
-            transform: onVideo ? 'translateX(-20px) scale(var(--tm-overlay-scale, 1))' : 'translateY(0)',
-            transformOrigin: onVideo ? 'left bottom' : 'center center'
+            transform: onVideo ? 'translateX(-50%) scale(var(--tm-overlay-scale, 1))' : 'translateY(0)',
+            transformOrigin: onVideo ? 'center bottom' : 'center center'
         };
 
         if (expanded) {

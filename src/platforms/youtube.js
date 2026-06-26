@@ -89,7 +89,11 @@ export function startYouTubeVolumeSlider() {
         onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
         clearExpandedHold: (overlay) => clearExpandedHold(overlay),
         setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
-        collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force)
+        collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force),
+        ensureOverlay: () => {
+            attachSliderIfPossible();
+            return document.getElementById(OVERLAY_ID);
+        }
     });
     const { getSavedVolume, readSnappedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
         window, storage: localStorage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
@@ -421,23 +425,6 @@ export function startYouTubeVolumeSlider() {
 
 #${OVERLAY_ID}.tm-expanded .tm-volume-controls {
   pointer-events: auto;
-}
-
-#${OVERLAY_ID}.tm-on-video .tm-volume-top-row,
-#${OVERLAY_ID}.tm-on-video .tm-volume-slider-row {
-  opacity: 0;
-  transform: translateX(-8px);
-  transition: opacity 0.12s ease, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-#${OVERLAY_ID}.tm-on-video.tm-expanded .tm-volume-top-row,
-#${OVERLAY_ID}.tm-on-video.tm-expanded .tm-volume-slider-row {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-#${OVERLAY_ID}.tm-on-video.tm-expanded .tm-volume-slider-row {
-  transition-delay: 0.04s;
 }
 
 #${OVERLAY_ID} .tm-volume-top-row {

@@ -85,6 +85,22 @@ for (const config of platforms) test(`${config.name}: thickness drag previews ex
   runtime.close();
 });
 
+for (const config of platforms) test(`${config.name}: thickness drag preview works on the first hold when overlay is recreated`,async()=>{
+  const {runtime,popup}=await openOptions(config);
+  const originalOverlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  originalOverlay.remove();
+
+  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  assert.ok(overlay);
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  await waitForTimers(runtime);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  runtime.close();
+});
+
 for (const config of platforms) test(`${config.name}: thickness drag does not collapse always-expanded slider`,async()=>{
   const {runtime,popup}=await openOptions(config,'on','controls',(storage)=>storage.setItem(config.expandedKey,'true'));
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');

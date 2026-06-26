@@ -84,11 +84,13 @@ export function createVolumeSettings({
   onModeChanged,
   clearExpandedHold,
   setOverlayExpanded,
-  collapseOverlayIfIdle
+  collapseOverlayIfIdle,
+  ensureOverlay
 }) {
   const read = (key) => { try { return storage.getItem(key); } catch { return null; } };
   const write = (key, value) => { try { storage.setItem(key, value); } catch { /* storage may be unavailable */ } };
   const remove = (key) => { try { storage.removeItem(key); } catch { /* storage may be unavailable */ } };
+  const getOverlay = () => ensureOverlay?.() || document.getElementById(overlayId);
 
   function getSavedVolumeSliderMode() {
     return normalizeVolumeSliderMode(read(keys.mode)) || 'on';
@@ -134,7 +136,7 @@ export function createVolumeSettings({
 
   function setAlwaysExpandedEnabled(enabled) {
     write(keys.expanded, enabled ? 'true' : 'false');
-    const overlay = document.getElementById(overlayId);
+    const overlay = getOverlay();
     if (!overlay) return;
     clearExpandedHold(overlay);
     if (enabled) setOverlayExpanded(overlay, true);
@@ -159,12 +161,12 @@ export function createVolumeSettings({
   function setSavedOverlayOpacityPercent(focused, value) {
     const fallback = focused ? defaults.activeOpacity : defaults.idleOpacity;
     write(focused ? keys.activeOpacity : keys.idleOpacity, String(normalizeOpacityPercent(value, fallback)));
-    updateOverlayOpacity(document.getElementById(overlayId));
+    updateOverlayOpacity(getOverlay());
   }
 
   function resetSavedOverlayOpacityPercent(focused) {
     remove(focused ? keys.activeOpacity : keys.idleOpacity);
-    updateOverlayOpacity(document.getElementById(overlayId));
+    updateOverlayOpacity(getOverlay());
   }
 
   function getSavedOverlaySizePercent() {
@@ -182,12 +184,12 @@ export function createVolumeSettings({
 
   function setSavedOverlaySizePercent(value) {
     write(keys.overlaySize, String(normalizeOverlaySizePercent(value, defaults.overlaySize)));
-    updateOverlaySize(document.getElementById(overlayId));
+    updateOverlaySize(getOverlay());
   }
 
   function resetSavedOverlaySizePercent() {
     remove(keys.overlaySize);
-    updateOverlaySize(document.getElementById(overlayId));
+    updateOverlaySize(getOverlay());
   }
 
   function getSavedSliderThicknessPercent() {
@@ -223,16 +225,16 @@ export function createVolumeSettings({
 
   function setSavedSliderThicknessPercent(value) {
     write(keys.sliderThickness, String(normalizeSliderThicknessPercent(value, defaults.sliderThickness)));
-    updateSliderThickness(document.getElementById(overlayId));
+    updateSliderThickness(getOverlay());
   }
 
   function resetSavedSliderThicknessPercent() {
     remove(keys.sliderThickness);
-    updateSliderThickness(document.getElementById(overlayId));
+    updateSliderThickness(getOverlay());
   }
 
   function beginThicknessSliderPreview() {
-    const overlay = document.getElementById(overlayId);
+    const overlay = getOverlay();
     if (!overlay || isAlwaysExpandedEnabled()) return;
     overlay.dataset.tmOptionsPreview = 'thickness';
     clearExpandedHold(overlay);
@@ -247,7 +249,7 @@ export function createVolumeSettings({
   }
 
   function beginOpacitySliderPreview(focused) {
-    const overlay = document.getElementById(overlayId);
+    const overlay = getOverlay();
     if (!overlay) return;
     overlay.dataset.tmOptionsPreview = focused ? 'opacity-active' : 'opacity-idle';
     clearExpandedHold(overlay);

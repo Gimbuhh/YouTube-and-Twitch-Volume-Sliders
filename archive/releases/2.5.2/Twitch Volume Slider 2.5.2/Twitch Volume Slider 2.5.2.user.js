@@ -130,8 +130,8 @@
         justifyContent: "flex-start",
         gap: "0",
         background: "transparent",
-        transform: onVideo ? "translateX(-20px) scale(var(--tm-overlay-scale, 1))" : "translateY(0)",
-        transformOrigin: onVideo ? "left bottom" : "center center"
+        transform: onVideo ? "translateX(-50%) scale(var(--tm-overlay-scale, 1))" : "translateY(0)",
+        transformOrigin: onVideo ? "center bottom" : "center center"
       };
       if (expanded) {
         overlay.classList.remove("tm-collapsed");
@@ -702,7 +702,8 @@
     onModeChanged,
     clearExpandedHold,
     setOverlayExpanded,
-    collapseOverlayIfIdle
+    collapseOverlayIfIdle,
+    ensureOverlay
   }) {
     const read = (key) => {
       try {
@@ -723,6 +724,7 @@
       } catch {
       }
     };
+    const getOverlay = () => ensureOverlay?.() || document2.getElementById(overlayId);
     function getSavedVolumeSliderMode() {
       return normalizeVolumeSliderMode(read(keys.mode)) || "on";
     }
@@ -755,7 +757,7 @@
     }
     function setAlwaysExpandedEnabled(enabled) {
       write(keys.expanded, enabled ? "true" : "false");
-      const overlay = document2.getElementById(overlayId);
+      const overlay = getOverlay();
       if (!overlay) return;
       clearExpandedHold(overlay);
       if (enabled) setOverlayExpanded(overlay, true);
@@ -775,11 +777,11 @@
     function setSavedOverlayOpacityPercent(focused, value) {
       const fallback = focused ? defaults.activeOpacity : defaults.idleOpacity;
       write(focused ? keys.activeOpacity : keys.idleOpacity, String(normalizeOpacityPercent(value, fallback)));
-      updateOverlayOpacity(document2.getElementById(overlayId));
+      updateOverlayOpacity(getOverlay());
     }
     function resetSavedOverlayOpacityPercent(focused) {
       remove(focused ? keys.activeOpacity : keys.idleOpacity);
-      updateOverlayOpacity(document2.getElementById(overlayId));
+      updateOverlayOpacity(getOverlay());
     }
     function getSavedOverlaySizePercent() {
       if (userSettings.overlaySize !== "saved") {
@@ -794,11 +796,11 @@
     }
     function setSavedOverlaySizePercent(value) {
       write(keys.overlaySize, String(normalizeOverlaySizePercent(value, defaults.overlaySize)));
-      updateOverlaySize(document2.getElementById(overlayId));
+      updateOverlaySize(getOverlay());
     }
     function resetSavedOverlaySizePercent() {
       remove(keys.overlaySize);
-      updateOverlaySize(document2.getElementById(overlayId));
+      updateOverlaySize(getOverlay());
     }
     function getSavedSliderThicknessPercent() {
       if (userSettings.sliderThickness !== "saved") {
@@ -829,14 +831,14 @@
     }
     function setSavedSliderThicknessPercent(value) {
       write(keys.sliderThickness, String(normalizeSliderThicknessPercent(value, defaults.sliderThickness)));
-      updateSliderThickness(document2.getElementById(overlayId));
+      updateSliderThickness(getOverlay());
     }
     function resetSavedSliderThicknessPercent() {
       remove(keys.sliderThickness);
-      updateSliderThickness(document2.getElementById(overlayId));
+      updateSliderThickness(getOverlay());
     }
     function beginThicknessSliderPreview() {
-      const overlay = document2.getElementById(overlayId);
+      const overlay = getOverlay();
       if (!overlay || isAlwaysExpandedEnabled()) return;
       overlay.dataset.tmOptionsPreview = "thickness";
       clearExpandedHold(overlay);
@@ -849,7 +851,7 @@
       restoreOverlayPreview(overlay);
     }
     function beginOpacitySliderPreview(focused) {
-      const overlay = document2.getElementById(overlayId);
+      const overlay = getOverlay();
       if (!overlay) return;
       overlay.dataset.tmOptionsPreview = focused ? "opacity-active" : "opacity-idle";
       clearExpandedHold(overlay);
@@ -1149,7 +1151,11 @@
       },
       clearExpandedHold: (overlay) => clearExpandedHold(overlay),
       setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
-      collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force)
+      collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force),
+      ensureOverlay: () => {
+        attachSliderIfPossible();
+        return document.getElementById(OVERLAY_ID);
+      }
     });
     const { getSavedVolume, readSnappedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
       window,
@@ -1476,23 +1482,6 @@
 
 #${OVERLAY_ID}.tm-expanded .tm-volume-controls {
   pointer-events: auto;
-}
-
-#${OVERLAY_ID}.tm-on-video .tm-volume-top-row,
-#${OVERLAY_ID}.tm-on-video .tm-volume-slider-row {
-  opacity: 0;
-  transform: translateX(-8px);
-  transition: opacity 0.12s ease, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-#${OVERLAY_ID}.tm-on-video.tm-expanded .tm-volume-top-row,
-#${OVERLAY_ID}.tm-on-video.tm-expanded .tm-volume-slider-row {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-#${OVERLAY_ID}.tm-on-video.tm-expanded .tm-volume-slider-row {
-  transition-delay: 0.04s;
 }
 
 #${OVERLAY_ID} .tm-volume-top-row {
