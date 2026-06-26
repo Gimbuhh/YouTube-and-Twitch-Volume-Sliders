@@ -520,7 +520,7 @@
       const hasPreview = !!(onPreviewStart || onPreviewEnd);
       const view = document2.defaultView;
       const runPreviewStart = () => onPreviewStart?.();
-      const isSliderEvent = (event) => event?.target === slider || event?.composedPath?.().includes(slider);
+      const isFocusInOptionsPopup = (target) => !!target && !!document2.getElementById(OPTIONS_POPUP_ID)?.contains(target);
       const startPreview = (event) => {
         if (!hasPreview) return;
         if (event?.type === "mousedown" && event.button !== 0) return;
@@ -530,9 +530,6 @@
         }
         previewActive = true;
         runPreviewStart();
-      };
-      const startPreviewFromCapture = (event) => {
-        if (isSliderEvent(event)) startPreview(event);
       };
       const endPreview = () => {
         if (!hasPreview) return;
@@ -544,21 +541,19 @@
         slider.addEventListener(type, startPreview);
       });
       [document2, view].filter(Boolean).forEach((target) => {
-        ["pointerdown", "mousedown", "touchstart"].forEach((type) => target.addEventListener(type, startPreviewFromCapture, true));
+        ["pointerup", "pointercancel", "mouseup", "touchend", "touchcancel"].forEach((type) => target.addEventListener(type, endPreview, true));
       });
-      [document2, document2.defaultView].filter(Boolean).forEach((target) => {
-        ["pointerup", "pointercancel", "mouseup", "touchend", "touchcancel", "blur"].forEach((type) => target.addEventListener(type, endPreview, true));
+      slider.addEventListener("blur", (event) => {
+        if (isFocusInOptionsPopup(event.relatedTarget)) return;
+        endPreview();
       });
-      slider.addEventListener("blur", endPreview);
       slider.addEventListener("input", () => {
-        startPreview();
         const value = Number(slider.value);
         const pct = Number.isFinite(value) ? value : fallback;
         slider.style.setProperty("--tm-opacity-fill", `${getFillPercent(pct)}%`);
         valueEl.textContent = `${Math.round(pct)}%`;
         setValue(pct);
       });
-      slider.addEventListener("change", endPreview);
       resetBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();

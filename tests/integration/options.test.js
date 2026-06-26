@@ -104,33 +104,37 @@ for (const config of platforms) test(`${config.name}: thickness drag previews ex
   runtime.close();
 });
 
-for (const config of platforms) test(`${config.name}: thickness input starts preview when first hold begins after controls reveal`,async()=>{
+for (const config of platforms) test(`${config.name}: thickness hold ignores transient blur after controls reveal`,async()=>{
   const {runtime,popup}=await openOptions(config,'on','video');
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
+  const reset=popup.querySelector('#tm-volume-options-thickness-section button');
   await hideAndRevealControls(runtime, config);
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
 
-  slider.value='80';
-  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
   assert.equal(overlay.classList.contains('tm-expanded'),true);
-  slider.dispatchEvent(new runtime.window.Event('change',{bubbles:true}));
+  runtime.window.dispatchEvent(new runtime.window.Event('blur'));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+  slider.dispatchEvent(new runtime.window.FocusEvent('blur',{relatedTarget:reset}));
+  assert.equal(overlay.classList.contains('tm-expanded'),true);
+
+  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
   await waitForTimers(runtime);
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
   runtime.close();
 });
 
-for (const config of platforms) test(`${config.name}: thickness hold starts preview before reveal handlers can swallow it`,async()=>{
+for (const config of platforms) test(`${config.name}: thickness blur ends preview when focus leaves options`,async()=>{
   const {runtime,popup}=await openOptions(config,'on','video');
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
-  await hideAndRevealControls(runtime, config);
-  popup.addEventListener('pointerdown',(event)=>event.stopImmediatePropagation(),true);
-  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  const outside=runtime.document.createElement('button');
+  runtime.document.body.appendChild(outside);
 
-  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true,composed:true}));
+  slider.dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
   assert.equal(overlay.classList.contains('tm-expanded'),true);
-  runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
+  slider.dispatchEvent(new runtime.window.FocusEvent('blur',{relatedTarget:outside}));
   await waitForTimers(runtime);
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
   runtime.close();
