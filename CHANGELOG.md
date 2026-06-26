@@ -2,6 +2,13 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.5.3 - 2026-06-26
+
+- Matched the custom volume label to YouTube's native control text size, line height, font stack, weight, and text shadow.
+- Reduced empty spacing around the custom volume label while keeping short values, long values, and the muted state visually balanced.
+- Removed redundant hover tooltips from the custom volume slider controls while preserving accessible labels.
+- Kept native player settings clicks responsive while the volume options popup is open.
+
 ## 2.5.2 - 2026-06-26
 
 - Changed the default Bar thickness setting from 50% to 75%.
