@@ -36,7 +36,7 @@
     const VOLUME_ARC_RADIUS = "14.625";
     const VOLUME_ARC_STROKE_WIDTH = "2.75";
     const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = "21";
-    const VOLUME_TEXT_MAX_OPTICAL_SHIFT = 1.5;
+    const VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX = 1.5;
     function updateSliderBar(slider) {
       const value = Number(slider.value) || 0;
       const pct = Math.min(Math.max(value, 0), 100);
@@ -125,8 +125,8 @@
       const visualCenter = box.x + box.width / 2;
       const correction = Number(VOLUME_INDICATOR_CENTER) - visualCenter;
       const safeCorrection = Math.max(
-        -VOLUME_TEXT_MAX_OPTICAL_SHIFT,
-        Math.min(VOLUME_TEXT_MAX_OPTICAL_SHIFT, correction)
+        -VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX,
+        Math.min(VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX, correction)
       );
       if (Math.abs(safeCorrection) < 0.01) return;
       textElement.setAttribute("transform", `translate(${safeCorrection.toFixed(2)} 0)`);
