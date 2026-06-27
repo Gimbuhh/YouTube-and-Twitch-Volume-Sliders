@@ -95,18 +95,142 @@ for(const config of platforms){
     runtime.close();
   });
 
-  test(`${config.name}: volume percentage label stays centered in a compact slot`,async()=>{
+  test(`${config.name}: volume number moves into the arc and frees slider space`,async()=>{
     const {runtime}=await loadPlatform(config);
     const row=runtime.document.querySelector('.tm-volume-top-row');
     const label=runtime.document.getElementById('tm-volume-slider-value');
+    const percent=runtime.document.querySelector('.tm-volume-percent');
+    const arc=runtime.document.querySelector('.tm-volume-arc');
+    const arcTrack=runtime.document.querySelector('.tm-volume-arc-track');
     const rowStyle=runtime.window.getComputedStyle(row);
     const labelStyle=runtime.window.getComputedStyle(label);
-    assert.equal(rowStyle.width,'96px');
-    assert.equal(labelStyle.left,'36px');
-    assert.equal(labelStyle.width,'58px');
-    assert.equal(labelStyle.textAlign,'center');
-    assert.equal(labelStyle.textShadow,'0 0 2px rgb(0, 0, 0)');
-    assert.equal(labelStyle.transform,'translateY(-50%)');
+    assert.equal(rowStyle.width,'50px');
+    assert.equal(labelStyle.width,'1px');
+    assert.equal(labelStyle.height,'1px');
+    assert.equal(labelStyle.overflow,'hidden');
+    assert.equal(percent.textContent,'50');
+    assert.equal(percent.getAttribute('text-anchor'),'middle');
+    assert.equal(percent.getAttribute('x'),'20');
+    assert.equal(percent.getAttribute('y'),'20');
+    assert.equal(percent.getAttribute('dominant-baseline'),'central');
+    assert.equal(percent.getAttribute('alignment-baseline'),'central');
+    assert.equal(arc.getAttribute('r'),'14');
+    assert.equal(arc.getAttribute('stroke-width'),'3');
+    assert.equal(arcTrack.hasAttribute('stroke-dasharray'),false);
+    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'14px');
+    assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'800');
+    runtime.close();
+  });
+
+  test(`${config.name}: max volume number uses fitted 14px compact text`,async()=>{
+    const {runtime}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.volumeKey,'100');
+    });
+    const percent=runtime.document.querySelector('.tm-volume-percent');
+    assert.equal(percent.textContent,'100');
+    assert.equal(percent.getAttribute('textLength'),'21');
+    assert.equal(percent.getAttribute('lengthAdjust'),'spacingAndGlyphs');
+    assert.equal(percent.getAttribute('x'),'19.5');
+    assert.equal(percent.getAttribute('y'),'20');
+    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'14px');
+    runtime.close();
+  });
+
+  test(`${config.name}: zero volume hides the active arc seam`,async()=>{
+    const {runtime}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.volumeKey,'0');
+    });
+    const percent=runtime.document.querySelector('.tm-volume-percent');
+    const arc=runtime.document.querySelector('.tm-volume-arc');
+    assert.equal(percent.textContent,'0');
+    assert.equal(percent.getAttribute('x'),'20');
+    assert.equal(percent.getAttribute('y'),'20');
+    assert.equal(arc.style.visibility,'hidden');
+    assert.equal(arc.style.strokeDasharray,'0 100');
+    runtime.close();
+  });
+
+  test(`${config.name}: collapsed slider clips hidden controls`,async()=>{
+    const {runtime}=await loadPlatform(config);
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+    const sliderRow=runtime.document.querySelector('.tm-volume-slider-row');
+    const overlayStyle=runtime.window.getComputedStyle(overlay);
+    assert.ok(overlay.classList.contains('tm-collapsed'));
+    assert.equal(overlayStyle.width,'40px');
+    assert.equal(overlayStyle.paddingRight,'0px');
+    assert.equal(overlayStyle.overflow,'hidden');
+    const sliderRowStyle=runtime.window.getComputedStyle(sliderRow);
+    assert.equal(sliderRowStyle.opacity,'0');
+    assert.equal(sliderRowStyle.pointerEvents,'none');
+    assert.equal(sliderRowStyle.visibility,'hidden');
+    runtime.close();
+  });
+
+  test(`${config.name}: slider row keeps full-width geometry while the pill animates`,async()=>{
+    const {runtime}=await loadPlatform(config);
+    const sliderRow=runtime.document.querySelector('.tm-volume-slider-row');
+    const style=runtime.document.getElementById('tm-volume-slider-style');
+    assert.equal(sliderRow.style.width,'');
+    assert.equal(sliderRow.style.flex,'');
+    assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*flex:\s*0 0 calc\(var\(--tm-pill-expanded-width\) - /s);
+    assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*width:\s*calc\(var\(--tm-pill-expanded-width\) - /s);
+    runtime.close();
+  });
+
+  test(`${config.name}: muted volume indicator uses M inside the arc`,async()=>{
+    const {runtime}=await loadPlatform(config,(current,currentFixture)=>{
+      if(config.file==='youtube')currentFixture.player.mute();else currentFixture.player._tmPlayerApi.setMuted(true);
+    });
+    const percent=runtime.document.querySelector('.tm-volume-percent');
+    const label=runtime.document.getElementById('tm-volume-slider-value');
+    assert.equal(percent.textContent,'M');
+    assert.equal(percent.getAttribute('x'),'20');
+    assert.equal(percent.getAttribute('y'),'20');
+    assert.equal(label.textContent,'Muted');
+    runtime.close();
+  });
+
+  test(`${config.name}: scrolling the arc changes volume in five point steps`,async()=>{
+    const {runtime,fixture}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.volumeKey,'50');
+    });
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+    const icon=overlay.querySelector('button.tm-volume-icon-cell');
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    const percent=runtime.document.querySelector('.tm-volume-percent');
+    const wheelUp=new runtime.window.Event('wheel',{bubbles:true,cancelable:true});
+    Object.defineProperty(wheelUp,'deltaY',{value:-100});
+    icon.dispatchEvent(wheelUp);
+    assert.equal(wheelUp.defaultPrevented,true);
+    assert.equal(slider.value,'55');
+    assert.equal(percent.textContent,'55');
+    assert.equal(fixture.state.volume,config.file==='youtube'?55:.55);
+
+    const wheelDown=new runtime.window.Event('wheel',{bubbles:true,cancelable:true});
+    Object.defineProperty(wheelDown,'deltaY',{value:100});
+    icon.dispatchEvent(wheelDown);
+    assert.equal(wheelDown.defaultPrevented,true);
+    assert.equal(slider.value,'50');
+    assert.equal(percent.textContent,'50');
+    assert.equal(fixture.state.volume,config.file==='youtube'?50:.5);
+    runtime.close();
+  });
+
+  test(`${config.name}: scrolling up from muted arc unmutes at five percent`,async()=>{
+    const {runtime,fixture}=await loadPlatform(config,(current,currentFixture)=>{
+      current.window.localStorage.setItem(config.volumeKey,'0');
+      if(config.file==='youtube')currentFixture.player.mute();else currentFixture.player._tmPlayerApi.setMuted(true);
+    });
+    const icon=runtime.document.querySelector('button.tm-volume-icon-cell');
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    const percent=runtime.document.querySelector('.tm-volume-percent');
+    const wheelUp=new runtime.window.Event('wheel',{bubbles:true,cancelable:true});
+    Object.defineProperty(wheelUp,'deltaY',{value:-100});
+    icon.dispatchEvent(wheelUp);
+    assert.equal(slider.value,'5');
+    assert.equal(percent.textContent,'5');
+    assert.equal(fixture.state.muted,false);
+    assert.equal(fixture.state.volume,config.file==='youtube'?5:.05);
     runtime.close();
   });
 }
