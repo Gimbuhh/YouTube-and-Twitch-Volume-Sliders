@@ -24,12 +24,12 @@
   <text x="82" y="52" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="500">Volume Slider Options</text>
 
   <text class="label" x="82" y="93">MODE</text>
-  <rect x="82" y="106" width="82" height="34" rx="6" fill="#9146ff"/>
+  <rect x="82" y="106" width="82" height="34" rx="6" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.14)"/>
   <rect x="170" y="106" width="82" height="34" rx="6" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.14)"/>
-  <text class="radio-on" x="123" y="127" text-anchor="middle">On</text>
+  <text class="radio" x="123" y="127" text-anchor="middle">On</text>
   <text class="radio" x="211" y="127" text-anchor="middle">Off</text>
-  <rect x="82" y="148" width="256" height="34" rx="6" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.14)"/>
-  <text class="radio" x="210" y="170" text-anchor="middle">Replace native</text>
+  <rect x="82" y="148" width="256" height="34" rx="6" fill="#9146ff"/>
+  <text class="radio-on" x="210" y="170" text-anchor="middle">Replace native</text>
 
   <line x1="66" y1="204" x2="354" y2="204" stroke="rgba(255,255,255,0.08)"/>
   <text class="label" x="82" y="229">POSITION WHEN REPLACING NATIVE</text>
