@@ -63,9 +63,9 @@ export async function restoreReleaseState(snapshots,destination){
   }
 }
 
-function updateEntryVersion(source,version){
+function updateEntryMetadata(source,version){
   return source
-    .replace(/^(\/\/ @name\s+.*?)(?:\s+\d+(?:\.\d+)*)?$/m,(_,name)=>name.replace(/\s+\d+(?:\.\d+)*$/,'')+` ${version}`)
+    .replace(/^(\/\/ @name\s+.*?)(?:\s+\d+(?:\.\d+)*)?$/m,(_,name)=>name.replace(/\s+\d+(?:\.\d+)*$/,''))
     .replace(/^\/\/ @version\s+.*$/m,`// @version      ${version}`);
 }
 
@@ -117,7 +117,7 @@ export async function runRelease(version){
   try{
     state.packageData.version=version;
     await writeFile(state.packageFile,JSON.stringify(state.packageData,null,2)+'\n');
-    for(const entry of state.entries)await writeFile(entry.file,updateEntryVersion(entry.source,version));
+    for(const entry of state.entries)await writeFile(entry.file,updateEntryMetadata(entry.source,version));
 
     runNode('scripts/archive-manifest.mjs');
     runNode('scripts/build.mjs');
