@@ -14,11 +14,6 @@ All notable changes to the maintained userscripts are documented here. Historica
 - The expanded slider is more compact and sits closer to the circle, returning to the shorter 2.5.3-style length now that the number lives inside the control.
 - The number-in-circle design is polished for native-size text, cleaner ring edges, and better centering from 0 to 100.
 
-### Fixed
-
-- Prevented the slider thumb from peeking out beside the circle while the slider is collapsed or animating.
-- Removed the tiny ring seam that could appear at 0 volume or while muted.
-
 ## 2.5.3 - 2026-06-26
 
 - Matched the custom volume label to YouTube's native control text size, line height, font stack, weight, and text shadow.
