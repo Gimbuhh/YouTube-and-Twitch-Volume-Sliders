@@ -66,7 +66,7 @@ for(const config of platforms){
     runtime.close();
   });
 
-  test(`${config.name}: on-video slider uses the version 2.5 centered expansion`,async()=>{
+  test(`${config.name}: on-video slider uses centered expansion`,async()=>{
     const {runtime}=await loadPlatform(config,current=>{
       current.window.localStorage.setItem(config.locationKey,'video');
     });

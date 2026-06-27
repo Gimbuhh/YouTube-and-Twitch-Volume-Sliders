@@ -2,6 +2,16 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6 - 2026-06-27
+
+- Replaced the speaker icon in the circular mute control with the current volume number.
+- Removed the percent sign from the circular indicator and shows muted volume as `M`.
+- Matched the circular number to the native duration text size, with a fitted `100` state that stays balanced inside the ring.
+- Moved the old visible percentage label out of the layout so the volume bar sits closer to the circular control.
+- Kept the slider thumb hidden during collapsed and expanding states, including at 100% volume.
+- Removed the tiny zero-volume arc seam so muted and 0% states look clean.
+- Added mouse-wheel volume control on the circular mute/volume indicator, changing volume in 5-point steps.
+
 ## 2.5.3 - 2026-06-26
 
 - Matched the custom volume label to YouTube's native control text size, line height, font stack, weight, and text shadow.

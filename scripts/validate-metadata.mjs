@@ -3,12 +3,17 @@ import { distPath, parseMetadata, platforms } from './lib.mjs';
 
 const singular = ['name', 'namespace', 'version', 'description', 'author', 'icon', 'match', 'updateURL', 'downloadURL', 'run-at', 'grant'];
 const repoRawBase = 'https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist';
+const expectedNames = new Map([
+  ['youtube', 'YouTube Volume Slider'],
+  ['twitch', 'Twitch Volume Slider']
+]);
 let releaseVersion;
 for (const platform of platforms) {
   const { fields } = parseMetadata(await readFile(distPath(platform), 'utf8'));
   for (const key of singular) {
     if ((fields.get(key) ?? []).length !== 1) throw new Error(`${platform}: expected exactly one @${key}`);
   }
+  if (fields.get('name')[0] !== expectedNames.get(platform)) throw new Error(`${platform}: invalid @name`);
   if (fields.get('run-at')[0] !== 'document-idle') throw new Error(`${platform}: invalid @run-at`);
   if (fields.get('grant')[0] !== 'none') throw new Error(`${platform}: invalid @grant`);
   const expectedUpdateUrl = `${repoRawBase}/${platform}-volume-slider.user.js`;
