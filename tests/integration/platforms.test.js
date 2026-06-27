@@ -5,8 +5,8 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', appearanceKey:'tm-yt-volume-slider-appearance' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
 
 async function loadPlatform(config, setup = () => {}) {
@@ -122,6 +122,38 @@ for(const config of platforms){
     assert.equal(runtime.window.getComputedStyle(percent).fontSize,'14px');
     assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'800');
     assert.equal(runtime.window.getComputedStyle(percent).fontVariantNumeric,'tabular-nums');
+    runtime.close();
+  });
+
+  test(`${config.name}: classic appearance restores speaker icon and side percent`,async()=>{
+    const {runtime}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.appearanceKey,'classic');
+    });
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+    const row=runtime.document.querySelector('.tm-volume-top-row');
+    const label=runtime.document.getElementById('tm-volume-slider-value');
+    const indicator=runtime.document.querySelector('.tm-volume-indicator');
+    const highIcon=runtime.document.querySelector('.tm-volume-speaker-high');
+    const percent=runtime.document.querySelector('.tm-volume-percent');
+    const arc=runtime.document.querySelector('.tm-volume-arc');
+    const arcTrack=runtime.document.querySelector('.tm-volume-arc-track');
+    const rowStyle=runtime.window.getComputedStyle(row);
+    const labelStyle=runtime.window.getComputedStyle(label);
+    assert.equal(overlay.dataset.tmAppearance,'classic');
+    assert.equal(indicator.dataset.volumeIcon,'high');
+    assert.ok(highIcon);
+    assert.equal(rowStyle.width,'96px');
+    assert.equal(labelStyle.left,'36px');
+    assert.equal(labelStyle.width,'58px');
+    assert.equal(labelStyle.overflow,'visible');
+    assert.equal(labelStyle.clipPath,'none');
+    assert.equal(label.textContent,'50%');
+    assert.equal(percent.textContent,'50');
+    assert.equal(arc.getAttribute('r'),'13');
+    assert.equal(arc.getAttribute('stroke-width'),'4');
+    assert.equal(arcTrack.getAttribute('r'),'13');
+    assert.equal(arcTrack.getAttribute('stroke-width'),'4');
+    assert.equal(arcTrack.getAttribute('stroke-dasharray'),'100 100');
     runtime.close();
   });
 
