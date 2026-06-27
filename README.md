@@ -13,9 +13,11 @@ Both scripts replace or complement the sites' native controls with a small indic
   <tr>
     <td align="center" valign="middle" width="58%">
       <img src="docs/images/demo-youtube-volume-slider-expanded.svg" alt="Expanded YouTube volume slider with a speaker icon, 40 percent volume label, and red slider track" width="420">
+      <br>
+      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the original thickness.</sub>
     </td>
     <td align="center" valign="middle" width="42%">
-      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and on-video appearance controls" width="240">
+      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and bar thickness controls" width="240">
     </td>
   </tr>
 </table>
@@ -28,9 +30,11 @@ Both scripts replace or complement the sites' native controls with a small indic
   <tr>
     <td align="center" valign="middle" width="58%">
       <img src="docs/images/demo-twitch-volume-slider-expanded.svg" alt="Expanded Twitch volume slider with a speaker icon, 40 percent volume label, and purple slider track" width="420">
+      <br>
+      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the original thickness.</sub>
     </td>
     <td align="center" valign="middle" width="42%">
-      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and on-video appearance controls" width="240">
+      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and bar thickness controls" width="240">
     </td>
   </tr>
 </table>
