@@ -1,7 +1,7 @@
 import { createOverlayUi } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
-import { createVolumePersistence, getSpeakerIconMode, snapTo5 } from '../shared/volume.js';
+import { createVolumePersistence, snapTo5 } from '../shared/volume.js';
 import { createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
 import { createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
 import { createStyleElement } from '../shared/styles.js';
@@ -32,9 +32,8 @@ export function startTwitchVolumeSlider() {
     const DEFAULT_SLIDER_THICKNESS = 75;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
-    const VOLUME_LABEL_ROW_WIDTH_PX = 96;
-    const VOLUME_LABEL_LEFT_PX = 36;
-    const VOLUME_LABEL_WIDTH_PX = 58;
+    const WHEEL_VOLUME_STEP = 5;
+    const VOLUME_LABEL_ROW_WIDTH_PX = 50;
     const VOLUME_SLIDER_ROW_OFFSET_PX = VOLUME_LABEL_ROW_WIDTH_PX + 12;
     const TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS = 5000;
     const TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR =
@@ -326,7 +325,7 @@ export function startTwitchVolumeSlider() {
         style.type = 'text/css';
         const css = `
 #${OVERLAY_ID} {
-  --tm-pill-expanded-width: clamp(320px, 34vw, 460px);
+  --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
@@ -474,7 +473,14 @@ export function startTwitchVolumeSlider() {
   display: block;
   width: 40px;
   height: 40px;
+  overflow: visible;
   shape-rendering: geometricPrecision;
+}
+
+#${OVERLAY_ID} .tm-volume-arc-track,
+#${OVERLAY_ID} .tm-volume-arc {
+  shape-rendering: geometricPrecision;
+  vector-effect: non-scaling-stroke;
 }
 
 #${OVERLAY_ID} .tm-volume-arc {
@@ -482,20 +488,15 @@ export function startTwitchVolumeSlider() {
   transition: stroke-dasharray 0.08s linear;
 }
 
-#${OVERLAY_ID} .tm-volume-speaker-icon {
-  color: rgba(255, 255, 255, 0.94);
-}
-
-#${OVERLAY_ID} .tm-volume-speaker-muted,
-#${OVERLAY_ID} .tm-volume-speaker-low,
-#${OVERLAY_ID} .tm-volume-speaker-high {
-  display: none;
-}
-
-#${OVERLAY_ID} .tm-volume-indicator[data-volume-icon="muted"] .tm-volume-speaker-muted,
-#${OVERLAY_ID} .tm-volume-indicator[data-volume-icon="low"] .tm-volume-speaker-low,
-#${OVERLAY_ID} .tm-volume-indicator[data-volume-icon="high"] .tm-volume-speaker-high {
-  display: block;
+#${OVERLAY_ID} .tm-volume-percent {
+  fill: rgba(255, 255, 255, 0.96);
+  font: 800 14px/1 "YouTube Noto", Roboto, Arial, Helvetica, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: 0;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.75);
+  text-rendering: geometricPrecision;
+  user-select: none;
 }
 
 #${OVERLAY_ID} .tm-volume-indicator.muted {
@@ -509,11 +510,15 @@ export function startTwitchVolumeSlider() {
 }
 
 #${OVERLAY_ID}.tm-collapsed .tm-volume-controls {
+  opacity: 0;
   pointer-events: none;
+  visibility: hidden;
 }
 
 #${OVERLAY_ID}.tm-expanded .tm-volume-controls {
+  opacity: 1;
   pointer-events: auto;
+  visibility: visible;
 }
 
 #${OVERLAY_ID} .tm-volume-top-row {
@@ -527,10 +532,12 @@ export function startTwitchVolumeSlider() {
 
 #${OVERLAY_ID} #${VALUE_LABEL_ID} {
   position: absolute;
-  left: ${VOLUME_LABEL_LEFT_PX}px;
-  top: 50%;
-  width: ${VOLUME_LABEL_WIDTH_PX}px;
-  transform: translateY(-50%);
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 
@@ -582,7 +589,7 @@ export function startTwitchVolumeSlider() {
     }
 
     const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg } = createOverlayUi({
-        document, window, getSpeakerIconMode, isAlwaysExpandedEnabled, isSliderOnVideo,
+        document, window, isAlwaysExpandedEnabled, isSliderOnVideo,
         updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue,
         accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
         arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
@@ -1689,7 +1696,7 @@ export function startTwitchVolumeSlider() {
             maxWidth: 'none',
             height: '40px',
             minHeight: '40px',
-            padding: '0 12px 0 0',
+            padding: '0',
             background: 'transparent',
             backdropFilter: 'none',
             WebkitBackdropFilter: 'none',
@@ -1784,10 +1791,12 @@ export function startTwitchVolumeSlider() {
             userSelect: 'none',
             letterSpacing: '0',
             position: 'absolute',
-            left: `${VOLUME_LABEL_LEFT_PX}px`,
-            top: '50%',
-            width: `${VOLUME_LABEL_WIDTH_PX}px`,
-            transform: 'translateY(-50%)',
+            left: '0',
+            top: '0',
+            width: '1px',
+            height: '1px',
+            overflow: 'hidden',
+            clipPath: 'inset(50%)',
             whiteSpace: 'nowrap'
         });
         label.textContent = '100%';
@@ -1797,8 +1806,6 @@ export function startTwitchVolumeSlider() {
         const sliderWrap = document.createElement('div');
         sliderWrap.className = 'tm-volume-controls tm-volume-slider-row';
         sliderWrap.style.position = 'relative';
-        sliderWrap.style.width = 'auto';
-        sliderWrap.style.flex = '1 1 auto';
         sliderWrap.style.height = '40px';
         sliderWrap.style.display = 'flex';
         sliderWrap.style.alignItems = 'center';
@@ -1847,6 +1854,20 @@ export function startTwitchVolumeSlider() {
             scheduleSaveVolume(value);
             markTwitchVolumeInteraction(overlay);
         };
+
+        const applyWheelVolumeStep = (event) => {
+            if (event.deltaY === 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const currentValue = Number(slider.value) || 0;
+            const direction = event.deltaY < 0 ? 1 : -1;
+            const nextValue = Math.min(100, Math.max(0, currentValue + (direction * WHEEL_VOLUME_STEP)));
+            if (nextValue === currentValue) return;
+            markUserVolumeIntent();
+            slider.value = String(nextValue);
+            applySliderValue(nextValue);
+        };
+        iconCell.addEventListener('wheel', applyWheelVolumeStep, { passive: false });
 
         const snapDirectClickIfNeeded = () => {
             const currentValue = Number(slider.value) || 0;

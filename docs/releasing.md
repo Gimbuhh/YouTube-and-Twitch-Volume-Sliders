@@ -1,6 +1,7 @@
 # Releasing
 
 1. Change canonical source and tests under `src/` and `tests/`.
+   - Keep userscript `// @name` values stable and version-free; put the release number in `// @version` and release artifacts instead.
 2. Add one release-note source at `release-notes/<version>.md`. Do not start it with `# Volume Sliders <version>`; the GitHub Release title already supplies that heading.
 3. Run `pnpm install --frozen-lockfile` and `pnpm check`.
 4. Run `pnpm release -- <version>` exactly once (for example, `pnpm release -- 2.4.4`).
