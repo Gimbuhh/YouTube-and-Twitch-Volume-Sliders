@@ -20,7 +20,7 @@ Both scripts replace or complement the sites' native controls with a small indic
   </tr>
   <tr>
     <td align="center" valign="bottom" width="58%">
-      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the original thickness.</sub>
+      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the thickness used before this setting was added.</sub>
     </td>
   </tr>
 </table>
@@ -40,7 +40,7 @@ Both scripts replace or complement the sites' native controls with a small indic
   </tr>
   <tr>
     <td align="center" valign="bottom" width="58%">
-      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the original thickness.</sub>
+      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the thickness used before this setting was added.</sub>
     </td>
   </tr>
 </table>
