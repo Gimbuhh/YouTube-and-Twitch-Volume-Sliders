@@ -36,6 +36,10 @@ Both scripts replace or complement the sites' native controls with a small indic
 </table>
 </details>
 
+<p align="center">
+  <a href="https://gimbuhh.github.io/YouTube-and-Twitch-Volume-Sliders/demo.html">Try the interactive demo</a>
+</p>
+
 ## Install
 
 - [YouTube Volume Slider 2.5](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5/YouTube.Volume.Slider.2.5.user.js)

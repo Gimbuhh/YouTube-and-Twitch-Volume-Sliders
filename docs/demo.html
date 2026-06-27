@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YouTube and Twitch Volume Sliders Demo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090d12;
+      --surface: #101010;
+      --surface-soft: #1f1f1f;
+      --line: rgba(255, 255, 255, 0.11);
+      --text: #f5f7fb;
+      --muted: rgba(245, 247, 251, 0.64);
+      --dim: rgba(245, 247, 251, 0.48);
+      --accent-light: #cc4444;
+      --accent: #bb3333;
+      --accent-mid: #cc5555;
+      --volume: 40;
+      --thickness: 75;
+      --track-h: 5px;
+      --thumb: 22px;
+      --fill: 40%;
+      --shadow: 0 24px 72px rgba(0, 0, 0, 0.34), 0 2px 12px rgba(0, 0, 0, 0.36);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background:
+        radial-gradient(circle at 22% 18%, rgba(187, 51, 51, 0.12), transparent 30%),
+        linear-gradient(145deg, #0d131a 0%, var(--bg) 54%, #0f1215 100%);
+      color: var(--text);
+    }
+
+    body[data-theme="twitch"] {
+      --accent-light: #a970ff;
+      --accent: #9146ff;
+      --accent-mid: #b38cff;
+      background:
+        radial-gradient(circle at 22% 18%, rgba(145, 70, 255, 0.14), transparent 30%),
+        linear-gradient(145deg, #0d1119 0%, var(--bg) 54%, #111018 100%);
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 34px 0 42px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.5;
+      max-width: 58ch;
+    }
+
+    .theme-switch {
+      display: flex;
+      gap: 6px;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .theme-switch button,
+    .chip {
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      min-height: 34px;
+      padding: 0 13px;
+      cursor: pointer;
+      transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease, color 0.18s ease;
+    }
+
+    .theme-switch button[aria-pressed="true"],
+    .chip[aria-pressed="true"] {
+      color: #fff;
+      background: var(--accent);
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 326px;
+      gap: 28px;
+      align-items: center;
+    }
+
+    .player {
+      min-height: 560px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 34%),
+        linear-gradient(165deg, #151a20 0%, #0c1117 52%, #16191d 100%);
+      position: relative;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .player::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, transparent 0 17%, rgba(255,255,255,0.03) 17% 18%, transparent 18% 42%, rgba(255,255,255,0.03) 42% 43%, transparent 43% 72%, rgba(255,255,255,0.025) 72% 73%, transparent 73%),
+        linear-gradient(0deg, transparent 0 24%, rgba(255,255,255,0.025) 24% 25%, transparent 25% 64%, rgba(255,255,255,0.025) 64% 65%, transparent 65%);
+      opacity: 0.8;
+      pointer-events: none;
+    }
+
+    .poster-mark {
+      position: absolute;
+      left: 42px;
+      top: 42px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .poster-mark span {
+      width: 150px;
+      height: 16px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .poster-mark span:nth-child(2) {
+      width: 230px;
+    }
+
+    .poster-mark span:nth-child(3) {
+      width: 110px;
+    }
+
+    .controls {
+      position: absolute;
+      left: 24px;
+      right: 24px;
+      bottom: 22px;
+      min-height: 96px;
+      border-top: 1px solid rgba(255,255,255,0.12);
+      background: linear-gradient(to top, rgba(0,0,0,0.42), rgba(0,0,0,0));
+    }
+
+    .native-row {
+      position: absolute;
+      left: 20px;
+      right: 20px;
+      bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .native-dot,
+    .native-button {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .native-dot {
+      width: 22px;
+      height: 22px;
+    }
+
+    .native-button {
+      width: 38px;
+      height: 22px;
+    }
+
+    .timebar {
+      flex: 1 1 auto;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.2);
+    }
+
+    .volume-pill {
+      position: absolute;
+      left: 42px;
+      bottom: 48px;
+      display: flex;
+      align-items: center;
+      width: 560px;
+      height: 64px;
+      border-radius: 32px;
+      background: rgba(8, 13, 15, 0.78);
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34), 0 2px 10px rgba(0,0,0,0.32);
+      transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), bottom 0.22s ease;
+    }
+
+    .player[data-location="video"] .volume-pill {
+      left: 50%;
+      bottom: 132px;
+      transform: translateX(-50%);
+    }
+
+    .player[data-mode="off"] .volume-pill {
+      opacity: 0.38;
+      filter: saturate(0.45);
+    }
+
+    .speaker {
+      width: 64px;
+      height: 64px;
+      display: grid;
+      place-items: center;
+      color: rgba(255,255,255,0.94);
+    }
+
+    .speaker svg {
+      width: 42px;
+      height: 42px;
+      display: block;
+    }
+
+    .value-label {
+      width: 74px;
+      text-align: center;
+      font-size: 22px;
+      font-weight: 650;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+    }
+
+    .slider-wrap {
+      position: relative;
+      flex: 1 1 auto;
+      height: 42px;
+      margin: 0 34px 0 22px;
+      display: grid;
+      align-items: center;
+    }
+
+    .demo-slider {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 100%;
+      height: 32px;
+      background: transparent;
+      margin: 0;
+      cursor: pointer;
+      position: relative;
+      z-index: 2;
+    }
+
+    .track {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: var(--track-h);
+      border-radius: 999px;
+      transform: translateY(-50%);
+      background:
+        repeating-linear-gradient(to right, rgba(255,255,255,0.24) 0 1px, transparent 1px 5%),
+        linear-gradient(to right, var(--accent-light) 0%, var(--accent) calc(var(--fill) - 2%), var(--accent-mid) var(--fill), rgba(255,255,255,0.15) calc(var(--fill) + 2%), rgba(255,255,255,0.15) 100%);
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .demo-slider::-webkit-slider-runnable-track {
+      height: var(--track-h);
+      background: transparent;
+      border: 0;
+    }
+
+    .demo-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: var(--thumb);
+      height: var(--thumb);
+      margin-top: calc((var(--track-h) - var(--thumb)) / 2);
+      border: 0;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.36);
+    }
+
+    .demo-slider::-moz-range-track {
+      height: var(--track-h);
+      background: transparent;
+      border: 0;
+    }
+
+    .demo-slider::-moz-range-thumb {
+      width: var(--thumb);
+      height: var(--thumb);
+      border: 0;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.36);
+    }
+
+    .menu {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(18, 18, 18, 0.97);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .menu h2 {
+      margin: 0;
+      padding: 17px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .section {
+      padding: 18px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .section:last-child {
+      border-bottom: 0;
+    }
+
+    .section-title {
+      display: block;
+      margin-bottom: 12px;
+      color: var(--dim);
+      font-size: 12px;
+      font-weight: 760;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .segment {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .segment:last-child {
+      margin-bottom: 0;
+    }
+
+    .chip {
+      flex: 1 1 0;
+      min-height: 38px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.13);
+      color: rgba(255,255,255,0.82);
+      font-weight: 720;
+    }
+
+    .check-row {
+      display: grid;
+      grid-template-columns: 1fr 22px;
+      gap: 12px;
+      align-items: center;
+      width: 100%;
+      min-height: 34px;
+      border: 0;
+      border-radius: 6px;
+      padding: 5px 8px;
+      margin: 0 -8px;
+      color: #fff;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .check-row:hover {
+      background: rgba(255,255,255,0.08);
+    }
+
+    .box {
+      width: 18px;
+      height: 18px;
+      border-radius: 3px;
+      border: 1.5px solid rgba(255,255,255,0.45);
+      display: grid;
+      place-items: center;
+      justify-self: end;
+    }
+
+    .check-row[aria-checked="true"] .box {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .check-row[aria-checked="true"] .box::after {
+      content: "";
+      width: 9px;
+      height: 5px;
+      border-left: 3px solid #fff;
+      border-bottom: 3px solid #fff;
+      transform: translateY(-1px) rotate(-45deg);
+    }
+
+    .range-row {
+      display: grid;
+      gap: 10px;
+    }
+
+    .range-label {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .range-label strong {
+      font-size: 14px;
+    }
+
+    .range-label span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .setting-range {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 100%;
+      height: 28px;
+      margin: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .setting-range::-webkit-slider-runnable-track {
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(to right, rgba(255,255,255,0.92) 0 var(--range-fill), rgba(255,255,255,0.22) var(--range-fill) 100%);
+    }
+
+    .setting-range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      margin-top: -5px;
+      border: 0;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+    }
+
+    .setting-range::-moz-range-track {
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(to right, rgba(255,255,255,0.92) 0 var(--range-fill), rgba(255,255,255,0.22) var(--range-fill) 100%);
+    }
+
+    .setting-range::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border: 0;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+    }
+
+    .reset {
+      min-height: 30px;
+      border: 0;
+      border-radius: 6px;
+      padding: 0 12px;
+      color: rgba(255,255,255,0.9);
+      background: rgba(255,255,255,0.12);
+      cursor: pointer;
+    }
+
+    .range-actions {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    @media (max-width: 900px) {
+      .topbar,
+      .stage {
+        grid-template-columns: 1fr;
+      }
+
+      .theme-switch {
+        width: max-content;
+      }
+
+      .player {
+        min-height: 420px;
+      }
+
+      .volume-pill {
+        left: 18px;
+        right: 18px;
+        width: auto;
+      }
+
+      .player[data-location="video"] .volume-pill {
+        left: 18px;
+        right: 18px;
+        transform: none;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .shell {
+        width: min(100% - 20px, 1180px);
+        padding-top: 20px;
+      }
+
+      .stage {
+        gap: 18px;
+      }
+
+      .player {
+        min-height: 360px;
+      }
+
+      .volume-pill {
+        height: 56px;
+        border-radius: 28px;
+      }
+
+      .speaker {
+        width: 54px;
+        height: 56px;
+      }
+
+      .value-label {
+        width: 58px;
+        font-size: 18px;
+      }
+
+      .slider-wrap {
+        margin-left: 12px;
+        margin-right: 20px;
+      }
+    }
+  </style>
+</head>
+<body data-theme="youtube">
+  <main class="shell">
+    <div class="topbar">
+      <div>
+        <h1>Volume slider demo</h1>
+        <p class="subtitle">A live preview of the shared slider UI used by the YouTube and Twitch userscripts.</p>
+      </div>
+      <div class="theme-switch" aria-label="Theme">
+        <button type="button" data-theme-button="youtube" aria-pressed="true">YouTube</button>
+        <button type="button" data-theme-button="twitch" aria-pressed="false">Twitch</button>
+      </div>
+    </div>
+
+    <div class="stage">
+      <section class="player" data-location="controls" data-mode="on" aria-label="Video player preview">
+        <div class="poster-mark" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="controls" aria-hidden="true">
+          <div class="native-row">
+            <span class="native-dot"></span>
+            <span class="timebar"></span>
+            <span class="native-button"></span>
+            <span class="native-button"></span>
+            <span class="native-button"></span>
+          </div>
+        </div>
+        <div class="volume-pill" aria-label="Expanded volume slider">
+          <div class="speaker" aria-hidden="true">
+            <svg viewBox="0 0 44 44" role="presentation">
+              <circle cx="22" cy="22" r="18" fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="3.5"/>
+              <path class="arc" d="M22 4a18 18 0 0 1 10.6 32.6" fill="none" stroke="var(--accent)" stroke-width="3.5" stroke-linecap="round"/>
+              <path d="M15.8 14.1 9.4 18a5.8 5.8 0 0 0-2.8 5v.3a5.8 5.8 0 0 0 2.8 5l6.4 3.9c.7.4 1.6-.1 1.6-.9V15c0-.8-.9-1.3-1.6-.9Z" fill="currentColor"/>
+              <path d="M21.5 17.1a6.9 6.9 0 0 1 0 9.8m4-13.8a12.4 12.4 0 0 1 0 17.8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <output class="value-label" for="volume">40%</output>
+          <div class="slider-wrap">
+            <span class="track" aria-hidden="true"></span>
+            <input class="demo-slider" id="volume" type="range" min="0" max="100" value="40" aria-label="Volume">
+          </div>
+        </div>
+      </section>
+
+      <aside class="menu" aria-label="Volume Slider Options">
+        <h2>Volume Slider Options</h2>
+        <section class="section">
+          <span class="section-title">Mode</span>
+          <div class="segment" role="group" aria-label="Mode">
+            <button class="chip" type="button" data-mode="on" aria-pressed="true">On</button>
+            <button class="chip" type="button" data-mode="off" aria-pressed="false">Off</button>
+          </div>
+          <div class="segment" role="group" aria-label="Replace native mode">
+            <button class="chip" type="button" data-mode="replace-native" aria-pressed="false">Replace native</button>
+          </div>
+        </section>
+
+        <section class="section">
+          <span class="section-title">Position when replacing native</span>
+          <div class="segment" role="group" aria-label="Position when replacing native">
+            <button class="chip" type="button" data-placement="native" aria-pressed="true">Native spot</button>
+            <button class="chip" type="button" data-placement="custom" aria-pressed="false">Custom spot</button>
+          </div>
+        </section>
+
+        <section class="section">
+          <span class="section-title">Slider behavior</span>
+          <button class="check-row" type="button" data-check="snap" aria-checked="true">
+            <span>Snap to 5%</span>
+            <span class="box" aria-hidden="true"></span>
+          </button>
+          <button class="check-row" type="button" data-check="expanded" aria-checked="false">
+            <span>Always expanded</span>
+            <span class="box" aria-hidden="true"></span>
+          </button>
+          <button class="check-row" type="button" data-check="location" aria-checked="false">
+            <span>Show on video</span>
+            <span class="box" aria-hidden="true"></span>
+          </button>
+        </section>
+
+        <section class="section">
+          <span class="section-title">Slider appearance</span>
+          <div class="range-row">
+            <div class="range-label">
+              <strong>Bar thickness</strong>
+              <span id="thicknessValue">75%</span>
+            </div>
+            <div class="range-actions">
+              <input class="setting-range" id="thickness" type="range" min="25" max="125" step="5" value="75" aria-label="Bar thickness">
+              <button class="reset" type="button" id="resetThickness">Reset</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    const body = document.body;
+    const root = document.documentElement;
+    const player = document.querySelector(".player");
+    const volumeInput = document.querySelector("#volume");
+    const valueLabel = document.querySelector(".value-label");
+    const thicknessInput = document.querySelector("#thickness");
+    const thicknessValue = document.querySelector("#thicknessValue");
+    const rangeActions = document.querySelector(".range-actions");
+
+    function setTheme(theme) {
+      body.dataset.theme = theme;
+      document.querySelectorAll("[data-theme-button]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.themeButton === theme));
+      });
+    }
+
+    function setMode(mode) {
+      document.querySelectorAll("[data-mode]").forEach((item) => {
+        item.setAttribute("aria-pressed", String(item.dataset.mode === mode));
+      });
+      player.dataset.mode = mode === "off" ? "off" : "on";
+    }
+
+    function setPlacement(placement) {
+      document.querySelectorAll("[data-placement]").forEach((item) => {
+        item.setAttribute("aria-pressed", String(item.dataset.placement === placement));
+      });
+    }
+
+    function setVolume(value) {
+      const snapped = document.querySelector('[data-check="snap"]').getAttribute("aria-checked") === "true"
+        ? Math.round(Number(value) / 5) * 5
+        : Number(value);
+      volumeInput.value = String(snapped);
+      root.style.setProperty("--volume", snapped);
+      root.style.setProperty("--fill", `${snapped}%`);
+      valueLabel.value = `${snapped}%`;
+      valueLabel.textContent = `${snapped}%`;
+    }
+
+    function setThickness(value) {
+      const thickness = Number(value);
+      const visualTrack = Math.max(2, Math.min(9, 5 * (thickness / 75)));
+      const thumb = Math.max(14, Math.min(30, 22 * (thickness / 75)));
+      root.style.setProperty("--thickness", thickness);
+      root.style.setProperty("--track-h", `${visualTrack.toFixed(2)}px`);
+      root.style.setProperty("--thumb", `${thumb.toFixed(2)}px`);
+      thicknessInput.value = String(thickness);
+      thicknessValue.textContent = `${thickness}%`;
+      rangeActions.style.setProperty("--range-fill", `${((thickness - 25) / 100) * 100}%`);
+    }
+
+    document.querySelectorAll("[data-theme-button]").forEach((button) => {
+      button.addEventListener("click", () => setTheme(button.dataset.themeButton));
+    });
+
+    document.querySelectorAll("[data-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setMode(button.dataset.mode);
+      });
+    });
+
+    document.querySelectorAll("[data-placement]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setPlacement(button.dataset.placement);
+      });
+    });
+
+    document.querySelectorAll("[data-check]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const next = button.getAttribute("aria-checked") !== "true";
+        button.setAttribute("aria-checked", String(next));
+        if (button.dataset.check === "location") {
+          player.dataset.location = next ? "video" : "controls";
+        }
+        if (button.dataset.check === "snap") {
+          setVolume(volumeInput.value);
+        }
+      });
+    });
+
+    volumeInput.addEventListener("input", (event) => setVolume(event.target.value));
+    thicknessInput.addEventListener("input", (event) => setThickness(event.target.value));
+    document.querySelector("#resetThickness").addEventListener("click", () => setThickness(75));
+
+    setTheme("youtube");
+    setMode("on");
+    setPlacement("native");
+    setVolume(40);
+    setThickness(75);
+  </script>
+</body>
+</html>

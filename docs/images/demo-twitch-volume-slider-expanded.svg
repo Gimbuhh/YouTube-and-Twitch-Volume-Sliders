@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="720" height="176" viewBox="0 0 720 176" role="img" aria-labelledby="title desc">
   <title id="title">Expanded Twitch volume slider</title>
-  <desc id="desc">Transparent demo of the expanded replacement volume slider showing a 40 percent volume value, speaker icon, and purple slider track.</desc>
+  <desc id="desc">Transparent demo of the expanded replacement volume slider showing a 40 percent volume value, speaker icon, and purple slider track at 75 percent bar thickness.</desc>
   <defs>
     <filter id="shadow" x="-12%" y="-40%" width="124%" height="180%">
       <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity="0.28"/>
@@ -33,12 +33,12 @@
     <text x="173" y="94" fill="#fff" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="22" font-weight="500" text-anchor="middle">40%</text>
 
     <g transform="translate(230 88)">
-      <rect x="0" y="-3.5" width="350" height="7" rx="3.5" fill="url(#track)"/>
+      <rect x="0" y="-2.5" width="350" height="5" rx="2.5" fill="url(#track)"/>
       <g opacity="0.55">
-        <path d="M14 -3.5v7M31.5 -3.5v7M49 -3.5v7M66.5 -3.5v7M84 -3.5v7M101.5 -3.5v7M119 -3.5v7M136.5 -3.5v7M154 -3.5v7M171.5 -3.5v7M189 -3.5v7M206.5 -3.5v7M224 -3.5v7M241.5 -3.5v7M259 -3.5v7M276.5 -3.5v7M294 -3.5v7M311.5 -3.5v7M329 -3.5v7" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+        <path d="M14 -2.5v5M31.5 -2.5v5M49 -2.5v5M66.5 -2.5v5M84 -2.5v5M101.5 -2.5v5M119 -2.5v5M136.5 -2.5v5M154 -2.5v5M171.5 -2.5v5M189 -2.5v5M206.5 -2.5v5M224 -2.5v5M241.5 -2.5v5M259 -2.5v5M276.5 -2.5v5M294 -2.5v5M311.5 -2.5v5M329 -2.5v5" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
       </g>
-      <circle cx="140" cy="0" r="15" fill="#fff"/>
-      <circle cx="140" cy="0" r="14.5" fill="none" stroke="rgba(0,0,0,0.12)"/>
+      <circle cx="140" cy="0" r="11" fill="#fff"/>
+      <circle cx="140" cy="0" r="10.5" fill="none" stroke="rgba(0,0,0,0.12)"/>
     </g>
   </g>
 </svg>
