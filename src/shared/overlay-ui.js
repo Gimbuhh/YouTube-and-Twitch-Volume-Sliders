@@ -12,6 +12,7 @@ export function createOverlayUi(dependencies) {
     const VOLUME_ARC_RADIUS = '14.625';
     const VOLUME_ARC_STROKE_WIDTH = '2.75';
     const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = '21';
+    const VOLUME_TEXT_MAX_OPTICAL_SHIFT = 1.5;
 
     function updateSliderBar(slider) {
         const value = Number(slider.value) || 0;
@@ -80,6 +81,7 @@ export function createOverlayUi(dependencies) {
                 percent.removeAttribute('textLength');
                 percent.removeAttribute('lengthAdjust');
             }
+            opticallyCenterVolumeText(percent);
         }
         const arc = overlay.querySelector('.tm-volume-arc');
         if (arc) {
@@ -88,6 +90,31 @@ export function createOverlayUi(dependencies) {
             const dash = pct >= 100 ? 100.01 : pct;
             arc.style.strokeDasharray = `${dash} 100`;
         }
+    }
+
+    function opticallyCenterVolumeText(textElement) {
+        textElement.removeAttribute('transform');
+        if (typeof textElement.getBBox !== 'function') return;
+
+        let box;
+        try {
+            box = textElement.getBBox();
+        } catch {
+            return;
+        }
+
+        if (!box || !Number.isFinite(box.x) || !Number.isFinite(box.width) || box.width <= 0) {
+            return;
+        }
+
+        const visualCenter = box.x + (box.width / 2);
+        const correction = Number(VOLUME_INDICATOR_CENTER) - visualCenter;
+        const safeCorrection = Math.max(
+            -VOLUME_TEXT_MAX_OPTICAL_SHIFT,
+            Math.min(VOLUME_TEXT_MAX_OPTICAL_SHIFT, correction)
+        );
+        if (Math.abs(safeCorrection) < 0.01) return;
+        textElement.setAttribute('transform', `translate(${safeCorrection.toFixed(2)} 0)`);
     }
 
     function setOverlayExpanded(overlay, expanded, force = false, options = {}) {

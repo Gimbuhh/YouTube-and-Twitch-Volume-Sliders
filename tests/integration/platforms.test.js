@@ -139,6 +139,29 @@ for(const config of platforms){
     runtime.close();
   });
 
+  test(`${config.name}: volume number uses rendered bounds for optical centering`,async()=>{
+    const {runtime}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.volumeKey,'14');
+      current.window.SVGElement.prototype.getBBox=function(){
+        if(this.classList?.contains('tm-volume-percent')&&this.textContent==='14'){
+          return {x:14.8,y:10,width:12,height:14};
+        }
+        return {x:14,y:10,width:12,height:14};
+      };
+    });
+    const percent=runtime.document.querySelector('.tm-volume-percent');
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    assert.equal(percent.textContent,'14');
+    assert.equal(percent.getAttribute('x'),'20');
+    assert.equal(percent.getAttribute('transform'),'translate(-0.80 0)');
+
+    slider.value='50';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(percent.textContent,'50');
+    assert.equal(percent.hasAttribute('transform'),false);
+    runtime.close();
+  });
+
   test(`${config.name}: zero volume hides the active arc seam`,async()=>{
     const {runtime}=await loadPlatform(config,current=>{
       current.window.localStorage.setItem(config.volumeKey,'0');
