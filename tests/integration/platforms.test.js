@@ -196,12 +196,18 @@ for(const config of platforms){
     const {runtime}=await loadPlatform(config);
     const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const sliderRow=runtime.document.querySelector('.tm-volume-slider-row');
+    const ticks=runtime.document.querySelector('.tm-slider-ticks');
     const style=runtime.document.getElementById('tm-volume-slider-style');
+    const sliderRowStyle=runtime.window.getComputedStyle(sliderRow);
+    const ticksStyle=runtime.window.getComputedStyle(ticks);
     assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(274px, calc(34vw - 46px), 414px)');
     assert.equal(sliderRow.style.width,'');
     assert.equal(sliderRow.style.flex,'');
+    assert.equal(ticksStyle.opacity,'1');
+    assert.match(sliderRowStyle.transition,/visibility 0s linear 0\.22s/);
     assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*flex:\s*0 0 calc\(var\(--tm-pill-expanded-width\) - /s);
     assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*width:\s*calc\(var\(--tm-pill-expanded-width\) - /s);
+    assert.doesNotMatch(style.textContent,/\.tm-expanded\s+\.tm-slider-ticks/);
     runtime.close();
   });
 
