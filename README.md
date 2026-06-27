@@ -9,21 +9,31 @@ Both scripts replace or complement the sites' native controls with a small indic
 <details open>
 <summary>YouTube theme</summary>
 
-<p align="center">
-  <img src="docs/images/demo-youtube-volume-slider-expanded.svg" alt="Expanded YouTube volume slider with a speaker icon, 40 percent volume label, and red slider track" width="520">
-  &nbsp;
-  <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and on-video appearance controls" width="300">
-</p>
+<table>
+  <tr>
+    <td align="center" valign="middle" width="58%">
+      <img src="docs/images/demo-youtube-volume-slider-expanded.svg" alt="Expanded YouTube volume slider with a speaker icon, 40 percent volume label, and red slider track" width="420">
+    </td>
+    <td align="center" valign="middle" width="42%">
+      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and on-video appearance controls" width="240">
+    </td>
+  </tr>
+</table>
 </details>
 
 <details>
 <summary>Twitch theme</summary>
 
-<p align="center">
-  <img src="docs/images/demo-twitch-volume-slider-expanded.svg" alt="Expanded Twitch volume slider with a speaker icon, 40 percent volume label, and purple slider track" width="520">
-  &nbsp;
-  <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and on-video appearance controls" width="300">
-</p>
+<table>
+  <tr>
+    <td align="center" valign="middle" width="58%">
+      <img src="docs/images/demo-twitch-volume-slider-expanded.svg" alt="Expanded Twitch volume slider with a speaker icon, 40 percent volume label, and purple slider track" width="420">
+    </td>
+    <td align="center" valign="middle" width="42%">
+      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and on-video appearance controls" width="240">
+    </td>
+  </tr>
+</table>
 </details>
 
 ## Install
