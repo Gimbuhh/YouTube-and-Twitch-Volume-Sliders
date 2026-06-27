@@ -422,18 +422,24 @@ export function startYouTubeVolumeSlider() {
 #${OVERLAY_ID} .tm-volume-controls {
   position: relative;
   z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.08s ease 0.14s, visibility 0s linear 0.22s;
 }
 
 #${OVERLAY_ID}.tm-collapsed .tm-volume-controls {
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
+  transition: opacity 0.08s ease 0.14s, visibility 0s linear 0.22s;
 }
 
 #${OVERLAY_ID}.tm-expanded .tm-volume-controls {
   opacity: 1;
   pointer-events: auto;
   visibility: visible;
+  transition: opacity 0.1s ease, visibility 0s linear 0s;
 }
 
 #${OVERLAY_ID} .tm-volume-top-row {
@@ -496,13 +502,9 @@ export function startYouTubeVolumeSlider() {
   pointer-events: none;
   background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
   background-size: 100% 100%;
-  opacity: 0;
+  opacity: 1;
   transition: none;
   z-index: 1;
-}
-#${OVERLAY_ID}.tm-expanded .tm-slider-ticks {
-  opacity: 1;
-  transition: opacity 0.12s ease 0.08s;
 }
 
         `;
