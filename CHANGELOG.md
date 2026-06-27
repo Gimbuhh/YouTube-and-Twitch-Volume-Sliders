@@ -2,6 +2,21 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6.1 - 2026-06-28
+
+### Added
+
+- Added an Icon style option for choosing between the 2.6 volume number arc and the classic 2.5.3 speaker icon with side percentage text.
+
+### Fixed
+
+- Kept the 5% step markers visible as part of the slider bar throughout expansion instead of fading them in after the pill finishes opening.
+- Smoothed collapse timing so the slider visuals do not disappear before the pill has finished shrinking.
+
+### Notes
+
+- New remains the default icon style, so existing 2.6 behavior is preserved unless users choose Classic.
+
 ## 2.6 - 2026-06-27
 
 ### Added
