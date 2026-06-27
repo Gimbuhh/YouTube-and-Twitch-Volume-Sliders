@@ -4,10 +4,52 @@ Compact, accessible volume controls for YouTube and Twitch, distributed as stand
 
 Both scripts replace or complement the sites' native controls with a small indicator that expands into a full slider when needed. They share the same tested core while keeping site-specific behavior isolated.
 
+## Preview
+
+<details open>
+<summary>YouTube theme</summary>
+
+<table>
+  <tr>
+    <td align="center" valign="middle" width="58%" height="350">
+      <img src="docs/images/demo-youtube-volume-slider-expanded.svg" alt="Expanded YouTube volume slider with a speaker icon, 40 percent volume label, and red slider track" width="420">
+    </td>
+    <td align="center" valign="middle" width="42%" rowspan="2">
+      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and bar thickness controls" width="240">
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="bottom" width="58%">
+      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the thickness used before this setting was added.</sub>
+    </td>
+  </tr>
+</table>
+</details>
+
+<details>
+<summary>Twitch theme</summary>
+
+<table>
+  <tr>
+    <td align="center" valign="middle" width="58%" height="350">
+      <img src="docs/images/demo-twitch-volume-slider-expanded.svg" alt="Expanded Twitch volume slider with a speaker icon, 40 percent volume label, and purple slider track" width="420">
+    </td>
+    <td align="center" valign="middle" width="42%" rowspan="2">
+      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and bar thickness controls" width="240">
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="bottom" width="58%">
+      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the thickness used before this setting was added.</sub>
+    </td>
+  </tr>
+</table>
+</details>
+
 ## Install
 
-- [YouTube Volume Slider 2.5](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5/YouTube.Volume.Slider.2.5.user.js)
-- [Twitch Volume Slider 2.5](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5/Twitch.Volume.Slider.2.5.user.js)
+- [YouTube Volume Slider 2.5.3](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5.3/YouTube.Volume.Slider.2.5.3.user.js)
+- [Twitch Volume Slider 2.5.3](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5.3/Twitch.Volume.Slider.2.5.3.user.js)
 
 Install a current userscript manager such as Tampermonkey or Violentmonkey in a modern browser, download the appropriate file above, and open it with the userscript manager. Both scripts update from the committed `dist/` files on `main`.
 
