@@ -114,11 +114,14 @@ for(const config of platforms){
     assert.equal(percent.getAttribute('y'),'20');
     assert.equal(percent.getAttribute('dominant-baseline'),'central');
     assert.equal(percent.getAttribute('alignment-baseline'),'central');
-    assert.equal(arc.getAttribute('r'),'14');
-    assert.equal(arc.getAttribute('stroke-width'),'3');
+    assert.equal(arc.getAttribute('r'),'14.625');
+    assert.equal(arc.getAttribute('stroke-width'),'2.75');
+    assert.equal(runtime.window.getComputedStyle(arc).vectorEffect,'non-scaling-stroke');
     assert.equal(arcTrack.hasAttribute('stroke-dasharray'),false);
+    assert.equal(runtime.window.getComputedStyle(arcTrack).vectorEffect,'non-scaling-stroke');
     assert.equal(runtime.window.getComputedStyle(percent).fontSize,'14px');
     assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'800');
+    assert.equal(runtime.window.getComputedStyle(percent).fontVariantNumeric,'tabular-nums');
     runtime.close();
   });
 
@@ -130,7 +133,7 @@ for(const config of platforms){
     assert.equal(percent.textContent,'100');
     assert.equal(percent.getAttribute('textLength'),'21');
     assert.equal(percent.getAttribute('lengthAdjust'),'spacingAndGlyphs');
-    assert.equal(percent.getAttribute('x'),'19.5');
+    assert.equal(percent.getAttribute('x'),'20');
     assert.equal(percent.getAttribute('y'),'20');
     assert.equal(runtime.window.getComputedStyle(percent).fontSize,'14px');
     runtime.close();
@@ -168,8 +171,10 @@ for(const config of platforms){
 
   test(`${config.name}: slider row keeps full-width geometry while the pill animates`,async()=>{
     const {runtime}=await loadPlatform(config);
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const sliderRow=runtime.document.querySelector('.tm-volume-slider-row');
     const style=runtime.document.getElementById('tm-volume-slider-style');
+    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(274px, calc(34vw - 46px), 414px)');
     assert.equal(sliderRow.style.width,'');
     assert.equal(sliderRow.style.flex,'');
     assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*flex:\s*0 0 calc\(var\(--tm-pill-expanded-width\) - /s);

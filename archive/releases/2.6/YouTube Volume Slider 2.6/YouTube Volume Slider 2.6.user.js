@@ -32,10 +32,9 @@
     } = dependencies;
     const DEFAULT_VISUAL_THUMB_SIZE_PX = 22;
     const VOLUME_INDICATOR_CENTER = "20";
-    const VOLUME_INDICATOR_COMPACT_X = "19.5";
     const VOLUME_INDICATOR_TEXT_Y = "20";
-    const VOLUME_ARC_RADIUS = "14";
-    const VOLUME_ARC_STROKE_WIDTH = "3";
+    const VOLUME_ARC_RADIUS = "14.625";
+    const VOLUME_ARC_STROKE_WIDTH = "2.75";
     const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = "21";
     function updateSliderBar(slider) {
       const value = Number(slider.value) || 0;
@@ -91,7 +90,7 @@
         const text = muted ? "M" : String(Math.round(pct));
         const isCompact = text.length > 2;
         percent.textContent = text;
-        percent.setAttribute("x", isCompact ? VOLUME_INDICATOR_COMPACT_X : VOLUME_INDICATOR_CENTER);
+        percent.setAttribute("x", VOLUME_INDICATOR_CENTER);
         percent.setAttribute("y", VOLUME_INDICATOR_TEXT_Y);
         if (isCompact) {
           percent.setAttribute("textLength", VOLUME_INDICATOR_COMPACT_TEXT_LENGTH);
@@ -1250,7 +1249,7 @@
       if (!style) return;
       const css = `
 #${OVERLAY_ID} {
-  --tm-pill-expanded-width: clamp(320px, 34vw, 460px);
+  --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
@@ -1398,7 +1397,14 @@
   display: block;
   width: 40px;
   height: 40px;
+  overflow: visible;
   shape-rendering: geometricPrecision;
+}
+
+#${OVERLAY_ID} .tm-volume-arc-track,
+#${OVERLAY_ID} .tm-volume-arc {
+  shape-rendering: geometricPrecision;
+  vector-effect: non-scaling-stroke;
 }
 
 #${OVERLAY_ID} .tm-volume-arc {
@@ -1409,8 +1415,11 @@
 #${OVERLAY_ID} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
   font: 800 14px/1 "YouTube Noto", Roboto, Arial, Helvetica, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
   letter-spacing: 0;
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.75);
+  text-rendering: geometricPrecision;
   user-select: none;
 }
 

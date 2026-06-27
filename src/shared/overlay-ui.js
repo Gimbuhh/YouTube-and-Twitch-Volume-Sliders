@@ -8,10 +8,9 @@ export function createOverlayUi(dependencies) {
 
     const DEFAULT_VISUAL_THUMB_SIZE_PX = 22;
     const VOLUME_INDICATOR_CENTER = '20';
-    const VOLUME_INDICATOR_COMPACT_X = '19.5';
     const VOLUME_INDICATOR_TEXT_Y = '20';
-    const VOLUME_ARC_RADIUS = '14';
-    const VOLUME_ARC_STROKE_WIDTH = '3';
+    const VOLUME_ARC_RADIUS = '14.625';
+    const VOLUME_ARC_STROKE_WIDTH = '2.75';
     const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = '21';
 
     function updateSliderBar(slider) {
@@ -72,7 +71,7 @@ export function createOverlayUi(dependencies) {
             const text = muted ? 'M' : String(Math.round(pct));
             const isCompact = text.length > 2;
             percent.textContent = text;
-            percent.setAttribute('x', isCompact ? VOLUME_INDICATOR_COMPACT_X : VOLUME_INDICATOR_CENTER);
+            percent.setAttribute('x', VOLUME_INDICATOR_CENTER);
             percent.setAttribute('y', VOLUME_INDICATOR_TEXT_Y);
             if (isCompact) {
                 percent.setAttribute('textLength', VOLUME_INDICATOR_COMPACT_TEXT_LENGTH);

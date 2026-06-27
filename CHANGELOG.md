@@ -8,6 +8,8 @@ All notable changes to the maintained userscripts are documented here. Historica
 - Removed the percent sign from the circular indicator and shows muted volume as `M`.
 - Matched the circular number to the native duration text size, with a fitted `100` state that stays balanced inside the ring.
 - Moved the old visible percentage label out of the layout so the volume bar sits closer to the circular control.
+- Restored the expanded volume bar to the shorter 2.5.3-feeling length now that the number lives inside the arc.
+- Refined the arc edge and numeric centering so low two-digit values like `10` and `11` sit more naturally in the circle.
 - Kept the slider thumb hidden during collapsed and expanding states, including at 100% volume.
 - Removed the tiny zero-volume arc seam so muted and 0% states look clean.
 - Added mouse-wheel volume control on the circular mute/volume indicator, changing volume in 5-point steps.

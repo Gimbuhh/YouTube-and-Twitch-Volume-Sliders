@@ -240,7 +240,7 @@ export function startYouTubeVolumeSlider() {
         if (!style) return;
         const css = `
 #${OVERLAY_ID} {
-  --tm-pill-expanded-width: clamp(320px, 34vw, 460px);
+  --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
@@ -388,7 +388,14 @@ export function startYouTubeVolumeSlider() {
   display: block;
   width: 40px;
   height: 40px;
+  overflow: visible;
   shape-rendering: geometricPrecision;
+}
+
+#${OVERLAY_ID} .tm-volume-arc-track,
+#${OVERLAY_ID} .tm-volume-arc {
+  shape-rendering: geometricPrecision;
+  vector-effect: non-scaling-stroke;
 }
 
 #${OVERLAY_ID} .tm-volume-arc {
@@ -399,8 +406,11 @@ export function startYouTubeVolumeSlider() {
 #${OVERLAY_ID} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
   font: 800 14px/1 "YouTube Noto", Roboto, Arial, Helvetica, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
   letter-spacing: 0;
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.75);
+  text-rendering: geometricPrecision;
   user-select: none;
 }
 
