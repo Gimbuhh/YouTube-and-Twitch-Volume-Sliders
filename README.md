@@ -15,7 +15,7 @@ Both scripts replace or complement the sites' native controls with a small indic
       <strong>New</strong><br>
       <img src="docs/images/demo-youtube-volume-slider-expanded.svg" alt="New expanded YouTube volume slider with 25 shown inside the circular control and a red slider track" width="420"><br><br>
       <strong>Classic</strong><br>
-      <img src="docs/images/demo-youtube-volume-slider-classic.svg" alt="Classic expanded YouTube volume slider with a speaker icon, 40 percent volume label, and red slider track" width="420">
+      <img src="docs/images/demo-youtube-volume-slider-classic.svg" alt="Classic expanded YouTube volume slider with a speaker icon, 25 percent volume label, and red slider track" width="420">
     </td>
     <td align="center" valign="middle" width="42%">
       <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240">
@@ -33,7 +33,7 @@ Both scripts replace or complement the sites' native controls with a small indic
       <strong>New</strong><br>
       <img src="docs/images/demo-twitch-volume-slider-expanded.svg" alt="New expanded Twitch volume slider with 25 shown inside the circular control and a purple slider track" width="420"><br><br>
       <strong>Classic</strong><br>
-      <img src="docs/images/demo-twitch-volume-slider-classic.svg" alt="Classic expanded Twitch volume slider with a speaker icon, 40 percent volume label, and purple slider track" width="420">
+      <img src="docs/images/demo-twitch-volume-slider-classic.svg" alt="Classic expanded Twitch volume slider with a speaker icon, 25 percent volume label, and purple slider track" width="420">
     </td>
     <td align="center" valign="middle" width="42%">
       <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240">
