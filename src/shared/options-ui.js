@@ -2,6 +2,7 @@ export function createOptionsUi(dependencies) {
   const {
     document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
     getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
+    getVolumeAppearance, setVolumeAppearance,
     isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
     setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
@@ -210,6 +211,32 @@ export function createOptionsUi(dependencies) {
         return section;
     }
 
+    function createAppearanceSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+        section.id = 'tm-volume-options-appearance-section';
+        section.appendChild(createOptionsSectionLabel('Icon style'));
+
+        const segment = createOptionsSegment([
+            createOptionsRadio(
+                'tm-volume-options-appearance-new',
+                'New',
+                getVolumeAppearance() === 'new',
+                () => setVolumeAppearance('new')
+            ),
+            createOptionsRadio(
+                'tm-volume-options-appearance-classic',
+                'Classic',
+                getVolumeAppearance() === 'classic',
+                () => setVolumeAppearance('classic')
+            )
+        ]);
+        segment.setAttribute('role', 'radiogroup');
+        segment.setAttribute('aria-label', 'Icon style');
+        section.appendChild(segment);
+        return section;
+    }
+
     function createRangeSettingRow({
         label,
         ariaLabel,
@@ -413,6 +440,7 @@ export function createOptionsUi(dependencies) {
         body.className = 'tm-volume-options-body';
         body.appendChild(createModeSection());
         body.appendChild(createPlacementSection());
+        body.appendChild(createAppearanceSection());
         body.appendChild(createBehaviorSection());
         body.appendChild(createThicknessSection());
         body.appendChild(createOpacitySection());

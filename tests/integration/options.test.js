@@ -5,8 +5,8 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', sizeKey:'tm-yt-volume-slider-size', thicknessKey:'tm-yt-volume-slider-thickness' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', sizeKey:'tm-twitch-volume-slider-size', thicknessKey:'tm-twitch-volume-slider-thickness' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', sizeKey:'tm-yt-volume-slider-size', thicknessKey:'tm-yt-volume-slider-thickness', appearanceKey:'tm-yt-volume-slider-appearance' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', sizeKey:'tm-twitch-volume-slider-size', thicknessKey:'tm-twitch-volume-slider-thickness', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
 
 async function openOptions(config, mode = 'on', location = 'controls', setup = () => {}) {
@@ -55,6 +55,8 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
   assert.equal(hiddenSize.style.display,'none');
   const thicknessSection=popup.querySelector('#tm-volume-options-thickness-section');
   assert.equal(thicknessSection.style.display,'');
+  assert.equal(popup.querySelector('#tm-volume-options-appearance-new')?.getAttribute('aria-checked'),'true');
+  assert.equal(popup.querySelector('#tm-volume-options-appearance-classic')?.getAttribute('aria-checked'),'false');
   const lastVisible=popup.querySelector('#tm-volume-options-thickness-section button');
   lastVisible.focus();
   const forward=new runtime.window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true});
@@ -69,6 +71,28 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
 
   runtime.document.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
   assert.equal(popup.hidden,true); assert.equal(runtime.document.activeElement,button);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: icon style option switches between new and classic`,async()=>{
+  const {runtime,popup}=await openOptions(config);
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const classic=popup.querySelector('#tm-volume-options-appearance-classic');
+  const modern=popup.querySelector('#tm-volume-options-appearance-new');
+  assert.equal(overlay.dataset.tmAppearance,'new');
+  assert.equal(runtime.window.localStorage.getItem(config.appearanceKey),null);
+
+  classic.click();
+  assert.equal(runtime.window.localStorage.getItem(config.appearanceKey),'classic');
+  assert.equal(overlay.dataset.tmAppearance,'classic');
+  assert.equal(classic.getAttribute('aria-checked'),'true');
+  assert.equal(modern.getAttribute('aria-checked'),'false');
+
+  modern.click();
+  assert.equal(runtime.window.localStorage.getItem(config.appearanceKey),'new');
+  assert.equal(overlay.dataset.tmAppearance,'new');
+  assert.equal(modern.getAttribute('aria-checked'),'true');
+  assert.equal(classic.getAttribute('aria-checked'),'false');
   runtime.close();
 });
 

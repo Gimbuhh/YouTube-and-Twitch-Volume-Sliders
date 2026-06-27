@@ -1,5 +1,6 @@
 export const MODES = ['off', 'on', 'replace-native'];
 export const LOCATIONS = ['controls', 'video'];
+export const APPEARANCES = ['new', 'classic'];
 
 export function normalizeChoice(value, choices) {
   return choices.includes(value) ? value : null;
@@ -21,6 +22,10 @@ export function normalizeReplaceNativePlacement(placement) {
 
 export function normalizeSliderLocation(location) {
   return normalizeChoice(location, LOCATIONS);
+}
+
+export function normalizeVolumeAppearance(appearance) {
+  return normalizeChoice(appearance, APPEARANCES);
 }
 
 export function normalizeOpacityPercent(value, fallback) {
@@ -111,6 +116,69 @@ export function createVolumeSettings({
   }
 
   const isSliderOnVideo = () => getSliderLocation() === 'video';
+
+  function getVolumeAppearance() {
+    return normalizeVolumeAppearance(userSettings.volumeAppearance) ||
+      normalizeVolumeAppearance(read(keys.appearance)) || 'new';
+  }
+
+  function updateOverlayAppearance(overlay) {
+    if (!overlay) return;
+    const appearance = getVolumeAppearance();
+    const classic = appearance === 'classic';
+    overlay.dataset.tmAppearance = appearance;
+    overlay.classList.toggle('tm-volume-appearance-classic', classic);
+    overlay.classList.toggle('tm-volume-appearance-new', !classic);
+
+    const topRow = overlay.querySelector?.('.tm-volume-top-row');
+    if (topRow) topRow.style.width = classic ? '96px' : '50px';
+
+    const arcTrack = overlay.querySelector?.('.tm-volume-arc-track');
+    if (arcTrack) {
+      arcTrack.setAttribute('r', classic ? '13' : '14.625');
+      arcTrack.setAttribute('stroke-width', classic ? '4' : '2.75');
+      if (classic) {
+        arcTrack.setAttribute('stroke-dasharray', '100 100');
+        arcTrack.setAttribute('pathLength', '100');
+      } else {
+        arcTrack.removeAttribute('stroke-dasharray');
+        arcTrack.removeAttribute('pathLength');
+      }
+    }
+
+    const arc = overlay.querySelector?.('.tm-volume-arc');
+    if (arc) {
+      arc.setAttribute('r', classic ? '13' : '14.625');
+      arc.setAttribute('stroke-width', classic ? '4' : '2.75');
+    }
+
+    const label = overlay.querySelector?.('#tm-volume-slider-value');
+    if (!label) return;
+    Object.assign(label.style, classic ? {
+      left: '36px',
+      top: '50%',
+      width: '58px',
+      height: 'auto',
+      overflow: 'visible',
+      clipPath: 'none',
+      transform: 'translateY(-50%)',
+      whiteSpace: 'nowrap'
+    } : {
+      left: '0',
+      top: '0',
+      width: '1px',
+      height: '1px',
+      overflow: 'hidden',
+      clipPath: 'inset(50%)',
+      transform: 'none',
+      whiteSpace: 'nowrap'
+    });
+  }
+
+  function setVolumeAppearance(appearance) {
+    write(keys.appearance, normalizeVolumeAppearance(appearance) || 'new');
+    updateOverlayAppearance(getOverlay());
+  }
 
   function setSliderLocation(location) {
     write(keys.location, normalizeSliderLocation(location) || 'controls');
@@ -284,7 +352,8 @@ export function createVolumeSettings({
 
   return {
     getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation,
-    isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled,
+    isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance,
+    updateOverlayAppearance, isSnapTo5Enabled,
     setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
     getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
