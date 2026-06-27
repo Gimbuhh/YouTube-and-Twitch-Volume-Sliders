@@ -4,6 +4,28 @@ Compact, accessible volume controls for YouTube and Twitch, distributed as stand
 
 Both scripts replace or complement the sites' native controls with a small indicator that expands into a full slider when needed. They share the same tested core while keeping site-specific behavior isolated.
 
+## Preview
+
+<details open>
+<summary>YouTube theme</summary>
+
+<p align="center">
+  <img src="docs/images/demo-youtube-volume-slider-expanded.svg" alt="Expanded YouTube volume slider with a speaker icon, 40 percent volume label, and red slider track" width="520">
+  &nbsp;
+  <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and on-video appearance controls" width="300">
+</p>
+</details>
+
+<details>
+<summary>Twitch theme</summary>
+
+<p align="center">
+  <img src="docs/images/demo-twitch-volume-slider-expanded.svg" alt="Expanded Twitch volume slider with a speaker icon, 40 percent volume label, and purple slider track" width="520">
+  &nbsp;
+  <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and on-video appearance controls" width="300">
+</p>
+</details>
+
 ## Install
 
 - [YouTube Volume Slider 2.5](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5/YouTube.Volume.Slider.2.5.user.js)

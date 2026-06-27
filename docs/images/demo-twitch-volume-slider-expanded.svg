@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="176" viewBox="0 0 720 176" role="img" aria-labelledby="title desc">
+  <title id="title">Expanded Twitch volume slider</title>
+  <desc id="desc">Transparent demo of the expanded replacement volume slider showing a 40 percent volume value, speaker icon, and purple slider track.</desc>
+  <defs>
+    <filter id="shadow" x="-12%" y="-40%" width="124%" height="180%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity="0.28"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+    <linearGradient id="track" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#a970ff"/>
+      <stop offset="0.38" stop-color="#9146ff"/>
+      <stop offset="0.40" stop-color="#b38cff"/>
+      <stop offset="0.42" stop-color="rgba(255,255,255,0.15)"/>
+      <stop offset="1" stop-color="rgba(255,255,255,0.15)"/>
+    </linearGradient>
+    <clipPath id="pill-clip">
+      <rect x="80" y="56" width="560" height="64" rx="32"/>
+    </clipPath>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="56" width="560" height="64" rx="32" fill="rgba(8,13,15,0.78)"/>
+    <rect x="80.5" y="56.5" width="559" height="63" rx="31.5" fill="none" stroke="rgba(255,255,255,0.1)"/>
+  </g>
+
+  <g clip-path="url(#pill-clip)">
+    <circle cx="112" cy="88" r="20" fill="rgba(255,255,255,0.04)"/>
+    <path d="M105.9 80.2 99.4 84.1a5.8 5.8 0 0 0-2.8 5v.3a5.8 5.8 0 0 0 2.8 5l6.5 3.9c.6.4 1.5-.1 1.5-.9V81.1c0-.8-.9-1.2-1.5-.9Z" fill="rgba(255,255,255,0.94)"/>
+    <path d="M111.5 83.1a6.9 6.9 0 0 1 0 9.8m4-13.8a12.4 12.4 0 0 1 0 17.8" fill="none" stroke="rgba(255,255,255,0.94)" stroke-width="2.6" stroke-linecap="round"/>
+    <circle cx="112" cy="88" r="17.3" fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="3.4"/>
+    <path d="M112 70.7a17.3 17.3 0 0 1 10.2 31.3" fill="none" stroke="#9146ff" stroke-width="3.4" stroke-linecap="round"/>
+
+    <text x="173" y="94" fill="#fff" font-family="Roboto, Arial, Helvetica, sans-serif" font-size="22" font-weight="500" text-anchor="middle">40%</text>
+
+    <g transform="translate(230 88)">
+      <rect x="0" y="-3.5" width="350" height="7" rx="3.5" fill="url(#track)"/>
+      <g opacity="0.55">
+        <path d="M14 -3.5v7M31.5 -3.5v7M49 -3.5v7M66.5 -3.5v7M84 -3.5v7M101.5 -3.5v7M119 -3.5v7M136.5 -3.5v7M154 -3.5v7M171.5 -3.5v7M189 -3.5v7M206.5 -3.5v7M224 -3.5v7M241.5 -3.5v7M259 -3.5v7M276.5 -3.5v7M294 -3.5v7M311.5 -3.5v7M329 -3.5v7" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+      </g>
+      <circle cx="140" cy="0" r="15" fill="#fff"/>
+      <circle cx="140" cy="0" r="14.5" fill="none" stroke="rgba(0,0,0,0.12)"/>
+    </g>
+  </g>
+</svg>
