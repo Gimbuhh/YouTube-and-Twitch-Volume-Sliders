@@ -1,6 +1,7 @@
 ## Fixed
 
 - Matched the New icon style's volume bar length to the Classic style, using the saved label space to shorten the pill instead of extending the bar.
+- Rebuilt the 5% tick marks as a single crisp SVG layer so tick thickness stays more even when browser page zoom changes.
 
 ## Notes
 

@@ -270,12 +270,23 @@ export function createOverlayUi(dependencies) {
     function populateSliderTicks(tickOverlay) {
         if (!tickOverlay) return;
         tickOverlay.textContent = '';
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('class', 'tm-slider-ticks-svg');
+        svg.setAttribute('viewBox', '0 0 100 1');
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
         for (let pct = 5; pct < 100; pct += 5) {
-            const tick = document.createElement('span');
-            tick.className = 'tm-slider-tick';
-            tick.style.left = `${pct}%`;
-            tickOverlay.appendChild(tick);
+            const tick = document.createElementNS(ns, 'line');
+            tick.setAttribute('class', 'tm-slider-tick');
+            tick.setAttribute('x1', String(pct));
+            tick.setAttribute('x2', String(pct));
+            tick.setAttribute('y1', '0');
+            tick.setAttribute('y2', '1');
+            svg.appendChild(tick);
         }
+        tickOverlay.appendChild(svg);
     }
 
     function makeVolumeIndicatorSvg() {

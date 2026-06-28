@@ -263,12 +263,23 @@
     function populateSliderTicks(tickOverlay) {
       if (!tickOverlay) return;
       tickOverlay.textContent = "";
+      const ns = "http://www.w3.org/2000/svg";
+      const svg = document2.createElementNS(ns, "svg");
+      svg.setAttribute("class", "tm-slider-ticks-svg");
+      svg.setAttribute("viewBox", "0 0 100 1");
+      svg.setAttribute("preserveAspectRatio", "none");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
       for (let pct = 5; pct < 100; pct += 5) {
-        const tick = document2.createElement("span");
-        tick.className = "tm-slider-tick";
-        tick.style.left = `${pct}%`;
-        tickOverlay.appendChild(tick);
+        const tick = document2.createElementNS(ns, "line");
+        tick.setAttribute("class", "tm-slider-tick");
+        tick.setAttribute("x1", String(pct));
+        tick.setAttribute("x2", String(pct));
+        tick.setAttribute("y1", "0");
+        tick.setAttribute("y2", "1");
+        svg.appendChild(tick);
       }
+      tickOverlay.appendChild(svg);
     }
     function makeVolumeIndicatorSvg() {
       const ns = "http://www.w3.org/2000/svg";
@@ -1734,12 +1745,19 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 }
 
 #${OVERLAY_ID} .tm-slider-tick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  transform: translateX(-0.5px);
-  background: rgba(255,255,255,0.25);
+  stroke: rgba(255,255,255,0.25);
+  stroke-width: 1px;
+  stroke-linecap: butt;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: crispEdges;
+}
+
+#${OVERLAY_ID} .tm-slider-ticks-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  shape-rendering: crispEdges;
 }
 
         `;

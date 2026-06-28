@@ -620,12 +620,19 @@ export function startTwitchVolumeSlider() {
 }
 
 #${OVERLAY_ID} .tm-slider-tick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  transform: translateX(-0.5px);
-  background: rgba(255,255,255,0.25);
+  stroke: rgba(255,255,255,0.25);
+  stroke-width: 1px;
+  stroke-linecap: butt;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: crispEdges;
+}
+
+#${OVERLAY_ID} .tm-slider-ticks-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  shape-rendering: crispEdges;
 }
 
         `;

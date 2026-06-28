@@ -387,6 +387,7 @@ for(const config of platforms){
     const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const sliderRow=runtime.document.querySelector('.tm-volume-slider-row');
     const ticks=runtime.document.querySelector('.tm-slider-ticks');
+    const ticksSvg=runtime.document.querySelector('.tm-slider-ticks-svg');
     const tickMarks=runtime.document.querySelectorAll('.tm-slider-tick');
     const style=runtime.document.getElementById('tm-volume-slider-style');
     const sliderRowStyle=runtime.window.getComputedStyle(sliderRow);
@@ -396,9 +397,17 @@ for(const config of platforms){
     assert.equal(sliderRow.style.flex,'');
     assert.equal(ticksStyle.opacity,'1');
     assert.match(sliderRowStyle.transition,/visibility 0s linear 0\.22s/);
+    assert.equal(ticksSvg?.namespaceURI,'http://www.w3.org/2000/svg');
+    assert.equal(ticksSvg.getAttribute('viewBox'),'0 0 100 1');
+    assert.equal(ticksSvg.getAttribute('preserveAspectRatio'),'none');
     assert.equal(tickMarks.length,19);
-    assert.equal(tickMarks[0].style.left,'5%');
-    assert.equal(tickMarks[18].style.left,'95%');
+    assert.equal(tickMarks[0].tagName.toLowerCase(),'line');
+    assert.equal(tickMarks[0].getAttribute('x1'),'5');
+    assert.equal(tickMarks[0].getAttribute('x2'),'5');
+    assert.equal(tickMarks[18].getAttribute('x1'),'95');
+    assert.equal(tickMarks[18].getAttribute('x2'),'95');
+    assert.match(style.textContent,/\.tm-slider-tick\s*{[^}]*vector-effect:\s*non-scaling-stroke/s);
+    assert.match(style.textContent,/\.tm-slider-tick\s*{[^}]*shape-rendering:\s*crispEdges/s);
     assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*flex:\s*0 0 calc\(var\(--tm-pill-expanded-width\) - /s);
     assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*width:\s*calc\(var\(--tm-pill-expanded-width\) - /s);
     assert.doesNotMatch(style.textContent,/repeating-linear-gradient/);
