@@ -11,16 +11,14 @@ Both scripts replace or complement the sites' native controls with a small indic
 
 <table>
   <tr>
-    <td align="center" valign="middle" width="58%" height="350">
-      <img src="docs/images/demo-youtube-volume-slider-expanded.svg" alt="Expanded YouTube volume slider with a speaker icon, 40 percent volume label, and red slider track" width="420">
+    <td align="center" valign="middle" width="58%">
+      <strong>New</strong><br>
+      <img src="docs/images/demo-youtube-volume-slider-expanded.svg" alt="New expanded YouTube volume slider with 25 shown inside the circular control and a red slider track" width="420"><br><br>
+      <strong>Classic</strong><br>
+      <img src="docs/images/demo-youtube-volume-slider-classic.svg" alt="Classic expanded YouTube volume slider with a speaker icon, 25 percent volume label, and red slider track" width="420">
     </td>
-    <td align="center" valign="middle" width="42%" rowspan="2">
-      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and bar thickness controls" width="240">
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="bottom" width="58%">
-      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the thickness used before this setting was added.</sub>
+    <td align="center" valign="middle" width="42%">
+      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240">
     </td>
   </tr>
 </table>
@@ -31,16 +29,14 @@ Both scripts replace or complement the sites' native controls with a small indic
 
 <table>
   <tr>
-    <td align="center" valign="middle" width="58%" height="350">
-      <img src="docs/images/demo-twitch-volume-slider-expanded.svg" alt="Expanded Twitch volume slider with a speaker icon, 40 percent volume label, and purple slider track" width="420">
+    <td align="center" valign="middle" width="58%">
+      <strong>New</strong><br>
+      <img src="docs/images/demo-twitch-volume-slider-expanded.svg" alt="New expanded Twitch volume slider with 25 shown inside the circular control and a purple slider track" width="420"><br><br>
+      <strong>Classic</strong><br>
+      <img src="docs/images/demo-twitch-volume-slider-classic.svg" alt="Classic expanded Twitch volume slider with a speaker icon, 25 percent volume label, and purple slider track" width="420">
     </td>
-    <td align="center" valign="middle" width="42%" rowspan="2">
-      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and bar thickness controls" width="240">
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="bottom" width="58%">
-      <sub>Preview uses 40% volume and 75% bar thickness. Bar thickness ranges from 25% to 125%, where 100% matches the thickness used before this setting was added.</sub>
+    <td align="center" valign="middle" width="42%">
+      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240">
     </td>
   </tr>
 </table>
@@ -72,6 +68,8 @@ pnpm release -- 2.5
 ```
 
 Edit canonical code under `src/`; never edit `dist/` or archives manually. `dist/` is generated, `archive/legacy/` preserves historical releases, and `archive/releases/` contains immutable packaged releases. See [architecture](docs/architecture.md), [testing](docs/testing.md), [releasing](docs/releasing.md), and [contributing](CONTRIBUTING.md).
+
+The userscripts and this repository are made and maintained with Codex.
 
 `node_modules/` is machine-local and intentionally excluded. Recreate it with the frozen lockfile instead of copying it between Windows and macOS; pnpm installs only native packages for the current machine.
 
