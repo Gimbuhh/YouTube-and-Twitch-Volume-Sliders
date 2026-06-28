@@ -19,7 +19,90 @@ async function loadPlatform(config, setup = () => {}) {
   return {runtime,fixture};
 }
 
+test('YouTube: replace-native guard hides native volume areas as soon as they appear',async()=>{
+  const config=platforms[0];
+  const {runtime}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.modeKey,'replace-native');
+  });
+  assert.ok(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'));
+
+  const lateNativeArea=runtime.document.createElement('div');
+  lateNativeArea.className='ytp-volume-area';
+  runtime.document.body.appendChild(lateNativeArea);
+  assert.equal(runtime.window.getComputedStyle(lateNativeArea).display,'none');
+  runtime.close();
+});
+
+test('YouTube: document-start bootstrap mounts the slider when the player arrives',async()=>{
+  const config=platforms[0];
+  const runtime=createRuntime(config.url,{runScripts:'outside-only'});
+  runtime.window.localStorage.setItem(config.modeKey,'replace-native');
+  const source=await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`,import.meta.url),'utf8');
+  runtime.window.eval(source);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+
+  const fixture=config.fixture(runtime.document);
+  fixture.player.hideControls=()=>fixture.player.classList.add('ytp-autohide');
+  await new Promise(resolve=>runtime.window.setTimeout(resolve,60));
+
+  assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+  assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+  assert.equal(runtime.window.getComputedStyle(fixture.player.querySelector('.ytp-volume-area')).display,'none');
+  runtime.close();
+});
+
+test('YouTube: closing a scrolled options menu outside the player hides controls without forcing autohide',async()=>{
+  const config=platforms[0];
+  const {runtime,fixture}=await loadPlatform(config);
+  let hideCalls=0;
+  fixture.player.hideControls=()=>{
+    hideCalls+=1;
+    fixture.player.classList.add('ytp-autohide');
+  };
+  const bottom=runtime.document.createElement('div');
+  bottom.className='ytp-chrome-bottom';
+  fixture.player.appendChild(bottom);
+  const btn=runtime.document.getElementById('tm-volume-options-button');
+  btn.dispatchEvent(new runtime.window.MouseEvent('click',{bubbles:true,cancelable:true}));
+  assert.ok(fixture.player.classList.contains('tm-volume-options-controls-hold'));
+
+  const popup=runtime.document.getElementById('tm-volume-options-popup');
+  const body=popup.querySelector('.tm-volume-options-body');
+  body.scrollTop=200;
+  runtime.document.body.dispatchEvent(new runtime.window.MouseEvent('click',{bubbles:true,cancelable:true}));
+
+  assert.ok(popup.hasAttribute('hidden'));
+  assert.equal(fixture.player.classList.contains('tm-volume-options-controls-hold'),false);
+  assert.equal(fixture.player.classList.contains('ytp-autohide'),false);
+  assert.equal(hideCalls,0);
+  assert.equal(fixture.player.classList.contains('tm-volume-options-close-hide-controls'),true);
+  assert.equal(runtime.window.getComputedStyle(bottom).pointerEvents,'none');
+  assert.equal(runtime.window.getComputedStyle(bottom).opacity,'0');
+
+  fixture.player.dispatchEvent(new runtime.window.MouseEvent('pointermove',{bubbles:true,cancelable:true}));
+  assert.equal(fixture.player.classList.contains('tm-volume-options-close-hide-controls'),false);
+  assert.equal(runtime.window.getComputedStyle(bottom).pointerEvents,'auto');
+  runtime.close();
+});
+
 for(const config of platforms){
+  test(`${config.name}: initial volume indicator matches saved volume before the first visible sync`,async()=>{
+    const {runtime}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.volumeKey,'35');
+    });
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    const label=runtime.document.getElementById('tm-volume-slider-value');
+    const arc=overlay.querySelector('.tm-volume-arc');
+    assert.equal(slider.value,'35');
+    assert.equal(label.textContent,'35%');
+    assert.equal(arc.style.strokeDasharray,'35 100');
+    assert.equal(arc.getAttribute('stroke-dasharray'),'35 100');
+    assert.equal(arc.style.visibility,'visible');
+    assert.notEqual(runtime.window.getComputedStyle(arc).transitionProperty,'stroke-dasharray');
+    runtime.close();
+  });
+
   test(`${config.name}: full artifact restores volume without unmuting and slider input unmutes`,async()=>{
     const {runtime,fixture}=await loadPlatform(config,(current,currentFixture)=>{
       current.window.localStorage.setItem(config.volumeKey,'35');

@@ -89,7 +89,9 @@ export function createOverlayUi(dependencies) {
             arc.style.visibility = pct <= 0 ? 'hidden' : 'visible';
             arc.style.strokeLinecap = pct <= 0 ? 'butt' : 'round';
             const dash = pct >= 100 ? 100.01 : pct;
-            arc.style.strokeDasharray = `${dash} 100`;
+            const dashValue = `${dash} 100`;
+            arc.setAttribute('stroke-dasharray', dashValue);
+            arc.style.strokeDasharray = dashValue;
         }
     }
 

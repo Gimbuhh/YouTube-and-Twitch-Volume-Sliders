@@ -15,6 +15,7 @@ export function startYouTubeVolumeSlider() {
     const OPTIONS_STYLE_ID = 'tm-volume-options-style';
     const OPTIONS_BUTTON_ID = 'tm-volume-options-button';
     const OPTIONS_POPUP_ID = 'tm-volume-options-popup';
+    const OPTIONS_CLOSE_HIDE_CONTROLS_CLASS = 'tm-volume-options-close-hide-controls';
     const STORAGE_KEY = 'tm-yt-volume';
     const VOLUME_MODE_KEY = 'tm-yt-volume-slider-mode';
     const SLIDER_LOCATION_KEY = 'tm-yt-volume-slider-location';
@@ -35,6 +36,8 @@ export function startYouTubeVolumeSlider() {
     const WHEEL_VOLUME_STEP = 5;
     const NAV_REATTACH_DELAY_MS = 700;
     const NAV_DEBOUNCE_MS = 180;
+    const INITIAL_ATTACH_RETRY_MS = 50;
+    const INITIAL_ATTACH_MAX_ATTEMPTS = 80;
     const ON_VIDEO_IDLE_BOTTOM_PX = 12;
     const ON_VIDEO_MAX_CONTROLS_OFFSET_PX = 140;
     const VOLUME_ACCENT_LIGHT = '#cc4444';
@@ -129,8 +132,28 @@ export function startYouTubeVolumeSlider() {
 
 
 
+    function shouldHideNativeVolume() {
+        return isOverlayEnabled() && isNativeVolumeReplacementEnabled();
+    }
+
+    function ensureNativeVolumeVisibilityGuard() {
+        const style = createStyleElement(document, 'tm-volume-native-visibility-style');
+        if (style) {
+            style.textContent = `
+html.tm-yt-volume-native-replacement-active .ytp-volume-area {
+  display: none !important;
+}
+            `;
+        }
+        document.documentElement.classList.toggle(
+            'tm-yt-volume-native-replacement-active',
+            shouldHideNativeVolume()
+        );
+    }
+
     function applyNativeVolumeVisibility() {
-        const shouldHideNative = isOverlayEnabled() && isNativeVolumeReplacementEnabled();
+        ensureNativeVolumeVisibilityGuard();
+        const shouldHideNative = shouldHideNativeVolume();
         document.querySelectorAll('.ytp-volume-area').forEach((area) => {
             const nextDisplay = shouldHideNative ? 'none' : '';
             if (area.style.display !== nextDisplay) {
@@ -408,7 +431,6 @@ export function startYouTubeVolumeSlider() {
 
 #${OVERLAY_ID} .tm-volume-arc {
   stroke-linecap: round;
-  transition: stroke-dasharray 0.08s linear;
 }
 
 #${OVERLAY_ID} .tm-volume-speaker-icon {
@@ -782,6 +804,19 @@ export function startYouTubeVolumeSlider() {
             }
             .tm-volume-options-open .ytp-tooltip {
                 display: none !important;
+            }
+            #movie_player.ytp-autohide:not(.tm-volume-options-controls-hold) .ytp-chrome-bottom,
+            #movie_player.ytp-hide-controls:not(.tm-volume-options-controls-hold) .ytp-chrome-bottom {
+                pointer-events: none !important;
+            }
+            #movie_player.${OPTIONS_CLOSE_HIDE_CONTROLS_CLASS}:not(.tm-volume-options-controls-hold) .ytp-chrome-bottom {
+                opacity: 0 !important;
+                pointer-events: none !important;
+            }
+            .tm-volume-options-controls-hold .ytp-chrome-bottom {
+                opacity: 1 !important;
+                pointer-events: auto !important;
+                visibility: visible !important;
             }
             .tm-volume-options-header {
                 align-items: center;
@@ -1167,6 +1202,7 @@ export function startYouTubeVolumeSlider() {
     let optionsPopupOutsideHandler = null;
     let optionsPopupKeyHandler = null;
     let optionsPopupRepositionHandler = null;
+    let optionsCloseHideControlsHandler = null;
     let optionsPopupOpener = null;
 
     function getOptionsPopup() {
@@ -1293,16 +1329,38 @@ export function startYouTubeVolumeSlider() {
     function keepYouTubeControlsVisible() {
         const player = getPlayerContainer();
         if (!player) return;
+        clearOptionsCloseControlsHide();
+        player.classList.add('tm-volume-options-controls-hold');
         player.classList.remove('ytp-autohide', 'ytp-hide-controls');
         if (typeof player.showControls === 'function') {
             try { player.showControls(); } catch (e) { /* ignore player API errors */ }
         }
     }
 
-    function hideYouTubeControls() {
+    function releaseYouTubeControlsVisibility() {
+        getPlayerContainer()?.classList?.remove('tm-volume-options-controls-hold');
+    }
+
+    function clearOptionsCloseControlsHide() {
+        getPlayerContainer()?.classList?.remove(OPTIONS_CLOSE_HIDE_CONTROLS_CLASS);
+        if (!optionsCloseHideControlsHandler) return;
+        document.removeEventListener('pointermove', optionsCloseHideControlsHandler, true);
+        document.removeEventListener('pointerdown', optionsCloseHideControlsHandler, true);
+        optionsCloseHideControlsHandler = null;
+    }
+
+    function hideControlsUntilPlayerPointerReturn() {
         const player = getPlayerContainer();
         if (!player) return;
-        player.classList.add('ytp-autohide');
+        clearOptionsCloseControlsHide();
+        player.classList.add(OPTIONS_CLOSE_HIDE_CONTROLS_CLASS);
+        optionsCloseHideControlsHandler = (event) => {
+            if (getPlayerContainer()?.contains?.(event.target)) {
+                clearOptionsCloseControlsHide();
+            }
+        };
+        document.addEventListener('pointermove', optionsCloseHideControlsHandler, true);
+        document.addEventListener('pointerdown', optionsCloseHideControlsHandler, true);
     }
 
     function isYouTubeVideoSurfaceClick(event) {
@@ -1319,6 +1377,10 @@ export function startYouTubeVolumeSlider() {
     function startOptionsControlsHold() {
         keepYouTubeControlsVisible();
         ensurePlayerControlsObserver();
+    }
+
+    function stopOptionsControlsHold() {
+        releaseYouTubeControlsVisibility();
     }
 
     function openVolumeOptionsPopup() {
@@ -1349,7 +1411,7 @@ export function startYouTubeVolumeSlider() {
                 const clickedOutsidePlayer = !getPlayerContainer()?.contains?.(event.target);
                 const clickedVideoSurface = isYouTubeVideoSurfaceClick(event);
                 closeVolumeOptionsPopup();
-                if (clickedOutsidePlayer) hideYouTubeControls();
+                if (clickedOutsidePlayer) hideControlsUntilPlayerPointerReturn();
                 if (clickedVideoSurface) {
                     event.preventDefault();
                     event.stopPropagation();
@@ -1395,6 +1457,7 @@ export function startYouTubeVolumeSlider() {
             popup.setAttribute('hidden', '');
         }
         getPlayerContainer()?.classList?.remove('tm-volume-options-open');
+        stopOptionsControlsHold();
         document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute('aria-expanded', 'false');
 
         if (optionsPopupOutsideHandler) {
@@ -1594,15 +1657,20 @@ export function startYouTubeVolumeSlider() {
         slider.setAttribute('aria-label', 'Volume');
         slider.setAttribute('aria-describedby', VALUE_LABEL_ID);
 
+        const syncInitialSliderState = (value, muted = false) => {
+            slider.value = String(value);
+            label.textContent = muted ? 'Muted' : `${value}%`;
+            updateSliderBar(slider);
+            updateVolumeIndicator(overlay, value, muted);
+        };
+
         // Initialize from localStorage to avoid the 100% to actual jump on video load
         const initVol = getSavedVolume();
         if (initVol !== null) {
-            slider.value = String(initVol);
-            label.textContent = `${initVol}%`;
+            syncInitialSliderState(initVol, isMuted(video));
         } else {
-            setSliderFromPlayer(slider, label, video);
+            syncInitialSliderState(getVolume(video), isMuted(video));
         }
-        updateSliderBar(slider);
 
         let pointerStartX = 0;
         let pointerStartY = 0;
@@ -1810,6 +1878,7 @@ export function startYouTubeVolumeSlider() {
         const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
         if (!hasAddedNodes || attachQueued) return;
 
+        applyNativeVolumeVisibility();
         const overlay = document.getElementById(OVERLAY_ID);
         const button = document.getElementById(OPTIONS_BUTTON_ID);
         const overlayMissing = isOverlayEnabled() && (!overlay || !overlay.isConnected);
@@ -1856,19 +1925,19 @@ export function startYouTubeVolumeSlider() {
         ensureAttachObserver();
         if (attachObserverTarget || attachBootstrapObserver) return;
 
+        const bootstrapRoot = document.body || document.documentElement;
+        if (!bootstrapRoot) return;
         attachBootstrapObserver = new MutationObserver(() => {
             if (!getAttachObserverRoot()) return;
             ensureAttachObserver();
         });
-        attachBootstrapObserver.observe(document.body, { childList: true, subtree: true });
+        attachBootstrapObserver.observe(bootstrapRoot, { childList: true, subtree: true });
     }
 
     function setupInitialAttempts() {
-        const maxAttempts = 20;
-        const delayMs = 500;
         const attemptAttach = (attempt) => {
-            if (attachSliderIfPossible() || attempt >= maxAttempts) return;
-            window.setTimeout(() => attemptAttach(attempt + 1), delayMs);
+            if (attachSliderIfPossible() || attempt >= INITIAL_ATTACH_MAX_ATTEMPTS) return;
+            window.setTimeout(() => attemptAttach(attempt + 1), INITIAL_ATTACH_RETRY_MS);
         };
         attemptAttach(0);
     }
@@ -1886,6 +1955,7 @@ export function startYouTubeVolumeSlider() {
             resetVideoElement();
             cachedYtPlayer = null;
             closeVolumeOptionsPopup();
+            clearOptionsCloseControlsHide();
             disconnectPlayerControlsObserver();
             disconnectAttachObserver();
 
@@ -1913,6 +1983,7 @@ export function startYouTubeVolumeSlider() {
     }
 
     function init() {
+        applyNativeVolumeVisibility();
         setupInitialAttempts();
         setupAttachObserver();
         setupYtNavigationHandler();
@@ -1922,6 +1993,7 @@ export function startYouTubeVolumeSlider() {
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         init();
     } else {
-        window.addEventListener('DOMContentLoaded', init, { once: true });
+        applyNativeVolumeVisibility();
+        init();
     }
 }
