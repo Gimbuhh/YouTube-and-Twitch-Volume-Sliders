@@ -327,13 +327,14 @@ export function startTwitchVolumeSlider() {
         style.type = 'text/css';
         const css = `
 #${OVERLAY_ID} {
-  --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
+  --tm-pill-expanded-width: clamp(228px, calc(34vw - 92px), 368px);
   --tm-label-row-width: 50px;
   --tm-slider-row-offset: 62px;
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
 #${OVERLAY_ID}.tm-volume-appearance-classic {
+  --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
   --tm-label-row-width: 96px;
   --tm-slider-row-offset: 108px;
 }
@@ -619,12 +620,19 @@ export function startTwitchVolumeSlider() {
 }
 
 #${OVERLAY_ID} .tm-slider-tick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  transform: translateX(-0.5px);
-  background: rgba(255,255,255,0.25);
+  stroke: rgba(255,255,255,0.25);
+  stroke-width: 1px;
+  stroke-linecap: butt;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: crispEdges;
+}
+
+#${OVERLAY_ID} .tm-slider-ticks-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  shape-rendering: crispEdges;
 }
 
         `;

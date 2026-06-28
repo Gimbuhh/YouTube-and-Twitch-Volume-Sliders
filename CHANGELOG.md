@@ -2,6 +2,17 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6.4 - 2026-06-28
+
+### Fixed
+
+- Matched the New icon style's volume bar length to the Classic style, using the saved label space to shorten the pill instead of extending the bar.
+- Rebuilt the 5% tick marks as a single crisp SVG layer so tick thickness stays more even when browser page zoom changes.
+
+### Notes
+
+- Classic style bar geometry remains unchanged.
+
 ## 2.6.3 - 2026-06-28
 
 ### Fixed
