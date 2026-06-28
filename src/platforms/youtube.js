@@ -25,6 +25,7 @@ export function startYouTubeVolumeSlider() {
     const OVERLAY_OPACITY_ACTIVE_KEY = 'tm-yt-volume-slider-opacity-active';
     const OVERLAY_SIZE_KEY = 'tm-yt-volume-slider-size';
     const SLIDER_THICKNESS_KEY = 'tm-yt-volume-slider-thickness';
+    const VOLUME_APPEARANCE_KEY = 'tm-yt-volume-slider-appearance';
     const DEFAULT_OVERLAY_OPACITY_IDLE = 45;
     const DEFAULT_OVERLAY_OPACITY_ACTIVE = 95;
     const DEFAULT_OVERLAY_SIZE = 100;
@@ -34,8 +35,6 @@ export function startYouTubeVolumeSlider() {
     const WHEEL_VOLUME_STEP = 5;
     const NAV_REATTACH_DELAY_MS = 700;
     const NAV_DEBOUNCE_MS = 180;
-    const VOLUME_LABEL_ROW_WIDTH_PX = 50;
-    const VOLUME_SLIDER_ROW_OFFSET_PX = VOLUME_LABEL_ROW_WIDTH_PX + 12;
     const ON_VIDEO_IDLE_BOTTOM_PX = 12;
     const ON_VIDEO_MAX_CONTROLS_OFFSET_PX = 140;
     const VOLUME_ACCENT_LIGHT = '#cc4444';
@@ -62,7 +61,9 @@ export function startYouTubeVolumeSlider() {
         // On-video slider size: 'saved' or 100-200 as a percentage. Default: 100
         overlaySize: 'saved',
         // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 75
-        sliderThickness: 'saved'
+        sliderThickness: 'saved',
+        // Volume icon style: 'saved', 'new', or 'classic'. Default: 'saved'
+        volumeAppearance: 'saved'
     };
 
     let cachedYtPlayer = null;
@@ -84,9 +85,9 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage: localStorage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY },
+        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
         onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
@@ -241,7 +242,14 @@ export function startYouTubeVolumeSlider() {
         const css = `
 #${OVERLAY_ID} {
   --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
+  --tm-label-row-width: 50px;
+  --tm-slider-row-offset: 62px;
   filter: ${VOLUME_PANEL_DROP_SHADOW};
+}
+
+#${OVERLAY_ID}.tm-volume-appearance-classic {
+  --tm-label-row-width: 96px;
+  --tm-slider-row-offset: 108px;
 }
 
 #${OVERLAY_ID} input[type=range] {
@@ -403,6 +411,21 @@ export function startYouTubeVolumeSlider() {
   transition: stroke-dasharray 0.08s linear;
 }
 
+#${OVERLAY_ID} .tm-volume-speaker-icon {
+  color: rgba(255, 255, 255, 0.94);
+  display: none;
+}
+
+#${OVERLAY_ID}.tm-volume-appearance-classic .tm-volume-percent {
+  display: none;
+}
+
+#${OVERLAY_ID}.tm-volume-appearance-classic .tm-volume-indicator[data-volume-icon="muted"] .tm-volume-speaker-muted,
+#${OVERLAY_ID}.tm-volume-appearance-classic .tm-volume-indicator[data-volume-icon="low"] .tm-volume-speaker-low,
+#${OVERLAY_ID}.tm-volume-appearance-classic .tm-volume-indicator[data-volume-icon="high"] .tm-volume-speaker-high {
+  display: block;
+}
+
 #${OVERLAY_ID} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
   font: 800 14px/1 "YouTube Noto", Roboto, Arial, Helvetica, sans-serif;
@@ -422,24 +445,30 @@ export function startYouTubeVolumeSlider() {
 #${OVERLAY_ID} .tm-volume-controls {
   position: relative;
   z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.08s ease 0.14s, visibility 0s linear 0.22s;
 }
 
 #${OVERLAY_ID}.tm-collapsed .tm-volume-controls {
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
+  transition: opacity 0.08s ease 0.14s, visibility 0s linear 0.22s;
 }
 
 #${OVERLAY_ID}.tm-expanded .tm-volume-controls {
   opacity: 1;
   pointer-events: auto;
   visibility: visible;
+  transition: opacity 0.1s ease, visibility 0s linear 0s;
 }
 
 #${OVERLAY_ID} .tm-volume-top-row {
   flex: 0 0 auto;
   position: relative;
-  width: ${VOLUME_LABEL_ROW_WIDTH_PX}px;
+  width: var(--tm-label-row-width);
   height: 40px;
   box-sizing: border-box;
   pointer-events: none !important;
@@ -462,13 +491,23 @@ export function startYouTubeVolumeSlider() {
   letter-spacing: 0;
 }
 
+#${OVERLAY_ID}.tm-volume-appearance-classic #${VALUE_LABEL_ID} {
+  left: 36px;
+  top: 50%;
+  width: 58px;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
+  transform: translateY(-50%);
+}
+
 #${OVERLAY_ID} .tm-volume-slider-row {
   --tm-active-track-h: 11px;
   --tm-visual-track-h: 5px;
   --tm-thumb-size: 22px;
   --tm-track-radius: calc(var(--tm-visual-track-h, 5px) / 2);
-  flex: 0 0 calc(var(--tm-pill-expanded-width) - ${VOLUME_SLIDER_ROW_OFFSET_PX}px);
-  width: calc(var(--tm-pill-expanded-width) - ${VOLUME_SLIDER_ROW_OFFSET_PX}px);
+  flex: 0 0 calc(var(--tm-pill-expanded-width) - var(--tm-slider-row-offset));
+  width: calc(var(--tm-pill-expanded-width) - var(--tm-slider-row-offset));
   min-width: 0;
   height: 40px;
 }
@@ -496,13 +535,9 @@ export function startYouTubeVolumeSlider() {
   pointer-events: none;
   background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
   background-size: 100% 100%;
-  opacity: 0;
+  opacity: 1;
   transition: none;
   z-index: 1;
-}
-#${OVERLAY_ID}.tm-expanded .tm-slider-ticks {
-  opacity: 1;
-  transition: opacity 0.12s ease 0.08s;
 }
 
         `;
@@ -1147,6 +1182,7 @@ export function startYouTubeVolumeSlider() {
     const { buildOptionsPopup, syncOptionsRadioGroups } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
+        getVolumeAppearance, setVolumeAppearance,
         isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
         isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
         setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
@@ -1185,6 +1221,11 @@ export function startYouTubeVolumeSlider() {
             if (!el) return;
             el.setAttribute('aria-checked', getReplaceNativePlacement() === p ? 'true' : 'false');
             el.disabled = !placementEnabled;
+        });
+
+        ['new', 'classic'].forEach((appearance) => {
+            popup.querySelector(`#tm-volume-options-appearance-${appearance}`)
+                ?.setAttribute('aria-checked', getVolumeAppearance() === appearance ? 'true' : 'false');
         });
 
         popup.querySelector('#tm-volume-options-snap')
@@ -1669,6 +1710,7 @@ export function startYouTubeVolumeSlider() {
         overlay.appendChild(iconCell);
         overlay.appendChild(topRow);
         overlay.appendChild(sliderWrap);
+        updateOverlayAppearance(overlay);
 
         placeOverlay(overlay, player, controlsHost);
         setSliderFromPlayer(slider, label, video);

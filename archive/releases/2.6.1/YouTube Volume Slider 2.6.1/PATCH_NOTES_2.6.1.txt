@@ -1,0 +1,12 @@
+## Added
+
+- Added an Icon style option for choosing between the 2.6 volume number arc and the classic 2.5.3 speaker icon with side percentage text.
+
+## Fixed
+
+- Kept the 5% step markers visible as part of the slider bar throughout expansion instead of fading them in after the pill finishes opening.
+- Smoothed collapse timing so the slider visuals do not disappear before the pill has finished shrinking.
+
+## Notes
+
+- New remains the default icon style, so existing 2.6 behavior is preserved unless users choose Classic.
