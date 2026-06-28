@@ -2,7 +2,7 @@
   <title id="title">Expanded Twitch volume slider, new appearance</title>
   <desc id="desc">Expanded Twitch replacement volume slider using the new appearance with the volume number inside the circular arc control.</desc>
   <defs>
-    <filter id="drop" x="-6%" y="-30%" width="112%" height="160%">
+    <filter id="drop" x="-8%" y="-40%" width="116%" height="180%">
       <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#000" flood-opacity="0.06"/>
     </filter>
     <linearGradient id="thumb" x1="0" x2="1" y1="0" y2="1">
@@ -11,33 +11,33 @@
     </linearGradient>
     <linearGradient id="track" x1="0" x2="1">
       <stop offset="0" stop-color="#a970ff"/>
-      <stop offset="0.242" stop-color="#9146ff"/>
-      <stop offset="0.255" stop-color="#b38cff"/>
-      <stop offset="0.268" stop-color="rgba(255,255,255,0.16)"/>
+      <stop offset="0.256" stop-color="#9146ff"/>
+      <stop offset="0.266" stop-color="#b38cff"/>
+      <stop offset="0.275" stop-color="rgba(255,255,255,0.16)"/>
       <stop offset="1" stop-color="rgba(255,255,255,0.16)"/>
     </linearGradient>
     <clipPath id="pill-clip">
-      <rect x="8" y="12" width="536" height="80" rx="40"/>
+      <rect x="16" y="20" width="520" height="64" rx="32"/>
     </clipPath>
   </defs>
 
   <g filter="url(#drop)">
     <g clip-path="url(#pill-clip)">
-      <rect x="8" y="12" width="536" height="80" rx="40" fill="rgba(55,48,62,0.68)"/>
+      <rect x="16" y="20" width="520" height="64" rx="32" fill="rgba(55,48,62,0.68)"/>
 
-      <g transform="translate(16 16)">
-        <circle cx="36" cy="36" r="29" fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="5" transform="rotate(-90 36 36)"/>
-        <circle cx="36" cy="36" r="29" fill="none" stroke="#a970ff" stroke-width="5" stroke-dasharray="25 100" pathLength="100" transform="rotate(-90 36 36)" stroke-linecap="round"/>
-        <text x="36" y="37" fill="rgba(255,255,255,0.96)" font-family="Inter, Arial, Helvetica, sans-serif" font-size="22" font-weight="800" font-variant-numeric="tabular-nums" text-anchor="middle" dominant-baseline="central" alignment-baseline="central" text-shadow="0 0 3px rgba(0,0,0,0.75)">25</text>
+      <g transform="translate(24 20)">
+        <circle cx="32" cy="32" r="23.4" fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="4.4" transform="rotate(-90 32 32)"/>
+        <circle cx="32" cy="32" r="23.4" fill="none" stroke="#a970ff" stroke-width="4.4" stroke-dasharray="25 100" pathLength="100" transform="rotate(-90 32 32)" stroke-linecap="round"/>
+        <text x="32" y="32" fill="rgba(255,255,255,0.96)" font-family="Inter, Arial, Helvetica, sans-serif" font-size="22.4" font-weight="800" font-variant-numeric="tabular-nums" text-anchor="middle" dominant-baseline="central" alignment-baseline="central" text-shadow="0 0 3px rgba(0,0,0,0.75)">25</text>
       </g>
 
-      <g transform="translate(106 52)">
-        <rect x="0" y="-4.5" width="402" height="9" rx="4.5" fill="url(#track)"/>
+      <g transform="translate(96 52)">
+        <rect x="0" y="-6.6" width="421" height="13.2" rx="6.6" fill="url(#track)"/>
         <g opacity="0.55">
-          <path d="M19.65 -4.5v9M36.4 -4.5v9M53.15 -4.5v9M69.9 -4.5v9M86.65 -4.5v9M103.4 -4.5v9M120.15 -4.5v9M136.9 -4.5v9M153.65 -4.5v9M170.4 -4.5v9M187.15 -4.5v9M203.9 -4.5v9M220.65 -4.5v9M237.4 -4.5v9M254.15 -4.5v9M270.9 -4.5v9M287.65 -4.5v9M304.4 -4.5v9M321.15 -4.5v9M337.9 -4.5v9M354.65 -4.5v9M371.4 -4.5v9" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+          <path d="M20.6 -6.6v13.2M38.1 -6.6v13.2M55.7 -6.6v13.2M73.2 -6.6v13.2M90.7 -6.6v13.2M108.3 -6.6v13.2M125.8 -6.6v13.2M143.3 -6.6v13.2M160.9 -6.6v13.2M178.4 -6.6v13.2M195.9 -6.6v13.2M213.5 -6.6v13.2M231 -6.6v13.2M248.5 -6.6v13.2M266.1 -6.6v13.2M283.6 -6.6v13.2M301.1 -6.6v13.2M318.7 -6.6v13.2M336.2 -6.6v13.2M353.7 -6.6v13.2M371.3 -6.6v13.2M388.8 -6.6v13.2" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
         </g>
-        <circle cx="100.5" cy="0" r="16" fill="url(#thumb)"/>
-        <circle cx="100.5" cy="0" r="15.5" fill="none" stroke="rgba(0,0,0,0.12)"/>
+        <circle cx="111.9" cy="0" r="13.2" fill="url(#thumb)"/>
+        <circle cx="111.9" cy="0" r="12.7" fill="none" stroke="rgba(0,0,0,0.12)"/>
       </g>
     </g>
   </g>
