@@ -494,7 +494,6 @@ export function startTwitchVolumeSlider() {
 
 #${OVERLAY_ID} .tm-volume-arc {
   stroke-linecap: round;
-  transition: stroke-dasharray 0.08s linear;
 }
 
 #${OVERLAY_ID} .tm-volume-speaker-icon {
@@ -1871,15 +1870,20 @@ export function startTwitchVolumeSlider() {
         slider.setAttribute('aria-label', 'Volume');
         slider.setAttribute('aria-describedby', VALUE_LABEL_ID);
 
+        const syncInitialSliderState = (value, muted = false) => {
+            slider.value = String(value);
+            label.textContent = muted ? 'Muted' : `${value}%`;
+            updateSliderBar(slider);
+            updateVolumeIndicator(overlay, value, muted);
+        };
+
         // Initialize from localStorage to avoid the 100% to actual jump on stream load
         const initVol = getSavedVolume();
         if (initVol !== null) {
-            slider.value = String(initVol);
-            label.textContent = `${initVol}%`;
+            syncInitialSliderState(initVol, isMuted(video));
         } else {
-            setSliderFromPlayer(slider, label, video);
+            syncInitialSliderState(getVolume(video), isMuted(video));
         }
-        updateSliderBar(slider);
 
         let pointerStartX = 0;
         let pointerStartY = 0;

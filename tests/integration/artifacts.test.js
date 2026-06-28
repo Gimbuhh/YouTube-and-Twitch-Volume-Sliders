@@ -9,6 +9,7 @@ for (const platform of ['youtube','twitch']) test(`${platform} artifact metadata
   const packageData=JSON.parse(await readFile(new URL('../../package.json',import.meta.url),'utf8'));
   const updateUrl = `https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/${platform}-volume-slider.user.js`;
   assert.match(source,new RegExp(`// @version\\s+${packageData.version.replaceAll('.','\\.')}`)); assert.match(source,/\/\/ @grant\s+none/);
+  assert.match(source,new RegExp(`// @run-at\\s+${platform === 'youtube' ? 'document-start' : 'document-idle'}`));
   assert.match(source,new RegExp(`// @updateURL\\s+${updateUrl.replaceAll('.','\\.')}`));
   assert.match(source,new RegExp(`// @downloadURL\\s+${updateUrl.replaceAll('.','\\.')}`));
   assert.doesNotMatch(source,/@require|sourceMappingURL|\bfetch\s*\(|XMLHttpRequest/);
