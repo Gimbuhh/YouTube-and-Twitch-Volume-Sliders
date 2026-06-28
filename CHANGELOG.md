@@ -2,6 +2,19 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6.2 - 2026-06-28
+
+### Fixed
+
+- Hid YouTube's native volume button immediately when replace-native mode is active, avoiding the brief native-icon flash during page load.
+- Mounted the custom YouTube slider earlier during page load so replace-native mode does not leave a visible gap before the custom control appears.
+- Synced the volume arc before the custom slider is inserted and removed the arc fill transition, avoiding the brief low-volume red ring flash.
+- Closing the YouTube Slider Options menu outside the player now visually hides the controls without forcing YouTube's sticky hidden-controls state, so hover reveal remains responsive.
+
+### Notes
+
+- Twitch received the shared arc rendering cleanup only; its timing and controls behavior are unchanged.
+
 ## 2.6.1 - 2026-06-28
 
 ### Added
