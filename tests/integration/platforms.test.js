@@ -268,9 +268,9 @@ for(const config of platforms){
     assert.equal(arcTrack.getAttribute('stroke-width'),'3');
     assert.equal(runtime.window.getComputedStyle(arcTrack).vectorEffect,'non-scaling-stroke');
     assert.equal(percent.getAttribute('font-family'),'Arial, Helvetica, sans-serif');
-    assert.equal(percent.getAttribute('font-size'),'14');
+    assert.equal(percent.getAttribute('font-size'),'15');
     assert.equal(percent.getAttribute('font-weight'),'700');
-    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'14px');
+    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'15px');
     assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'700');
     assert.doesNotMatch(runtime.window.getComputedStyle(percent).fontFamily,/YouTube Noto/);
     assert.equal(runtime.window.getComputedStyle(percent).fontVariantNumeric,'tabular-nums');
@@ -309,17 +309,17 @@ for(const config of platforms){
     runtime.close();
   });
 
-  test(`${config.name}: max volume number uses fitted 14px compact text`,async()=>{
+  test(`${config.name}: max volume number uses fitted compact text`,async()=>{
     const {runtime}=await loadPlatform(config,current=>{
       current.window.localStorage.setItem(config.volumeKey,'100');
     });
     const percent=runtime.document.querySelector('.tm-volume-percent');
     assert.equal(percent.textContent,'100');
-    assert.equal(percent.getAttribute('textLength'),'21');
+    assert.equal(percent.getAttribute('textLength'),'22.5');
     assert.equal(percent.getAttribute('lengthAdjust'),'spacingAndGlyphs');
     assert.equal(percent.getAttribute('x'),'20');
     assert.equal(percent.getAttribute('y'),'20');
-    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'14px');
+    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'15px');
     runtime.close();
   });
 

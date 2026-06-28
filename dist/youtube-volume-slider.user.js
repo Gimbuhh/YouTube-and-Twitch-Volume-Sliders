@@ -35,7 +35,7 @@
     const VOLUME_INDICATOR_TEXT_Y = "20";
     const VOLUME_ARC_RADIUS = "14.5";
     const VOLUME_ARC_STROKE_WIDTH = "3";
-    const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = "21";
+    const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = "22.5";
     const VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX = 1.5;
     function updateSliderBar(slider) {
       const value = Number(slider.value) || 0;
@@ -322,7 +322,7 @@
       percent.setAttribute("dominant-baseline", "central");
       percent.setAttribute("alignment-baseline", "central");
       percent.setAttribute("font-family", "Arial, Helvetica, sans-serif");
-      percent.setAttribute("font-size", "14");
+      percent.setAttribute("font-size", "15");
       percent.setAttribute("font-weight", "700");
       percent.textContent = "0";
       svg.appendChild(percent);
@@ -1621,7 +1621,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
 #${OVERLAY_ID} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
-  font: 700 14px/1 Arial, Helvetica, sans-serif;
+  font: 700 15px/1 Arial, Helvetica, sans-serif;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   font-synthesis: none;

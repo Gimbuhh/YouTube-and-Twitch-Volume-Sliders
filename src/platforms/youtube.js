@@ -450,7 +450,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
 #${OVERLAY_ID} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
-  font: 700 14px/1 Arial, Helvetica, sans-serif;
+  font: 700 15px/1 Arial, Helvetica, sans-serif;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   font-synthesis: none;
