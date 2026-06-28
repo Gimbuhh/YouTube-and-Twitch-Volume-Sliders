@@ -241,8 +241,9 @@ for(const config of platforms){
     runtime.close();
   });
 
-  test(`${config.name}: volume number moves into the arc and frees slider space`,async()=>{
+  test(`${config.name}: volume number moves into the arc and shortens the pill`,async()=>{
     const {runtime}=await loadPlatform(config);
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const row=runtime.document.querySelector('.tm-volume-top-row');
     const label=runtime.document.getElementById('tm-volume-slider-value');
     const percent=runtime.document.querySelector('.tm-volume-percent');
@@ -250,6 +251,9 @@ for(const config of platforms){
     const arcTrack=runtime.document.querySelector('.tm-volume-arc-track');
     const rowStyle=runtime.window.getComputedStyle(row);
     const labelStyle=runtime.window.getComputedStyle(label);
+    assert.equal(overlay.dataset.tmAppearance,'new');
+    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(228px, calc(34vw - 92px), 368px)');
+    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-slider-row-offset').trim(),'62px');
     assert.equal(rowStyle.width,'50px');
     assert.equal(labelStyle.width,'1px');
     assert.equal(labelStyle.height,'1px');
@@ -292,6 +296,8 @@ for(const config of platforms){
     const rowStyle=runtime.window.getComputedStyle(row);
     const labelStyle=runtime.window.getComputedStyle(label);
     assert.equal(overlay.dataset.tmAppearance,'classic');
+    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(274px, calc(34vw - 46px), 414px)');
+    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-slider-row-offset').trim(),'108px');
     assert.equal(indicator.dataset.volumeIcon,'high');
     assert.ok(highIcon);
     assert.equal(rowStyle.width,'96px');
@@ -385,7 +391,7 @@ for(const config of platforms){
     const style=runtime.document.getElementById('tm-volume-slider-style');
     const sliderRowStyle=runtime.window.getComputedStyle(sliderRow);
     const ticksStyle=runtime.window.getComputedStyle(ticks);
-    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(274px, calc(34vw - 46px), 414px)');
+    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(228px, calc(34vw - 92px), 368px)');
     assert.equal(sliderRow.style.width,'');
     assert.equal(sliderRow.style.flex,'');
     assert.equal(ticksStyle.opacity,'1');

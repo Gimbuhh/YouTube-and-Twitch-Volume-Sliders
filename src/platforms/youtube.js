@@ -264,13 +264,14 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!style) return;
         const css = `
 #${OVERLAY_ID} {
-  --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
+  --tm-pill-expanded-width: clamp(228px, calc(34vw - 92px), 368px);
   --tm-label-row-width: 50px;
   --tm-slider-row-offset: 62px;
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
 #${OVERLAY_ID}.tm-volume-appearance-classic {
+  --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
   --tm-label-row-width: 96px;
   --tm-slider-row-offset: 108px;
 }
