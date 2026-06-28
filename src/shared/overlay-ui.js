@@ -9,9 +9,9 @@ export function createOverlayUi(dependencies) {
     const DEFAULT_VISUAL_THUMB_SIZE_PX = 22;
     const VOLUME_INDICATOR_CENTER = '20';
     const VOLUME_INDICATOR_TEXT_Y = '20';
-    const VOLUME_ARC_RADIUS = '14.625';
-    const VOLUME_ARC_STROKE_WIDTH = '2.75';
-    const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = '21';
+    const VOLUME_ARC_RADIUS = '14.5';
+    const VOLUME_ARC_STROKE_WIDTH = '3';
+    const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = '22.5';
     const VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX = 1.5;
 
     function updateSliderBar(slider) {
@@ -267,6 +267,17 @@ export function createOverlayUi(dependencies) {
         return group;
     }
 
+    function populateSliderTicks(tickOverlay) {
+        if (!tickOverlay) return;
+        tickOverlay.textContent = '';
+        for (let pct = 5; pct < 100; pct += 5) {
+            const tick = document.createElement('span');
+            tick.className = 'tm-slider-tick';
+            tick.style.left = `${pct}%`;
+            tickOverlay.appendChild(tick);
+        }
+    }
+
     function makeVolumeIndicatorSvg() {
         const ns = 'http://www.w3.org/2000/svg';
         const svg = document.createElementNS(ns, 'svg');
@@ -321,6 +332,9 @@ export function createOverlayUi(dependencies) {
         percent.setAttribute('text-anchor', 'middle');
         percent.setAttribute('dominant-baseline', 'central');
         percent.setAttribute('alignment-baseline', 'central');
+        percent.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+        percent.setAttribute('font-size', '15');
+        percent.setAttribute('font-weight', '700');
         percent.textContent = '0';
         svg.appendChild(percent);
 
@@ -331,5 +345,5 @@ export function createOverlayUi(dependencies) {
         return svg;
     }
 
-  return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg };
+  return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks };
 }

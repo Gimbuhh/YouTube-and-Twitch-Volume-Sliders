@@ -135,8 +135,8 @@ export function createVolumeSettings({
 
     const arcTrack = overlay.querySelector?.('.tm-volume-arc-track');
     if (arcTrack) {
-      arcTrack.setAttribute('r', classic ? '13' : '14.625');
-      arcTrack.setAttribute('stroke-width', classic ? '4' : '2.75');
+      arcTrack.setAttribute('r', classic ? '13' : '14.5');
+      arcTrack.setAttribute('stroke-width', classic ? '4' : '3');
       if (classic) {
         arcTrack.setAttribute('stroke-dasharray', '100 100');
         arcTrack.setAttribute('pathLength', '100');
@@ -148,8 +148,8 @@ export function createVolumeSettings({
 
     const arc = overlay.querySelector?.('.tm-volume-arc');
     if (arc) {
-      arc.setAttribute('r', classic ? '13' : '14.625');
-      arc.setAttribute('stroke-width', classic ? '4' : '2.75');
+      arc.setAttribute('r', classic ? '13' : '14.5');
+      arc.setAttribute('stroke-width', classic ? '4' : '3');
     }
 
     const label = overlay.querySelector?.('#tm-volume-slider-value');
