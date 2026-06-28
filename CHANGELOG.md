@@ -2,6 +2,19 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6.3 - 2026-06-28
+
+### Fixed
+
+- Stabilized the New icon style's in-arc volume number so it no longer repaints from a fallback thickness to the page font thickness during load.
+- Retuned the New icon style's volume arc to use pixel-aligned 3px ring geometry, improving its smoothness on 1440p displays.
+- Mounted the options button as soon as native player controls appear, before the full custom slider is ready, reducing startup delay next to the native control buttons.
+- Rebuilt the slider's 5% tick marks as evenly positioned 1px marks from 5% through 95%, avoiding uneven spacing and edge rendering artifacts.
+
+### Notes
+
+- The Classic icon style is unchanged.
+
 ## 2.6.2 - 2026-06-28
 
 ### Fixed

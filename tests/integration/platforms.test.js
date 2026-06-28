@@ -9,14 +9,41 @@ const platforms = [
   { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
 
+const waitForTimers = (runtime, delay = 0) => new Promise(resolve=>runtime.window.setTimeout(resolve,delay));
+
+async function startBuiltArtifact(config) {
+  const runtime=createRuntime(config.url,{runScripts:'outside-only'});
+  const source=await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`,import.meta.url),'utf8');
+  runtime.window.eval(source);
+  return runtime;
+}
+
 async function loadPlatform(config, setup = () => {}) {
   const runtime=createRuntime(config.url,{runScripts:'outside-only'});
   const fixture=config.fixture(runtime.document);
   setup(runtime,fixture);
   const source=await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`,import.meta.url),'utf8');
   runtime.window.eval(source);
-  await new Promise(resolve=>runtime.window.setTimeout(resolve,0));
+  await waitForTimers(runtime);
   return {runtime,fixture};
+}
+
+function addYouTubeVideoToEarlyControls(runtime) {
+  const player=runtime.document.getElementById('movie_player');
+  const video=runtime.document.createElement('video');
+  video.className='html5-main-video';
+  let volume=50, muted=false;
+  Object.assign(player,{getVolume:()=>volume,setVolume:v=>{volume=v;},isMuted:()=>muted,mute:()=>{muted=true;},unMute:()=>{muted=false;}});
+  player.insertBefore(video,player.firstChild);
+}
+
+function addTwitchVideoToEarlyControls(runtime) {
+  const player=runtime.document.querySelector('.video-player');
+  const video=runtime.document.createElement('video');
+  let volume=.5, muted=false;
+  player._tmPlayerApi={getVolume:()=>volume,setVolume:v=>{volume=v;},isMuted:()=>muted,setMuted:v=>{muted=v;}};
+  player.__reactFiber$test={return:{memoizedProps:{mediaPlayerInstance:player._tmPlayerApi},return:null}};
+  player.insertBefore(video,player.firstChild);
 }
 
 test('YouTube: replace-native guard hides native volume areas as soon as they appear',async()=>{
@@ -43,11 +70,47 @@ test('YouTube: document-start bootstrap mounts the slider when the player arrive
 
   const fixture=config.fixture(runtime.document);
   fixture.player.hideControls=()=>fixture.player.classList.add('ytp-autohide');
-  await new Promise(resolve=>runtime.window.setTimeout(resolve,60));
+  await waitForTimers(runtime,60);
 
   assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
   assert.ok(runtime.document.getElementById('tm-volume-options-button'));
   assert.equal(runtime.window.getComputedStyle(fixture.player.querySelector('.ytp-volume-area')).display,'none');
+  runtime.close();
+});
+
+test('YouTube: options button mounts when native controls appear before video',async()=>{
+  const config=platforms[0];
+  const runtime=await startBuiltArtifact(config);
+  assert.equal(runtime.document.getElementById('tm-volume-options-button'),null);
+
+  runtime.document.body.innerHTML = '<div id="movie_player"><div class="ytp-left-controls"><div class="ytp-volume-area"></div></div><div class="ytp-right-controls"><button class="ytp-settings-button"></button></div></div>';
+  await waitForTimers(runtime);
+
+  assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+
+  addYouTubeVideoToEarlyControls(runtime);
+  await waitForTimers(runtime,60);
+
+  assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+  runtime.close();
+});
+
+test('Twitch: options button mounts when native controls appear before video',async()=>{
+  const config=platforms[1];
+  const runtime=await startBuiltArtifact(config);
+  assert.equal(runtime.document.getElementById('tm-volume-options-button'),null);
+
+  runtime.document.body.innerHTML = '<div class="video-player" data-a-target="player-overlay-click-handler"><div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings"></button></div></div></div>';
+  await waitForTimers(runtime);
+
+  assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+
+  addTwitchVideoToEarlyControls(runtime);
+  await waitForTimers(runtime,60);
+
+  assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
   runtime.close();
 });
 
@@ -197,13 +260,19 @@ for(const config of platforms){
     assert.equal(percent.getAttribute('y'),'20');
     assert.equal(percent.getAttribute('dominant-baseline'),'central');
     assert.equal(percent.getAttribute('alignment-baseline'),'central');
-    assert.equal(arc.getAttribute('r'),'14.625');
-    assert.equal(arc.getAttribute('stroke-width'),'2.75');
+    assert.equal(arc.getAttribute('r'),'14.5');
+    assert.equal(arc.getAttribute('stroke-width'),'3');
     assert.equal(runtime.window.getComputedStyle(arc).vectorEffect,'non-scaling-stroke');
     assert.equal(arcTrack.hasAttribute('stroke-dasharray'),false);
+    assert.equal(arcTrack.getAttribute('r'),'14.5');
+    assert.equal(arcTrack.getAttribute('stroke-width'),'3');
     assert.equal(runtime.window.getComputedStyle(arcTrack).vectorEffect,'non-scaling-stroke');
+    assert.equal(percent.getAttribute('font-family'),'Arial, Helvetica, sans-serif');
+    assert.equal(percent.getAttribute('font-size'),'14');
+    assert.equal(percent.getAttribute('font-weight'),'700');
     assert.equal(runtime.window.getComputedStyle(percent).fontSize,'14px');
-    assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'800');
+    assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'700');
+    assert.doesNotMatch(runtime.window.getComputedStyle(percent).fontFamily,/YouTube Noto/);
     assert.equal(runtime.window.getComputedStyle(percent).fontVariantNumeric,'tabular-nums');
     runtime.close();
   });
@@ -312,6 +381,7 @@ for(const config of platforms){
     const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const sliderRow=runtime.document.querySelector('.tm-volume-slider-row');
     const ticks=runtime.document.querySelector('.tm-slider-ticks');
+    const tickMarks=runtime.document.querySelectorAll('.tm-slider-tick');
     const style=runtime.document.getElementById('tm-volume-slider-style');
     const sliderRowStyle=runtime.window.getComputedStyle(sliderRow);
     const ticksStyle=runtime.window.getComputedStyle(ticks);
@@ -320,8 +390,12 @@ for(const config of platforms){
     assert.equal(sliderRow.style.flex,'');
     assert.equal(ticksStyle.opacity,'1');
     assert.match(sliderRowStyle.transition,/visibility 0s linear 0\.22s/);
+    assert.equal(tickMarks.length,19);
+    assert.equal(tickMarks[0].style.left,'5%');
+    assert.equal(tickMarks[18].style.left,'95%');
     assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*flex:\s*0 0 calc\(var\(--tm-pill-expanded-width\) - /s);
     assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*width:\s*calc\(var\(--tm-pill-expanded-width\) - /s);
+    assert.doesNotMatch(style.textContent,/repeating-linear-gradient/);
     assert.doesNotMatch(style.textContent,/\.tm-expanded\s+\.tm-slider-ticks/);
     runtime.close();
   });
