@@ -513,9 +513,10 @@ export function startTwitchVolumeSlider() {
 
 #${OVERLAY_ID} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
-  font: 800 14px/1 "YouTube Noto", Roboto, Arial, Helvetica, sans-serif;
+  font: 700 15px/1 Arial, Helvetica, sans-serif;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+  font-synthesis: none;
   letter-spacing: 0;
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.75);
   text-rendering: geometricPrecision;
@@ -612,18 +613,25 @@ export function startTwitchVolumeSlider() {
   transform: translateY(-50%);
   height: var(--tm-visual-track-h, 5px);
   pointer-events: none;
-  background: repeating-linear-gradient(to right, rgba(255,255,255,0.25) 0px, transparent 1px, transparent calc(5% - 1px), rgba(255,255,255,0.25) 5%);
-  background-size: 100% 100%;
   opacity: 1;
   transition: none;
   z-index: 1;
+}
+
+#${OVERLAY_ID} .tm-slider-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: rgba(255,255,255,0.25);
 }
 
         `;
         style.textContent = css;
     }
 
-    const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg } = createOverlayUi({
+    const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
         document, window, isAlwaysExpandedEnabled, isSliderOnVideo,
         updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue,
         accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
@@ -1853,6 +1861,7 @@ export function startTwitchVolumeSlider() {
 
         const tickOverlay = document.createElement('div');
         tickOverlay.className = 'tm-slider-ticks';
+        populateSliderTicks(tickOverlay);
 
         const sliderTrack = document.createElement('div');
         sliderTrack.className = 'tm-slider-track';
@@ -2146,7 +2155,10 @@ export function startTwitchVolumeSlider() {
         const overlayMissing = isOverlayEnabled() && (!overlay || !overlay.isConnected);
         const buttonMissing = !button || !button.isConnected;
         const buttonMisplaced = !buttonMissing && !isOptionsButtonInPreferredSlot();
-        if (!overlayMissing && !buttonMissing && !buttonMisplaced) return;
+        if (buttonMissing || buttonMisplaced) {
+            injectVolumeOptionsButton();
+        }
+        if (!overlayMissing) return;
 
         attachQueued = true;
         requestAnimationFrame(() => {
@@ -2189,6 +2201,7 @@ export function startTwitchVolumeSlider() {
         attachObserverTarget = root;
         attachObserver = new MutationObserver(handleAttachObserverMutations);
         attachObserver.observe(root, { childList: true, subtree: true });
+        injectVolumeOptionsButton();
     }
 
     function setupAttachObserver() {
@@ -2199,6 +2212,7 @@ export function startTwitchVolumeSlider() {
         attachBootstrapObserver = new MutationObserver(() => {
             if (!getAttachObserverRoot()) return;
             ensureAttachObserver();
+            attachSliderIfPossible();
         });
         attachBootstrapObserver.observe(document.body, { childList: true, subtree: true });
     }
