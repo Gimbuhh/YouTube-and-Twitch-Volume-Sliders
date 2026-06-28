@@ -11,19 +11,19 @@
     </linearGradient>
     <linearGradient id="track" x1="0" x2="1">
       <stop offset="0" stop-color="#a970ff"/>
-      <stop offset="0.258" stop-color="#9146ff"/>
-      <stop offset="0.267" stop-color="#b38cff"/>
-      <stop offset="0.276" stop-color="rgba(255,255,255,0.16)"/>
+      <stop offset="0.260" stop-color="#9146ff"/>
+      <stop offset="0.269" stop-color="#b38cff"/>
+      <stop offset="0.278" stop-color="rgba(255,255,255,0.16)"/>
       <stop offset="1" stop-color="rgba(255,255,255,0.16)"/>
     </linearGradient>
     <clipPath id="pill-clip">
-      <rect x="16" y="20" width="492" height="64" rx="32"/>
+      <rect x="16" y="20" width="446.4" height="64" rx="32"/>
     </clipPath>
   </defs>
 
   <g filter="url(#drop)">
     <g clip-path="url(#pill-clip)">
-      <rect x="16" y="20" width="492" height="64" rx="32" fill="rgba(55,48,62,0.68)"/>
+      <rect x="16" y="20" width="446.4" height="64" rx="32" fill="rgba(55,48,62,0.68)"/>
 
       <g transform="translate(24 20)">
         <circle cx="32" cy="32" r="23.4" fill="none" stroke="rgba(255,255,255,0.42)" stroke-width="4.4" transform="rotate(-90 32 32)"/>
@@ -32,12 +32,12 @@
       </g>
 
       <g transform="translate(96 52)">
-        <rect x="0" y="-6.6" width="392.8" height="13.2" rx="6.6" fill="url(#track)"/>
+        <rect x="0" y="-6.6" width="347.2" height="13.2" rx="6.6" fill="url(#track)"/>
         <g opacity="0.55">
-          <path d="M13.2 -6.6v13.2M31.52 -6.6v13.2M49.84 -6.6v13.2M68.16 -6.6v13.2M86.48 -6.6v13.2M104.8 -6.6v13.2M123.12 -6.6v13.2M141.44 -6.6v13.2M159.76 -6.6v13.2M178.08 -6.6v13.2M196.4 -6.6v13.2M214.72 -6.6v13.2M233.04 -6.6v13.2M251.36 -6.6v13.2M269.68 -6.6v13.2M288 -6.6v13.2M306.32 -6.6v13.2M324.64 -6.6v13.2M342.96 -6.6v13.2M361.28 -6.6v13.2M379.6 -6.6v13.2" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+          <path d="M29.24 -6.6v13.2M45.28 -6.6v13.2M61.32 -6.6v13.2M77.36 -6.6v13.2M93.4 -6.6v13.2M109.44 -6.6v13.2M125.48 -6.6v13.2M141.52 -6.6v13.2M157.56 -6.6v13.2M173.6 -6.6v13.2M189.64 -6.6v13.2M205.68 -6.6v13.2M221.72 -6.6v13.2M237.76 -6.6v13.2M253.8 -6.6v13.2M269.84 -6.6v13.2M285.88 -6.6v13.2M301.92 -6.6v13.2M317.96 -6.6v13.2" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
         </g>
-        <circle cx="104.8" cy="0" r="13.2" fill="url(#thumb)"/>
-        <circle cx="104.8" cy="0" r="12.7" fill="none" stroke="rgba(0,0,0,0.12)"/>
+        <circle cx="93.4" cy="0" r="13.2" fill="url(#thumb)"/>
+        <circle cx="93.4" cy="0" r="12.7" fill="none" stroke="rgba(0,0,0,0.12)"/>
       </g>
     </g>
   </g>

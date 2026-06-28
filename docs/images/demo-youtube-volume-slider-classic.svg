@@ -34,12 +34,12 @@
         </g>
       </g>
 
-      <text x="128" y="57" fill="#fff" font-family="YouTube Noto, Roboto, Arial, Helvetica, sans-serif" font-size="20" font-weight="500" letter-spacing="0" text-anchor="middle" text-shadow="0 0 2px rgb(0,0,0)">25%</text>
+      <text x="128" y="59" fill="#fff" font-family="YouTube Noto, Roboto, Arial, Helvetica, sans-serif" font-size="20" font-weight="500" letter-spacing="0" text-anchor="middle" text-shadow="0 0 2px rgb(0,0,0)">25%</text>
 
       <g transform="translate(169.6 52)">
         <rect x="0" y="-6.6" width="347.2" height="13.2" rx="6.6" fill="url(#track)"/>
         <g opacity="0.55">
-          <path d="M13.2 -6.6v13.2M29.24 -6.6v13.2M45.28 -6.6v13.2M61.32 -6.6v13.2M77.36 -6.6v13.2M93.4 -6.6v13.2M109.44 -6.6v13.2M125.48 -6.6v13.2M141.52 -6.6v13.2M157.56 -6.6v13.2M173.6 -6.6v13.2M189.64 -6.6v13.2M205.68 -6.6v13.2M221.72 -6.6v13.2M237.76 -6.6v13.2M253.8 -6.6v13.2M269.84 -6.6v13.2M285.88 -6.6v13.2M301.92 -6.6v13.2M317.96 -6.6v13.2M334 -6.6v13.2" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+          <path d="M29.24 -6.6v13.2M45.28 -6.6v13.2M61.32 -6.6v13.2M77.36 -6.6v13.2M93.4 -6.6v13.2M109.44 -6.6v13.2M125.48 -6.6v13.2M141.52 -6.6v13.2M157.56 -6.6v13.2M173.6 -6.6v13.2M189.64 -6.6v13.2M205.68 -6.6v13.2M221.72 -6.6v13.2M237.76 -6.6v13.2M253.8 -6.6v13.2M269.84 -6.6v13.2M285.88 -6.6v13.2M301.92 -6.6v13.2M317.96 -6.6v13.2" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
         </g>
         <circle cx="93.4" cy="0" r="13.2" fill="url(#thumb)"/>
         <circle cx="93.4" cy="0" r="12.7" fill="none" stroke="rgba(0,0,0,0.12)"/>
