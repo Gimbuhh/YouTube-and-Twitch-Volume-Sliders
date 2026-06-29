@@ -51,6 +51,8 @@ export function startTwitchVolumeSlider() {
     const VOLUME_ACCENT_DISABLED = 'rgba(145, 70, 255, 0.55)';
     const VOLUME_ARC_TRACK = 'rgba(255, 255, 255, 0.38)';
     const VOLUME_PANEL_DROP_SHADOW = 'drop-shadow(0 2px 5px rgba(0, 0, 0, 0.06))';
+    const STARTUP_MUTE_GUARD_MS = 4000;
+    const STARTUP_MUTE_GUARD_INTERVAL_MS = 50;
     const USER_SETTINGS = {
         // Volume slider mode: 'saved', 'off', 'on', or 'replace-native'. Default: 'saved'
         volumeSliderMode: 'saved',
@@ -77,6 +79,7 @@ export function startTwitchVolumeSlider() {
     let cachedApiFromElement = null;
     let startupLockUntil = 0;
     let startupCorrectionApplied = false;
+    let stopActiveStartupMuteGuard = null;
     let userIntentUntil = 0;
     let navReattachTimer = 0;
     let navLateRestoreTimer = 0;
@@ -764,17 +767,25 @@ export function startTwitchVolumeSlider() {
     /**
      * Set volume via Twitch API (preferred) or video element from percentage (0-100).
      */
-    function setVolume(video, value) {
+    function setNativeVideoMuted(video, muted) {
+        if (!video) return;
+        video.muted = video.defaultMuted = !!muted;
+    }
+
+    function setVolume(video, value, options = {}) {
+        const preserveMute = options.preserveMute === true;
         try {
             const api = getTwitchPlayerApi();
             if (api) {
-                if (api.isMuted && api.isMuted()) api.setMuted(false);
+                if (!preserveMute && api.isMuted && api.isMuted()) api.setMuted(false);
                 api.setVolume(Math.min(1, Math.max(0, value / 100)));
                 return;
             }
         } catch (e) { /* fall through */ }
         video.volume = value / 100;
-        video.muted = false;
+        if (!preserveMute) {
+            setNativeVideoMuted(video, false);
+        }
     }
 
     /**
@@ -792,14 +803,19 @@ export function startTwitchVolumeSlider() {
      * Set mute state via Twitch API or video element.
      */
     function setMuted(video, muted) {
+        const nextMuted = !!muted;
+        if (!nextMuted) {
+            stopStartupMuteGuard();
+        }
         try {
             const api = getTwitchPlayerApi();
             if (api && api.setMuted) {
-                api.setMuted(!!muted);
+                api.setMuted(nextMuted);
+                setNativeVideoMuted(video, nextMuted);
                 return;
             }
         } catch (e) { /* fall through */ }
-        video.muted = !!muted;
+        setNativeVideoMuted(video, nextMuted);
     }
 
     function toggleMute(video) {
@@ -810,21 +826,72 @@ export function startTwitchVolumeSlider() {
      * Restore volume and mute from localStorage. Call before syncing slider.
      */
     function restoreSavedVolume(video) {
-        const wasMuted = isMuted(video);
+        const savedMute = readSavedMute();
+        const wasMuted = savedMute === null ? isMuted(video) : savedMute;
+        if (savedMute === true) {
+            setMuted(video, true);
+        }
         const value = getSavedVolume();
         if (value !== null) {
-            setVolume(video, value);
+            setVolume(video, value, { preserveMute: wasMuted });
         }
+        setMuted(video, wasMuted);
+        if (wasMuted) {
+            startStartupMuteGuard(video);
+        }
+    }
+
+    function readSavedMute() {
         try {
             const savedMute = localStorage.getItem(MUTE_STORAGE_KEY);
-            if (savedMute === 'true') {
-                setMuted(video, true);
-            } else if (savedMute === 'false') {
-                setMuted(video, false);
-            } else {
-                setMuted(video, wasMuted);
-            }
+            if (savedMute === 'true') return true;
+            if (savedMute === 'false') return false;
         } catch (e) { /* ignore storage errors */ }
+        return null;
+    }
+
+    function restoreSavedVolumeBeforeControls(video = getVideoElement()) {
+        if (!video) return false;
+        startupLockUntil = Math.max(startupLockUntil, Date.now() + 2000);
+        restoreSavedVolume(video);
+        return true;
+    }
+
+    function stopStartupMuteGuard() {
+        stopActiveStartupMuteGuard?.();
+        stopActiveStartupMuteGuard = null;
+    }
+
+    function startStartupMuteGuard(video) {
+        if (!shouldHoldSavedMute(video)) return;
+        stopStartupMuteGuard();
+
+        const guardUntil = Math.max(startupLockUntil, Date.now() + STARTUP_MUTE_GUARD_MS);
+        const enforceSavedMute = () => {
+            if (Date.now() > guardUntil || !shouldHoldSavedMute(video)) {
+                stopStartupMuteGuard();
+                return;
+            }
+            try {
+                const api = getTwitchPlayerApi();
+                if (api?.setMuted && (!api.isMuted || !api.isMuted())) {
+                    api.setMuted(true);
+                }
+            } catch (e) { /* Twitch API may still be initializing */ }
+            if (!video.muted || !video.defaultMuted) {
+                setNativeVideoMuted(video, true);
+            }
+        };
+
+        const timer = window.setInterval(enforceSavedMute, STARTUP_MUTE_GUARD_INTERVAL_MS);
+        stopActiveStartupMuteGuard = () => {
+            window.clearInterval(timer);
+        };
+        enforceSavedMute();
+    }
+
+    function shouldHoldSavedMute(video) {
+        return !!video?.isConnected && readSavedMute() === true && Date.now() > userIntentUntil;
     }
 
     /**
@@ -847,6 +914,7 @@ export function startTwitchVolumeSlider() {
     }
 
     function markUserVolumeIntent() {
+        stopStartupMuteGuard();
         userIntentUntil = Date.now() + USER_INTENT_GRACE_MS;
     }
 
@@ -2129,12 +2197,15 @@ export function startTwitchVolumeSlider() {
             return !!document.getElementById(OPTIONS_BUTTON_ID);
         }
 
+        const overlay = document.getElementById(OVERLAY_ID);
+        if (!overlay && video) {
+            restoreSavedVolumeBeforeControls(video);
+        }
         if (!video || !player || !controlsHost) {
             injectVolumeOptionsButton();
             return false;
         }
         // Only restore volume and schedule fade-in on first attach
-        const overlay = document.getElementById(OVERLAY_ID);
         if (!overlay) {
             // Extend to at least 2s from now; cooperates with the longer lock
             // already set by scheduleReattach on channel navigation without shortening it

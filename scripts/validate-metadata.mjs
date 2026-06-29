@@ -9,7 +9,7 @@ const expectedNames = new Map([
 ]);
 const expectedRunAt = new Map([
   ['youtube', 'document-start'],
-  ['twitch', 'document-idle']
+  ['twitch', 'document-start']
 ]);
 let releaseVersion;
 for (const platform of platforms) {
