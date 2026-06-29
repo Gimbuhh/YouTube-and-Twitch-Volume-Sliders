@@ -5,7 +5,7 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', appearanceKey:'tm-yt-volume-slider-appearance' },
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', muteKey:'tm-yt-muted', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', appearanceKey:'tm-yt-volume-slider-appearance' },
   { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
 
@@ -96,6 +96,42 @@ test('YouTube: options button mounts when native controls appear before video',a
   runtime.close();
 });
 
+test('YouTube: saved mute state restores and icon changes persist',async()=>{
+  const config=platforms[0];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'35');
+    current.window.localStorage.setItem(config.muteKey,'true');
+  });
+  const label=runtime.document.getElementById('tm-volume-slider-value');
+  const icon=runtime.document.querySelector('button.tm-volume-icon-cell');
+  assert.equal(fixture.state.muted,true);
+  assert.equal(label.textContent,'Muted');
+
+  icon.click();
+  assert.equal(fixture.state.muted,false);
+  assert.equal(runtime.window.localStorage.getItem(config.muteKey),'false');
+
+  icon.click();
+  assert.equal(fixture.state.muted,true);
+  assert.equal(runtime.window.localStorage.getItem(config.muteKey),'true');
+  runtime.close();
+});
+
+test('YouTube: native mute volumechange persists mute state',async()=>{
+  const config=platforms[0];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'35');
+  });
+  fixture.player.mute();
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+  assert.equal(runtime.window.localStorage.getItem(config.muteKey),'true');
+
+  fixture.player.unMute();
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+  assert.equal(runtime.window.localStorage.getItem(config.muteKey),'false');
+  runtime.close();
+});
+
 test('Twitch: options button mounts when native controls appear before video',async()=>{
   const config=platforms[1];
   const runtime=await startBuiltArtifact(config);
@@ -111,6 +147,42 @@ test('Twitch: options button mounts when native controls appear before video',as
   await waitForTimers(runtime,60);
 
   assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+  runtime.close();
+});
+
+test('Twitch: volume mouse interactions do not keep keyboard focus',async()=>{
+  const config=platforms[1];
+  const {runtime}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'50');
+  });
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const icon=overlay.querySelector('button.tm-volume-icon-cell');
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+
+  icon.focus();
+  assert.equal(runtime.document.activeElement,icon);
+  const mouseDown=new runtime.window.MouseEvent('mousedown',{bubbles:true,cancelable:true});
+  icon.dispatchEvent(mouseDown);
+  assert.equal(mouseDown.defaultPrevented,true);
+  icon.dispatchEvent(new runtime.window.MouseEvent('click',{bubbles:true,cancelable:true}));
+  await waitForTimers(runtime);
+  assert.notEqual(runtime.document.activeElement,icon);
+
+  icon.focus();
+  assert.equal(runtime.document.activeElement,icon);
+  runtime.window.dispatchEvent(new runtime.window.MouseEvent('pointermove',{bubbles:true,cancelable:true}));
+  overlay.dispatchEvent(new runtime.window.MouseEvent('mouseenter',{bubbles:true,cancelable:true}));
+  await waitForTimers(runtime);
+  assert.notEqual(runtime.document.activeElement,icon);
+
+  slider.focus();
+  assert.equal(runtime.document.activeElement,slider);
+  slider.dispatchEvent(new runtime.window.MouseEvent('pointerdown',{bubbles:true,cancelable:true,clientX:10,clientY:10}));
+  slider.value='60';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  slider.dispatchEvent(new runtime.window.MouseEvent('pointerup',{bubbles:true,cancelable:true,clientX:10,clientY:10}));
+  await waitForTimers(runtime);
+  assert.notEqual(runtime.document.activeElement,slider);
   runtime.close();
 });
 
