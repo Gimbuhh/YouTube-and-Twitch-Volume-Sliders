@@ -2,6 +2,12 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6.6 - 2026-06-29
+
+### Fixed
+
+- Rebuilt the 5% slider tick marks as device-pixel-snapped HTML marks so browser zoom no longer makes random ticks look thicker.
+
 ## 2.6.5 - 2026-06-29
 
 ### Fixed
