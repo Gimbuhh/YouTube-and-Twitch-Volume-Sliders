@@ -267,26 +267,80 @@ export function createOverlayUi(dependencies) {
         return group;
     }
 
+    function formatCssPx(value) {
+        if (!Number.isFinite(value)) return '0px';
+        const rounded = Number(value.toFixed(3));
+        return `${rounded}px`;
+    }
+
+    function getDevicePixelRatio() {
+        const ratio = Number(window.devicePixelRatio);
+        return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+    }
+
+    function syncSliderTicksToDevicePixels(tickOverlay, ticks) {
+        if (!tickOverlay || !ticks?.length) return;
+        const rect = tickOverlay.getBoundingClientRect?.();
+        const width = Number(rect?.width) || 0;
+        const ratio = getDevicePixelRatio();
+        const tickWidth = 1 / ratio;
+        tickOverlay.style.setProperty('--tm-slider-tick-width', formatCssPx(tickWidth));
+        if (width <= 0) return;
+
+        ticks.forEach((tick) => {
+            const pct = Number(tick.dataset.tmTickPct);
+            if (!Number.isFinite(pct)) return;
+            const rawCenter = width * (pct / 100);
+            const rawLeft = rawCenter - (tickWidth / 2);
+            const snappedLeft = Math.round(rawLeft * ratio) / ratio;
+            tick.style.left = formatCssPx(snappedLeft);
+        });
+    }
+
     function populateSliderTicks(tickOverlay) {
         if (!tickOverlay) return;
+        tickOverlay._tmSliderTicksCleanup?.();
         tickOverlay.textContent = '';
-        const ns = 'http://www.w3.org/2000/svg';
-        const svg = document.createElementNS(ns, 'svg');
-        svg.setAttribute('class', 'tm-slider-ticks-svg');
-        svg.setAttribute('viewBox', '0 0 100 1');
-        svg.setAttribute('preserveAspectRatio', 'none');
-        svg.setAttribute('aria-hidden', 'true');
-        svg.setAttribute('focusable', 'false');
+        const ticks = [];
+        const fragment = document.createDocumentFragment();
         for (let pct = 5; pct < 100; pct += 5) {
-            const tick = document.createElementNS(ns, 'line');
-            tick.setAttribute('class', 'tm-slider-tick');
-            tick.setAttribute('x1', String(pct));
-            tick.setAttribute('x2', String(pct));
-            tick.setAttribute('y1', '0');
-            tick.setAttribute('y2', '1');
-            svg.appendChild(tick);
+            const tick = document.createElement('span');
+            tick.className = 'tm-slider-tick';
+            tick.dataset.tmTickPct = String(pct);
+            tick.setAttribute('aria-hidden', 'true');
+            tick.style.left = `${pct}%`;
+            fragment.appendChild(tick);
+            ticks.push(tick);
         }
-        tickOverlay.appendChild(svg);
+        tickOverlay.appendChild(fragment);
+
+        let frame = 0;
+        const sync = () => {
+            frame = 0;
+            syncSliderTicksToDevicePixels(tickOverlay, ticks);
+        };
+        const scheduleSync = () => {
+            if (frame) return;
+            if (typeof window.requestAnimationFrame === 'function') {
+                frame = window.requestAnimationFrame(sync);
+                return;
+            }
+            sync();
+        };
+        const resizeObserver = typeof window.ResizeObserver === 'function'
+            ? new window.ResizeObserver(scheduleSync)
+            : null;
+        resizeObserver?.observe(tickOverlay);
+        window.addEventListener('resize', scheduleSync, { passive: true });
+        tickOverlay._tmSliderTicksCleanup = () => {
+            if (frame && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(frame);
+            }
+            frame = 0;
+            resizeObserver?.disconnect();
+            window.removeEventListener('resize', scheduleSync);
+        };
+        scheduleSync();
     }
 
     function makeVolumeIndicatorSvg() {
