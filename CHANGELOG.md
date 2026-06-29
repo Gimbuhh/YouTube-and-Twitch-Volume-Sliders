@@ -2,6 +2,13 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6.5 - 2026-06-29
+
+### Fixed
+
+- Persisted YouTube mute state separately from volume so refreshing after pressing the mute icon keeps the player muted.
+- Prevented Twitch's custom volume controls from keeping keyboard focus after mouse interaction, so player shortcuts like Space and F can continue reaching the video.
+
 ## 2.6.4 - 2026-06-28
 
 ### Fixed

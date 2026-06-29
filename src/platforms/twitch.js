@@ -1568,6 +1568,15 @@ export function startTwitchVolumeSlider() {
         startPostCloseControlsHold();
     }
 
+    function releaseTwitchVolumeFocusSoon(overlay) {
+        window.setTimeout(() => {
+            const active = document.activeElement;
+            if (active && overlay?.contains?.(active)) {
+                active.blur();
+            }
+        }, 0);
+    }
+
     function openVolumeOptionsPopup() {
         clearPostCloseControlsHold();
         ensureOptionsStyles();
@@ -1786,6 +1795,7 @@ export function startTwitchVolumeSlider() {
             overlay.dataset.tmHovering = 'true';
             setOverlayExpanded(overlay, true);
             updateOverlayOpacity(overlay);
+            releaseTwitchVolumeFocusSoon(overlay);
         });
         overlay.addEventListener('mouseleave', () => {
             overlay.dataset.tmHovering = 'false';
@@ -1815,6 +1825,9 @@ export function startTwitchVolumeSlider() {
         indicator.className = 'tm-volume-indicator';
         indicator.appendChild(makeVolumeIndicatorSvg());
         iconCell.appendChild(indicator);
+        iconCell.addEventListener('mousedown', (event) => {
+            event.preventDefault();
+        });
         iconCell.addEventListener('click', (e) => {
             e.stopPropagation();
             e.preventDefault();
@@ -1823,6 +1836,7 @@ export function startTwitchVolumeSlider() {
             saveMute(isMuted(video));
             setSliderFromPlayer(slider, label, video);
             markTwitchVolumeInteraction(overlay);
+            releaseTwitchVolumeFocusSoon(overlay);
         });
         const panelBg = document.createElement('div');
         panelBg.className = 'tm-volume-panel-bg';
@@ -1961,6 +1975,9 @@ export function startTwitchVolumeSlider() {
                 snapDirectClickIfNeeded();
             }
             overlay.dataset.tmDragging = 'false';
+            if (wasDragging && event?.type !== 'blur') {
+                releaseTwitchVolumeFocusSoon(overlay);
+            }
             collapseOverlayIfIdle(overlay, !overlay.matches(':hover'));
             updateOverlayOpacity(overlay);
         };
@@ -1996,6 +2013,7 @@ export function startTwitchVolumeSlider() {
             applySliderValue(readSnappedSliderValue(slider));
             cancelScheduledSaveVolume();
             saveVolume(Number(slider.value) || 0);
+            releaseTwitchVolumeFocusSoon(overlay);
         });
 
         // Sync slider UI and persist volume on any external/native change

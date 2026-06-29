@@ -17,6 +17,7 @@ export function startYouTubeVolumeSlider() {
     const OPTIONS_POPUP_ID = 'tm-volume-options-popup';
     const OPTIONS_CLOSE_HIDE_CONTROLS_CLASS = 'tm-volume-options-close-hide-controls';
     const STORAGE_KEY = 'tm-yt-volume';
+    const MUTE_STORAGE_KEY = 'tm-yt-muted';
     const VOLUME_MODE_KEY = 'tm-yt-volume-slider-mode';
     const SLIDER_LOCATION_KEY = 'tm-yt-volume-slider-location';
     const REPLACE_NATIVE_PLACEMENT_KEY = 'tm-yt-volume-slider-replace-placement';
@@ -701,6 +702,19 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }
     }
 
+    function setMuted(video, muted) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) {
+            if (muted) {
+                ytPlayer.mute();
+            } else {
+                ytPlayer.unMute();
+            }
+        } else {
+            video.muted = !!muted;
+        }
+    }
+
     /**
      * Set volume using YouTube's player API (0-100), falling back to video element.
      */
@@ -726,16 +740,21 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Restore volume from localStorage and apply to player. Call before syncing slider.
      */
     function restoreSavedVolume(video) {
+        const wasMuted = isMuted(video);
         const value = getSavedVolume();
         if (value !== null) {
-            const wasMuted = isMuted(video);
             setVolume(video, value);
-            if (wasMuted && !isMuted(video)) {
-                const ytPlayer = getYouTubePlayer();
-                if (ytPlayer) ytPlayer.mute();
-                else video.muted = true;
-            }
         }
+        try {
+            const savedMute = localStorage.getItem(MUTE_STORAGE_KEY);
+            if (savedMute === 'true') {
+                setMuted(video, true);
+            } else if (savedMute === 'false') {
+                setMuted(video, false);
+            } else if (wasMuted && !isMuted(video)) {
+                setMuted(video, true);
+            }
+        } catch (e) { /* ignore storage errors */ }
     }
 
     /**
@@ -747,6 +766,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Save volume to localStorage for persistence across page reloads.
      */
 
+
+    function saveMute(muted) {
+        try {
+            localStorage.setItem(MUTE_STORAGE_KEY, muted ? 'true' : 'false');
+        } catch (e) { /* ignore storage errors */ }
+    }
 
     /**
      * Sync mute button icon (style toggles only, no DOM mutation).
@@ -1639,6 +1664,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             e.stopPropagation();
             e.preventDefault();
             toggleMute(video);
+            saveMute(isMuted(video));
             setSliderFromPlayer(slider, label, video);
             markVolumeChangedWhileExpanded(overlay);
         });
@@ -1704,6 +1730,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
         const applySliderValue = (value) => {
             setVolume(video, value);
+            saveMute(false);
             label.textContent = `${value}%`;
             updateSliderBar(slider);
             updateVolumeIndicator(overlay, value, isMuted(video));
@@ -1791,7 +1818,9 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         const onVideoVolumeChange = () => {
             if (!document.getElementById(OVERLAY_ID)) return;
             setSliderFromPlayer(slider, label, video);
-            if (!isMuted(video)) scheduleSaveVolume(getVolume(video));
+            const muted = isMuted(video);
+            saveMute(muted);
+            if (!muted) scheduleSaveVolume(getVolume(video));
         };
         video.addEventListener('volumechange', onVideoVolumeChange);
 
