@@ -557,6 +557,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
   top: 50%;
   transform: translateY(-50%);
   height: var(--tm-visual-track-h, 5px);
+  overflow: visible;
   pointer-events: none;
   opacity: 1;
   transition: none;
@@ -564,19 +565,13 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 }
 
 #${OVERLAY_ID} .tm-slider-tick {
-  stroke: rgba(255,255,255,0.25);
-  stroke-width: 1px;
-  stroke-linecap: butt;
-  vector-effect: non-scaling-stroke;
-  shape-rendering: crispEdges;
-}
-
-#${OVERLAY_ID} .tm-slider-ticks-svg {
-  display: block;
-  width: 100%;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--tm-slider-tick-width, 1px);
   height: 100%;
-  overflow: visible;
-  shape-rendering: crispEdges;
+  background: rgba(255,255,255,0.25);
+  transform: none;
 }
 
         `;
@@ -1862,6 +1857,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             document.removeEventListener('click', collapseHeldSliderOnVideoClick, true);
             controlsObserver.disconnect();
             detachmentObserver.disconnect();
+            tickOverlay._tmSliderTicksCleanup?.();
             clearExpandedHold(overlay);
         };
         overlayLifecycle.set(overlay, cleanup);
