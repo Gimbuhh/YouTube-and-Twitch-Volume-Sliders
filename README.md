@@ -44,8 +44,8 @@ Both scripts replace or complement the sites' native controls with a small indic
 
 ## Install
 
-- [YouTube Volume Slider 2.5.3](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5.3/YouTube.Volume.Slider.2.5.3.user.js)
-- [Twitch Volume Slider 2.5.3](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.5.3/Twitch.Volume.Slider.2.5.3.user.js)
+- [YouTube Volume Slider 2.6.5](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.6.5/YouTube.Volume.Slider.2.6.5.user.js)
+- [Twitch Volume Slider 2.6.5](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.6.5/Twitch.Volume.Slider.2.6.5.user.js)
 
 Install a current userscript manager such as Tampermonkey or Violentmonkey in a modern browser, download the appropriate file above, and open it with the userscript manager. Both scripts update from the committed `dist/` files on `main`.
 
