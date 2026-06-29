@@ -2,6 +2,15 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6.7 - 2026-06-29
+
+### Fixed
+
+- Restored Twitch's saved mute and volume as soon as the video player appears, before the native controls finish mounting, so streams no longer play briefly before the saved mute state applies.
+- Added a short startup guard that re-applies saved mute to Twitch's native video element if Twitch resets it while the player initializes.
+- Started the Twitch userscript at document-start to match the early bootstrap behavior already used on YouTube.
+- Updated the README install links to the 2.6.7 release assets.
+
 ## 2.6.6 - 2026-06-29
 
 ### Fixed
