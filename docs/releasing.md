@@ -3,7 +3,7 @@
 1. Change canonical source and tests under `src/` and `tests/`.
    - Keep userscript `// @name` values stable and version-free; put the release number in `// @version` and release artifacts instead.
 2. Add one release-note source at `release-notes/<version>.md`. Do not start it with `# Volume Sliders <version>`; the GitHub Release title already supplies that heading.
-3. Add a matching `CHANGELOG.md` entry for the same version and date. The changelog and release notes must describe the same release-version-to-release-version user-facing changes using the established `Added`, `Changed`, and `Fixed`-style sections. Test-only notes may stay in a separate `Tests` section, but user-facing items should not appear in only one file.
+3. Add a matching `CHANGELOG.md` entry for the same version and date. The changelog and release notes must describe only the same release-version-to-release-version userscript changes using the established `Added`, `Changed`, and `Fixed`-style sections. Do not include repository maintenance, README link updates, or test-only notes in user-facing release notes or the changelog.
 4. Update the README install links so both platform links point at the current `v<version>` GitHub Release assets.
 5. Run `pnpm install --frozen-lockfile` and `pnpm check`.
 6. Run `pnpm release -- <version>` exactly once (for example, `pnpm release -- 2.4.4`).
