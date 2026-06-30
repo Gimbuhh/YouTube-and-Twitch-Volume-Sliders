@@ -2,7 +2,3 @@
 
 - Persisted YouTube mute state separately from volume so refreshing after pressing the mute icon keeps the player muted.
 - Prevented Twitch's custom volume controls from keeping keyboard focus after mouse interaction, so player shortcuts like Space and F can continue reaching the video.
-
-## Tests
-
-- Added regressions for YouTube saved mute restore, native mute volumechange persistence, and Twitch volume-control focus release.

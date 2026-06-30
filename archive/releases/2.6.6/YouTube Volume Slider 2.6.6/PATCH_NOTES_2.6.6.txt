@@ -1,7 +1,3 @@
 ## Fixed
 
 - Rebuilt the 5% slider tick marks as device-pixel-snapped HTML marks so browser zoom no longer makes random ticks look thicker.
-
-## Tests
-
-- Added regression coverage for 133% zoom tick positioning.
