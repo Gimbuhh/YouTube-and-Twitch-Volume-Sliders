@@ -47,7 +47,18 @@ Both scripts replace or complement the sites' native controls with a small indic
 - [YouTube Volume Slider 2.6.7](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.6.7/YouTube.Volume.Slider.2.6.7.user.js)
 - [Twitch Volume Slider 2.6.7](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.6.7/Twitch.Volume.Slider.2.6.7.user.js)
 
-Install a current userscript manager such as Tampermonkey or Violentmonkey in a modern browser, download the appropriate file above, and open it with the userscript manager. Both scripts update from the committed `dist/` files on `main`.
+Install a current userscript manager such as Tampermonkey or Violentmonkey in a modern browser. Both scripts update from the committed `dist/` files on `main`.
+
+### Tampermonkey in Chrome
+
+1. Install [Tampermonkey from the Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo).  
+Tampermonkey is also available for other browsers from [tampermonkey.net](https://www.tampermonkey.net/).
+2. Open `chrome://extensions`, select **Details** on Tampermonkey, and turn on **Allow user scripts** if the setting is shown. Chrome often requires this before Tampermonkey can run installed userscripts.
+3. Open one of the download links above.
+4. Tampermonkey should open an install screen. Review the script name, then select **Install**.
+5. Reload YouTube or Twitch and confirm the script is enabled in the Tampermonkey extension menu.
+
+Violentmonkey and other userscript managers use a similar flow: install the extension, open the `.user.js` download, approve the install prompt, then reload the video page.
 
 ## Features
 
