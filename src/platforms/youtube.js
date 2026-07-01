@@ -1827,6 +1827,9 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         overlay.appendChild(topRow);
         overlay.appendChild(sliderWrap);
         updateOverlayAppearance(overlay);
+        if (isAlwaysExpandedEnabled()) {
+            setOverlayExpanded(overlay, true, true);
+        }
 
         placeOverlay(overlay, player, controlsHost);
         setSliderFromPlayer(slider, label, video);

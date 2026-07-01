@@ -278,23 +278,42 @@ export function createOverlayUi(dependencies) {
         return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
     }
 
+    function getTickOverlayScale(tickOverlay) {
+        const overlay = tickOverlay?.closest?.('#tm-volume-slider-overlay');
+        if (!overlay?.classList?.contains('tm-on-video')) return 1;
+        const scales = [
+            window.getComputedStyle?.(overlay)?.getPropertyValue('--tm-overlay-scale'),
+            overlay.style?.getPropertyValue?.('--tm-overlay-scale')
+        ];
+        for (const rawScale of scales) {
+            const scale = Number.parseFloat(rawScale);
+            if (Number.isFinite(scale) && scale > 0) return scale;
+        }
+        return 1;
+    }
+
     function syncSliderTicksToDevicePixels(tickOverlay, ticks) {
-        if (!tickOverlay || !ticks?.length) return;
+        if (!tickOverlay || !ticks?.length) return false;
         const rect = tickOverlay.getBoundingClientRect?.();
-        const width = Number(rect?.width) || 0;
+        const scale = getTickOverlayScale(tickOverlay);
+        const width = (Number(rect?.width) || 0) / scale;
         const ratio = getDevicePixelRatio();
-        const tickWidth = 1 / ratio;
+        const tickWidth = 1 / (ratio * scale);
         tickOverlay.style.setProperty('--tm-slider-tick-width', formatCssPx(tickWidth));
-        if (width <= 0) return;
+        if (width <= 0) return false;
 
         ticks.forEach((tick) => {
             const pct = Number(tick.dataset.tmTickPct);
             if (!Number.isFinite(pct)) return;
             const rawCenter = width * (pct / 100);
             const rawLeft = rawCenter - (tickWidth / 2);
-            const snappedLeft = Math.round(rawLeft * ratio) / ratio;
+            const rawScreenLeft = (Number(rect?.left) || 0) + (rawLeft * scale);
+            const snappedScreenLeft = Math.round(rawScreenLeft * ratio) / ratio;
+            const snappedLeft = (snappedScreenLeft - (Number(rect?.left) || 0)) / scale;
             tick.style.left = formatCssPx(snappedLeft);
         });
+        tickOverlay.style.visibility = '';
+        return true;
     }
 
     function populateSliderTicks(tickOverlay) {
@@ -317,7 +336,7 @@ export function createOverlayUi(dependencies) {
         let frame = 0;
         const sync = () => {
             frame = 0;
-            syncSliderTicksToDevicePixels(tickOverlay, ticks);
+            return syncSliderTicksToDevicePixels(tickOverlay, ticks);
         };
         const scheduleSync = () => {
             if (frame) return;
@@ -332,6 +351,7 @@ export function createOverlayUi(dependencies) {
             : null;
         resizeObserver?.observe(tickOverlay);
         window.addEventListener('resize', scheduleSync, { passive: true });
+        tickOverlay._tmSliderTicksSync = sync;
         tickOverlay._tmSliderTicksCleanup = () => {
             if (frame && typeof window.cancelAnimationFrame === 'function') {
                 window.cancelAnimationFrame(frame);
@@ -339,6 +359,7 @@ export function createOverlayUi(dependencies) {
             frame = 0;
             resizeObserver?.disconnect();
             window.removeEventListener('resize', scheduleSync);
+            delete tickOverlay._tmSliderTicksSync;
         };
         scheduleSync();
     }
