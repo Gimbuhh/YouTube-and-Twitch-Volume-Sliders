@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="288" height="58" viewBox="0 0 288 58" role="img" aria-labelledby="title desc">
+  <title id="title">Twitch controls with Volume Slider Options button</title>
+  <desc id="desc">A cropped Twitch controls strip showing the Volume Slider Options button highlighted next to the standard settings button.</desc>
+  <defs>
+    <filter id="shadow" x="-8%" y="-28%" width="116%" height="156%">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000" flood-opacity="0.34"/>
+    </filter>
+    <style>
+      .icon{fill:#efeff1}
+      .button{fill:transparent}
+      .button-active{fill:rgba(255,255,255,.16)}
+      .quality{fill:#efeff1;font:700 12px/16px Arial,Helvetica,sans-serif}
+    </style>
+  </defs>
+
+  <rect x=".5" y=".5" width="287" height="55" rx="8" fill="rgba(14,14,16,0.96)" stroke="rgba(255,255,255,0.12)" filter="url(#shadow)"/>
+  <rect x="16" y="11" width="256" height="3" rx="1.5" fill="rgba(255,255,255,0.25)"/>
+  <rect x="16" y="11" width="86" height="3" rx="1.5" fill="#9146ff"/>
+
+  <g transform="translate(70 21)">
+    <rect width="48" height="22" rx="4" fill="rgba(255,255,255,0.15)"/>
+    <text class="quality" x="24" y="15" text-anchor="middle">720p</text>
+  </g>
+
+  <g transform="translate(122 16)">
+    <rect class="button-active" width="32" height="32" rx="16"/>
+    <path class="icon" transform="translate(4 4)" d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6h2z"/>
+  </g>
+
+  <g transform="translate(154 16)">
+    <rect class="button" width="32" height="32"/>
+    <path class="icon" transform="translate(4 4)" d="M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/>
+    <path class="icon" transform="translate(4 4)" fill-rule="evenodd" clip-rule="evenodd" d="M10.9 1h2.2v.228a3.362 3.362 0 0 0 5.739 2.378L19 3.444l1.556 1.555-.161.162a3.362 3.362 0 0 0 2.377 5.739H23v2.2h-.228a3.362 3.362 0 0 0-2.377 5.74l.161.16L19 20.557l-.16-.161a3.362 3.362 0 0 0-5.74 2.377V23h-2.2v-.228a3.362 3.362 0 0 0-5.74-2.377l-.16.16L3.444 19l.161-.16a3.362 3.362 0 0 0-2.377-5.74H1v-2.2h.228a3.362 3.362 0 0 0 2.377-5.739L3.445 5 5 3.444l.161.161A3.362 3.362 0 0 0 10.9 1.228V1ZM4.929 12 7 17l5 2.07L17 17l2.071-5L17 7l-5-2.071-5 2.07-2.071 5Z"/>
+  </g>
+
+  <g transform="translate(186 16)">
+    <rect class="button" width="32" height="32"/>
+    <path class="icon" transform="translate(4 4)" fill-rule="evenodd" clip-rule="evenodd" d="M2 5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5Zm14 0h4v14h-4V5Zm-2 0H4v14h10V5Z"/>
+  </g>
+
+  <g transform="translate(218 16)">
+    <rect class="button" width="32" height="32"/>
+    <path class="icon" transform="translate(4 4)" d="M8 3v2H3.996v4H2V3h6ZM2 15v6h6v-2H4v-4H2Zm18.002 0-.024 4H16v2h6v-6h-1.998ZM22 9V3h-5.993v2H20l.002 4H22Z"/>
+  </g>
+</svg>
