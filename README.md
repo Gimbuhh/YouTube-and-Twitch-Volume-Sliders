@@ -54,7 +54,7 @@ Install a current userscript manager such as Tampermonkey or Violentmonkey in a 
 1. Install [Tampermonkey from the Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo).  
 Tampermonkey is also available for other browsers from [tampermonkey.net](https://www.tampermonkey.net/).
 2. Open `chrome://extensions`, select **Details** on Tampermonkey, and turn on **Allow user scripts** if the setting is shown. Chrome often requires this before Tampermonkey can run installed userscripts.
-3. Open one of the download links above.
+3. Open one of the download links above, or choose a `.user.js` asset from the [Releases page](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases).
 4. Tampermonkey should open an install screen. Review the script name, then select **Install**.
 5. Reload YouTube or Twitch and confirm the script is enabled in the Tampermonkey extension menu.
 
