@@ -18,7 +18,8 @@ Both scripts replace or complement the sites' native controls with a small indic
       <img src="docs/images/demo-youtube-volume-slider-classic.svg" alt="Classic expanded YouTube volume slider with a speaker icon, 25 percent volume label, and red slider track" width="420">
     </td>
     <td align="center" valign="middle" width="42%">
-      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240">
+      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240"><br>
+      <img src="docs/images/demo-youtube-options-controls.svg" alt="YouTube player controls showing the Volume Slider Options button next to the settings gear" width="240">
     </td>
   </tr>
 </table>
@@ -36,7 +37,8 @@ Both scripts replace or complement the sites' native controls with a small indic
       <img src="docs/images/demo-twitch-volume-slider-classic.svg" alt="Classic expanded Twitch volume slider with a speaker icon, 25 percent volume label, and purple slider track" width="420">
     </td>
     <td align="center" valign="middle" width="42%">
-      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240">
+      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240"><br>
+      <img src="docs/images/demo-twitch-options-controls.svg" alt="Twitch player controls showing the Volume Slider Options button next to the settings button" width="240">
     </td>
   </tr>
 </table>
@@ -47,7 +49,18 @@ Both scripts replace or complement the sites' native controls with a small indic
 - [YouTube Volume Slider 2.6.7](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.6.7/YouTube.Volume.Slider.2.6.7.user.js)
 - [Twitch Volume Slider 2.6.7](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.6.7/Twitch.Volume.Slider.2.6.7.user.js)
 
-Install a current userscript manager such as Tampermonkey or Violentmonkey in a modern browser, download the appropriate file above, and open it with the userscript manager. Both scripts update from the committed `dist/` files on `main`.
+Install a current userscript manager such as Tampermonkey or Violentmonkey in a modern browser. Both scripts update from the committed `dist/` files on `main`.
+
+### Tampermonkey in Chrome
+
+1. Install [Tampermonkey from the Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo).  
+Tampermonkey is also available for other browsers from [tampermonkey.net](https://www.tampermonkey.net/).
+2. Open `chrome://extensions`, select **Details** on Tampermonkey, and turn on **Allow user scripts** if the setting is shown. Chrome often requires this before Tampermonkey can run installed userscripts.
+3. Open one of the download links above, or choose a `.user.js` asset from the [Releases page](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases).
+4. Tampermonkey should open an install screen. Review the script name, then select **Install**.
+5. Reload YouTube or Twitch and confirm the script is enabled in the Tampermonkey extension menu.
+
+Violentmonkey and other userscript managers use a similar flow: install the extension, open the `.user.js` download, approve the install prompt, then reload the video page.
 
 ## Features
 
