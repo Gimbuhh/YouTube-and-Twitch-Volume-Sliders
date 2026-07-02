@@ -248,6 +248,14 @@ export function createVolumeSettings({
     if (!overlay) return;
     const scale = isSliderOnVideo() ? getSavedOverlaySizePercent() / 100 : 1;
     overlay.style.setProperty('--tm-overlay-scale', String(scale));
+    syncOverlayTicks(overlay);
+    overlay.ownerDocument?.defaultView?.requestAnimationFrame?.(() => {
+      syncOverlayTicks(overlay);
+    });
+  }
+
+  function syncOverlayTicks(overlay) {
+    overlay?.querySelector?.('.tm-slider-ticks')?._tmSliderTicksSync?.();
   }
 
   function setSavedOverlaySizePercent(value) {
@@ -281,6 +289,7 @@ export function createVolumeSettings({
         row.style.setProperty('--tm-visual-track-h', thickness);
         row.style.setProperty('--tm-thumb-size', thumbSize);
       });
+    syncOverlayTicks(overlay);
   }
 
   function restoreOverlayPreview(overlay) {

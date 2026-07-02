@@ -2,6 +2,13 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6.8 - 2026-07-01
+
+### Fixed
+
+- Kept the 5% slider tick marks sharp and aligned when the on-video slider is enlarged, so scaled YouTube and Twitch sliders no longer render ticks beyond the pill or shift after page load.
+- Mounted Twitch's custom slider and Slider Options button in offline preview players without freezing the preview video, and uses a shorter expanded slider in those smaller players.
+
 ## 2.6.7 - 2026-06-29
 
 ### Fixed

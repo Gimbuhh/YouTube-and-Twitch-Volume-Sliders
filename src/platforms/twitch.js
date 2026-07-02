@@ -43,6 +43,7 @@ export function startTwitchVolumeSlider() {
         '[data-a-target="player-settings-menu"], ' +
         '[data-a-target="player-settings-submenu"], ' +
         '[data-a-target="player-settings-submenu-back-button"]';
+    const TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX = 720;
     const ON_VIDEO_IDLE_BOTTOM_PX = 12;
     const ON_VIDEO_MAX_CONTROLS_OFFSET_PX = 140;
     const VOLUME_ACCENT_LIGHT = '#a970ff';
@@ -160,36 +161,70 @@ export function startTwitchVolumeSlider() {
         }
 
         return (
-            video.closest('.video-player, .video-player__container, [data-a-target="video-player"]') ||
+            video.closest('[data-a-target="video-player"], .video-player') ||
+            video.closest('.video-player__container') ||
             video.parentElement
         );
     }
 
-    function getTwitchControlsHost() {
+    function getVideoOverlayContainer(video = getVideoElement(), player = getPlayerContainer(video)) {
+        return video?.closest?.('.video-player__container') || player;
+    }
+
+    function getElementWidth(element) {
+        const rect = element?.getBoundingClientRect?.();
+        const width = Number(rect?.width);
+        return Number.isFinite(width) && width > 0 ? width : 0;
+    }
+
+    function isTwitchPreviewPlayerWidth(width) {
+        return width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
+    }
+
+    function updateTwitchPreviewPlayerSizing(overlay, player) {
+        if (!overlay) return;
+        const playerWidth = getElementWidth(player);
+        const isPreviewPlayer = isTwitchPreviewPlayerWidth(playerWidth);
+        overlay.classList.toggle('tm-twitch-preview-player', isPreviewPlayer);
+        if (isPreviewPlayer) {
+            overlay.style.setProperty('--tm-twitch-preview-player-width', `${playerWidth.toFixed(2)}px`);
+        } else {
+            overlay.style.removeProperty('--tm-twitch-preview-player-width');
+        }
+    }
+
+    function getTwitchControlsHost(player = getPlayerContainer()) {
         return (
+            player?.querySelector?.('.player-controls__left-control-group') ||
             document.querySelector('#channel-player .player-controls__left-control-group') ||
             document.querySelector('[aria-label="Player Controls"] .player-controls__left-control-group') ||
             document.querySelector('.player-controls__left-control-group')
         );
     }
 
-    function getTwitchPlayerControlsRoot() {
+    function getTwitchPlayerControlsRoot(player = getPlayerContainer()) {
         return (
+            player?.querySelector?.('[data-a-target="player-controls"].player-controls') ||
+            player?.querySelector?.('[data-a-target="player-controls"]') ||
             document.querySelector('[data-a-target="player-controls"].player-controls') ||
             document.querySelector('[data-a-target="player-controls"]')
         );
     }
 
-    function getTwitchPlayerControlsShell() {
-        return getTwitchPlayerControlsRoot()?.closest?.('.tw-transition') || null;
+    function getTwitchPlayerControlsShell(player = getPlayerContainer()) {
+        return getTwitchPlayerControlsRoot(player)?.closest?.('.tw-transition') || null;
     }
 
-    function getTwitchPlayerControlsSection() {
-        return document.querySelector('#channel-player, [aria-label="Player Controls"]');
-    }
-
-    function getTwitchRightControlsHost() {
+    function getTwitchPlayerControlsSection(player = getPlayerContainer()) {
         return (
+            player?.querySelector?.('#channel-player, [aria-label="Player Controls"]') ||
+            document.querySelector('#channel-player, [aria-label="Player Controls"]')
+        );
+    }
+
+    function getTwitchRightControlsHost(player = getPlayerContainer()) {
+        return (
+            player?.querySelector?.('.player-controls__right-control-group') ||
             document.querySelector('#channel-player .player-controls__right-control-group') ||
             document.querySelector('[aria-label="Player Controls"] .player-controls__right-control-group') ||
             document.querySelector('.player-controls__right-control-group')
@@ -231,14 +266,14 @@ export function startTwitchVolumeSlider() {
         return host && settingsBtn ? getDirectChildOf(host, settingsBtn) : null;
     }
 
-    function positionOverlayAboveControls(overlay, player) {
-        const controls = getTwitchPlayerControlsSection();
-        if (!overlay || !player || !controls) {
+    function positionOverlayAboveControls(overlay, overlayHost, player = getPlayerContainer()) {
+        const controls = getTwitchPlayerControlsSection(player);
+        if (!overlay || !overlayHost || !controls) {
             if (overlay) overlay.style.bottom = `${ON_VIDEO_IDLE_BOTTOM_PX}px`;
             return;
         }
 
-        const playerRect = player.getBoundingClientRect();
+        const playerRect = overlayHost.getBoundingClientRect();
         const controlsRect = controls.getBoundingClientRect();
         const hasUsableControlsRect =
             controlsRect.width > 0 &&
@@ -254,13 +289,13 @@ export function startTwitchVolumeSlider() {
         overlay.style.bottom = `${safeBottomPx}px`;
     }
 
-    function updateVideoOverlayPosition(overlay, player) {
-        if (!overlay || !player || !isSliderOnVideo()) return;
-        if (areTwitchControlsHidden()) {
+    function updateVideoOverlayPosition(overlay, overlayHost, player = getPlayerContainer()) {
+        if (!overlay || !overlayHost || !isSliderOnVideo()) return;
+        if (areTwitchControlsHidden(player)) {
             overlay.style.bottom = `${ON_VIDEO_IDLE_BOTTOM_PX}px`;
             return;
         }
-        positionOverlayAboveControls(overlay, player);
+        positionOverlayAboveControls(overlay, overlayHost, player);
     }
 
     function placeOverlayInControls(overlay, controlsHost) {
@@ -288,13 +323,15 @@ export function startTwitchVolumeSlider() {
 
     function placeOverlay(overlay, player, controlsHost) {
         if (!overlay || !player) return;
+        updateTwitchPreviewPlayerSizing(overlay, player);
 
         if (isSliderOnVideo()) {
-            ensurePlayerPositioning(player);
-            if (overlay.parentElement !== player) {
-                player.appendChild(overlay);
+            const overlayHost = getVideoOverlayContainer(undefined, player);
+            ensurePlayerPositioning(overlayHost);
+            if (overlay.parentElement !== overlayHost) {
+                overlayHost.appendChild(overlay);
             }
-            updateVideoOverlayPosition(overlay, player);
+            updateVideoOverlayPosition(overlay, overlayHost, player);
         } else if (controlsHost) {
             placeOverlayInControls(overlay, controlsHost);
             overlay.style.bottom = '';
@@ -306,7 +343,10 @@ export function startTwitchVolumeSlider() {
     }
 
     function applyNativeVolumeVisibility() {
-        const nativeVolumeGroup = getNativeVolumeGroup();
+        const video = getVideoElement();
+        const player = getPlayerContainer(video);
+        const controlsHost = getTwitchControlsHost(player);
+        const nativeVolumeGroup = getNativeVolumeGroup(controlsHost);
         if (nativeVolumeGroup) {
             const shouldHideNative = isOverlayEnabled() && isNativeVolumeReplacementEnabled();
             const nextDisplay = shouldHideNative ? 'none' : '';
@@ -316,9 +356,6 @@ export function startTwitchVolumeSlider() {
         }
 
         const overlay = document.getElementById(OVERLAY_ID);
-        const video = getVideoElement();
-        const player = getPlayerContainer(video);
-        const controlsHost = getTwitchControlsHost();
         if (overlay && player && !isOverlayInteractionFocused(overlay)) {
             placeOverlay(overlay, player, controlsHost);
         }
@@ -340,6 +377,18 @@ export function startTwitchVolumeSlider() {
   --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
   --tm-label-row-width: 96px;
   --tm-slider-row-offset: 108px;
+}
+
+#${OVERLAY_ID}.tm-twitch-preview-player {
+  --tm-pill-expanded-width: clamp(184px, calc(var(--tm-twitch-preview-player-width, 520px) * 0.48), 260px);
+  --tm-label-row-width: 42px;
+  --tm-slider-row-offset: 54px;
+}
+
+#${OVERLAY_ID}.tm-twitch-preview-player.tm-volume-appearance-classic {
+  --tm-pill-expanded-width: clamp(220px, calc(var(--tm-twitch-preview-player-width, 520px) * 0.58), 304px);
+  --tm-label-row-width: 84px;
+  --tm-slider-row-offset: 96px;
 }
 
 #${OVERLAY_ID} input[type=range] {
@@ -648,10 +697,10 @@ export function startTwitchVolumeSlider() {
 
 
 
-    function areTwitchControlsHidden() {
-        const controlsRoot = getTwitchPlayerControlsRoot();
-        const controlsShell = getTwitchPlayerControlsShell();
-        const controls = getTwitchPlayerControlsSection();
+    function areTwitchControlsHidden(player = getPlayerContainer()) {
+        const controlsRoot = getTwitchPlayerControlsRoot(player);
+        const controlsShell = getTwitchPlayerControlsShell(player);
+        const controls = getTwitchPlayerControlsSection(player);
         if (controlsShell?.getAttribute('aria-hidden') === 'true') return true;
         if (controlsRoot?.getAttribute('data-a-visible') === 'false') return true;
         if (controlsRoot?.getAttribute('aria-hidden') === 'true') return true;
@@ -712,35 +761,42 @@ export function startTwitchVolumeSlider() {
      */
     function getTwitchPlayerApi() {
         try {
-            const playerSel = 'div[data-a-target="player-overlay-click-handler"], .video-player';
-            const el = document.querySelector(playerSel);
-            if (!el) return null;
-            if (cachedApi && cachedApiFromElement === el) {
+            const player = getPlayerContainer();
+            const candidates = [
+                player,
+                player?.closest?.('div[data-a-target="player-overlay-click-handler"], [data-a-target="video-player"], .video-player'),
+                player?.querySelector?.('div[data-a-target="player-overlay-click-handler"], [data-a-target="video-player"], .video-player'),
+                document.querySelector('div[data-a-target="player-overlay-click-handler"], [data-a-target="video-player"], .video-player')
+            ].filter(Boolean);
+            const uniqueCandidates = candidates.filter((candidate, index) => candidates.indexOf(candidate) === index);
+            if (cachedApi && uniqueCandidates.includes(cachedApiFromElement)) {
                 return cachedApi;
             }
 
-            let instance;
-            for (const key in el) {
-                if (key.startsWith('__reactInternalInstance$') || key.startsWith('__reactFiber$')) {
-                    instance = el[key];
-                    break;
-                }
-            }
-            if (!instance) return null;
-
-            let parent = instance.return;
-            for (let i = 0; i < 50; i++) {
-                if (!parent || !parent.memoizedProps) break;
-                const player = parent.memoizedProps.mediaPlayerInstance;
-                if (player) {
-                    const api = player.core ?? player.playerInstance?.core ?? player;
-                    if (typeof api?.getVolume === 'function' && typeof api?.setVolume === 'function') {
-                        cachedApi = api;
-                        cachedApiFromElement = el;
-                        return api;
+            for (const el of uniqueCandidates) {
+                let instance;
+                for (const key in el) {
+                    if (key.startsWith('__reactInternalInstance$') || key.startsWith('__reactFiber$')) {
+                        instance = el[key];
+                        break;
                     }
                 }
-                parent = parent.return;
+                if (!instance) continue;
+
+                let parent = instance.return;
+                for (let i = 0; i < 50; i++) {
+                    if (!parent || !parent.memoizedProps) break;
+                    const player = parent.memoizedProps.mediaPlayerInstance;
+                    if (player) {
+                        const api = player.core ?? player.playerInstance?.core ?? player;
+                        if (typeof api?.getVolume === 'function' && typeof api?.setVolume === 'function') {
+                            cachedApi = api;
+                            cachedApiFromElement = el;
+                            return api;
+                        }
+                    }
+                    parent = parent.return;
+                }
             }
         } catch (e) { /* React structure may change */ }
         cachedApi = null;
@@ -1468,13 +1524,14 @@ export function startTwitchVolumeSlider() {
 
     function ensureOptionsPopup() {
         const player = getPlayerContainer();
-        if (!player) return null;
+        const overlayHost = getVideoOverlayContainer(undefined, player);
+        if (!overlayHost) return null;
         let popup = getOptionsPopup();
         if (!popup || !popup.isConnected) {
             popup?.remove();
             popup = buildOptionsPopup();
-            ensurePlayerPositioning(player);
-            player.appendChild(popup);
+            ensurePlayerPositioning(overlayHost);
+            overlayHost.appendChild(popup);
         }
         return popup;
     }
@@ -1482,8 +1539,9 @@ export function startTwitchVolumeSlider() {
     function positionOptionsPopup(popup, resetScroll = false) {
         const btn = document.getElementById(OPTIONS_BUTTON_ID);
         const player = getPlayerContainer();
-        if (!btn || !player || !popup) return;
-        const playerRect = player.getBoundingClientRect();
+        const overlayHost = getVideoOverlayContainer(undefined, player);
+        if (!btn || !overlayHost || !popup) return;
+        const playerRect = overlayHost.getBoundingClientRect();
         const btnRect = btn.getBoundingClientRect();
         const bottomPx = playerRect.bottom - btnRect.top + 8;
 
@@ -2105,9 +2163,10 @@ export function startTwitchVolumeSlider() {
 
         const onLayoutChange = () => {
             if (!overlay.isConnected) return;
-            if (areTwitchControlsHidden()) {
+            const activePlayer = getPlayerContainer(video);
+            if (areTwitchControlsHidden(activePlayer)) {
                 if (isSliderOnVideo()) {
-                    updateVideoOverlayPosition(overlay, getPlayerContainer(video));
+                    updateVideoOverlayPosition(overlay, getVideoOverlayContainer(video, activePlayer), activePlayer);
                 }
                 if (isOverlayInteractionFocused(overlay)) {
                     updateOverlayOpacity(overlay);
@@ -2122,12 +2181,12 @@ export function startTwitchVolumeSlider() {
                 return;
             }
             if (isOverlayInteractionFocused(overlay)) return;
-            placeOverlay(overlay, getPlayerContainer(video), getTwitchControlsHost());
+            placeOverlay(overlay, activePlayer, getTwitchControlsHost(activePlayer));
         };
         window.addEventListener('resize', onLayoutChange);
         const controlsObserver = new MutationObserver(onLayoutChange);
-        const controlsRootForLayout = getTwitchPlayerControlsRoot();
-        const controlsForLayout = getTwitchPlayerControlsSection();
+        const controlsRootForLayout = getTwitchPlayerControlsRoot(player);
+        const controlsForLayout = getTwitchPlayerControlsSection(player);
         if (controlsRootForLayout) {
             controlsObserver.observe(controlsRootForLayout, { attributes: true, attributeFilter: ['data-a-visible', 'class', 'aria-hidden', 'style'] });
         }
@@ -2188,7 +2247,7 @@ export function startTwitchVolumeSlider() {
     function attachSliderIfPossible() {
         const video = getVideoElement();
         const player = getPlayerContainer(video);
-        const controlsHost = getTwitchControlsHost();
+        const controlsHost = getTwitchControlsHost(player);
 
         // Keep the options button available even when the slider is off.
         if (!isOverlayEnabled()) {

@@ -5,8 +5,8 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', muteKey:'tm-yt-muted', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', appearanceKey:'tm-yt-volume-slider-appearance' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', appearanceKey:'tm-twitch-volume-slider-appearance' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', muteKey:'tm-yt-muted', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', appearanceKey:'tm-yt-volume-slider-appearance' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
 
 const waitForTimers = (runtime, delay = 0) => new Promise(resolve=>runtime.window.setTimeout(resolve,delay));
@@ -78,6 +78,37 @@ test('YouTube: document-start bootstrap mounts the slider when the player arrive
   runtime.close();
 });
 
+test('YouTube: always-expanded slider starts expanded when inserted',async()=>{
+  const config=platforms[0];
+  const runtime=createRuntime(config.url,{runScripts:'outside-only'});
+  config.fixture(runtime.document);
+  runtime.window.localStorage.setItem(config.expandedKey,'true');
+
+  const appendRecords=[];
+  const originalAppendChild=runtime.window.Element.prototype.appendChild;
+  runtime.window.Element.prototype.appendChild=function(child){
+    if(child?.id==='tm-volume-slider-overlay'){
+      appendRecords.push({className:child.className,width:child.style.width});
+    }
+    return originalAppendChild.call(this,child);
+  };
+
+  try{
+    const source=await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`,import.meta.url),'utf8');
+    runtime.window.eval(source);
+    await waitForTimers(runtime);
+
+    assert.ok(appendRecords.length>0);
+    assert.match(appendRecords[0].className,/\btm-expanded\b/);
+    assert.doesNotMatch(appendRecords[0].className,/\btm-collapsed\b/);
+    assert.equal(appendRecords[0].width,'var(--tm-pill-expanded-width)');
+    assert.ok(runtime.document.getElementById('tm-volume-slider-overlay').classList.contains('tm-expanded'));
+  } finally {
+    runtime.window.Element.prototype.appendChild=originalAppendChild;
+    runtime.close();
+  }
+});
+
 test('YouTube: options button mounts when native controls appear before video',async()=>{
   const config=platforms[0];
   const runtime=await startBuiltArtifact(config);
@@ -147,6 +178,51 @@ test('Twitch: options button mounts when native controls appear before video',as
   await waitForTimers(runtime,60);
 
   assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+  runtime.close();
+});
+
+test('Twitch: preview player mounts slider and options in its own controls',async()=>{
+  const config=platforms[1];
+  const runtime=await startBuiltArtifact(config);
+  runtime.window.localStorage.setItem(config.locationKey,'video');
+  const inactive=runtime.document.createElement('div');
+  inactive.className='video-player';
+  inactive.setAttribute('data-a-target','video-player');
+  inactive.innerHTML='<div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings"></button></div></div>';
+  runtime.document.body.appendChild(inactive);
+
+  const preview=runtime.document.createElement('div');
+  preview.className='video-player';
+  preview.setAttribute('data-a-target','video-player');
+  preview.innerHTML='<div class="video-player__container"><div class="video-ref" data-a-target="video-ref"><video aria-label="Twitch video player"></video><section id="channel-player" aria-label="Player Controls"><div data-a-target="player-controls" class="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings"></button></div></div></section></div></div>';
+  runtime.document.body.appendChild(preview);
+  const previewContainer=preview.querySelector('.video-player__container');
+  preview.getBoundingClientRect=()=>({left:100,top:100,right:633,bottom:400,width:533,height:300});
+  previewContainer.getBoundingClientRect=()=>({left:100,top:100,right:633,bottom:400,width:533,height:300});
+  const video=preview.querySelector('video');
+  Object.defineProperty(video,'clientWidth',{value:533,configurable:true});
+  Object.defineProperty(video,'clientHeight',{value:300,configurable:true});
+  let volume=.5, muted=false;
+  preview._tmPlayerApi={getVolume:()=>volume,setVolume:v=>{volume=v;},isMuted:()=>muted,setMuted:v=>{muted=v;}};
+  preview.__reactFiber$test={return:{memoizedProps:{mediaPlayerInstance:preview._tmPlayerApi},return:null}};
+
+  await waitForTimers(runtime,60);
+
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const options=runtime.document.getElementById('tm-volume-options-button');
+  assert.ok(overlay);
+  assert.ok(options);
+  assert.equal(preview.querySelector('#tm-volume-slider-overlay'),overlay);
+  assert.equal(preview.querySelector('#tm-volume-options-button'),options);
+  assert.equal(overlay.parentElement,previewContainer);
+  assert.equal(overlay.classList.contains('tm-twitch-preview-player'),true);
+  assert.equal(overlay.style.getPropertyValue('--tm-twitch-preview-player-width'),'533.00px');
+  assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/\.tm-twitch-preview-player\s*{[^}]*--tm-pill-expanded-width:\s*clamp\(184px,/s);
+  options.click();
+  await waitForTimers(runtime);
+  assert.equal(runtime.document.getElementById('tm-volume-options-popup')?.parentElement,previewContainer);
+  assert.equal(inactive.querySelector('#tm-volume-slider-overlay'),null);
+  assert.equal(inactive.querySelector('#tm-volume-options-button'),null);
   runtime.close();
 });
 
@@ -479,11 +555,20 @@ for(const config of platforms){
     assert.doesNotMatch(style.textContent,/\.tm-slider-tick\s*{[^}]*vector-effect:\s*non-scaling-stroke/s);
     Object.defineProperty(runtime.window,'devicePixelRatio',{value:4/3,configurable:true});
     ticks.getBoundingClientRect=()=>({left:0,top:0,right:242.34375,bottom:8.25,width:242.34375,height:8.25});
-    runtime.window.dispatchEvent(new runtime.window.Event('resize'));
-    await waitForTimers(runtime,20);
+    ticks._tmSliderTicksSync?.();
+    assert.equal(ticks.style.visibility,'');
     assert.equal(ticks.style.getPropertyValue('--tm-slider-tick-width'),'0.75px');
     assert.equal(tickMarks[5].style.left,'72px');
     assert.equal(tickMarks[6].style.left,'84.75px');
+    overlay.classList.add('tm-on-video');
+    overlay.style.setProperty('--tm-overlay-scale','2');
+    Object.defineProperty(runtime.window,'devicePixelRatio',{value:1,configurable:true});
+    ticks.getBoundingClientRect=()=>({left:.25,top:0,right:200.25,bottom:8,width:200,height:8});
+    ticks._tmSliderTicksSync?.();
+    await waitForTimers(runtime,20);
+    assert.equal(ticks.style.getPropertyValue('--tm-slider-tick-width'),'0.5px');
+    assert.equal(tickMarks[9].style.left,'49.875px');
+    assert.equal(tickMarks[18].style.left,'94.875px');
     assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*flex:\s*0 0 calc\(var\(--tm-pill-expanded-width\) - /s);
     assert.match(style.textContent,/\.tm-volume-slider-row\s*{[^}]*width:\s*calc\(var\(--tm-pill-expanded-width\) - /s);
     assert.doesNotMatch(style.textContent,/repeating-linear-gradient/);
