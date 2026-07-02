@@ -217,7 +217,8 @@ test('Twitch: preview player mounts slider and options in its own controls',asyn
   assert.equal(overlay.parentElement,previewContainer);
   assert.equal(overlay.classList.contains('tm-twitch-preview-player'),true);
   assert.equal(overlay.style.getPropertyValue('--tm-twitch-preview-player-width'),'533.00px');
-  assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/\.tm-twitch-preview-player\s*{[^}]*--tm-pill-expanded-width:\s*clamp\(184px,/s);
+  assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/\.tm-twitch-preview-player\s*{[^}]*--tm-pill-min-width:\s*184px/s);
+  assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/\.tm-twitch-preview-player\s*{[^}]*--tm-pill-zoom-adaptive-width:\s*calc\(var\(--tm-twitch-preview-player-width,\s*520px\) \* 0\.48\)/s);
   options.click();
   await waitForTimers(runtime);
   assert.equal(runtime.document.getElementById('tm-volume-options-popup')?.parentElement,previewContainer);
@@ -259,6 +260,55 @@ test('Twitch: volume mouse interactions do not keep keyboard focus',async()=>{
   slider.dispatchEvent(new runtime.window.MouseEvent('pointerup',{bubbles:true,cancelable:true,clientX:10,clientY:10}));
   await waitForTimers(runtime);
   assert.notEqual(runtime.document.activeElement,slider);
+  runtime.close();
+});
+
+test('Twitch: compact controls layout protects preview-sized control bars',async()=>{
+  const config=platforms[1];
+  const {runtime}=await loadPlatform(config,current=>{
+    const controls=current.document.querySelector('[data-a-target="player-controls"]');
+    controls.getBoundingClientRect=()=>({left:0,top:0,right:600,bottom:40,width:600,height:40});
+  });
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const style=runtime.document.getElementById('tm-volume-slider-style');
+  assert.ok(overlay.classList.contains('tm-volume-compact-layout'));
+  assert.match(style.textContent,/#tm-volume-slider-overlay\.tm-volume-compact-layout\s*{[\s\S]*--tm-pill-min-width:\s*208px/);
+  assert.match(style.textContent,/#tm-volume-slider-overlay\.tm-volume-compact-layout\s*{[\s\S]*--tm-pill-zoom-adaptive-width:\s*min\(252px,\s*calc\(64vw - 14px\)\)/);
+  assert.match(style.textContent,/@media \(max-width:\s*320px\)[\s\S]*#tm-volume-slider-overlay\.tm-volume-compact-layout\s*{[\s\S]*--tm-pill-min-width:\s*176px/);
+  assert.match(style.textContent,/#tm-volume-slider-overlay\.tm-volume-compact-layout \.tm-volume-slider-row\s*{[\s\S]*--tm-thumb-size:\s*18px/);
+  runtime.close();
+});
+
+test('Twitch: discovery preview video switch rebinds the custom slider',async()=>{
+  const config=platforms[1];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'40');
+  });
+  const firstOverlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const controls=runtime.document.querySelector('[data-a-target="player-controls"]');
+  const secondVideo=runtime.document.createElement('video');
+  let secondVolume=.8, secondMuted=false;
+  const secondPlayer=runtime.document.createElement('div');
+  secondPlayer.className='video-player';
+  secondPlayer.dataset.aTarget='player-overlay-click-handler';
+  secondPlayer._tmPlayerApi={getVolume:()=>secondVolume,setVolume:v=>{secondVolume=v;},isMuted:()=>secondMuted,setMuted:v=>{secondMuted=v;}};
+  secondPlayer.__reactFiber$test={return:{memoizedProps:{mediaPlayerInstance:secondPlayer._tmPlayerApi},return:null}};
+  Object.defineProperties(fixture.video,{clientWidth:{value:160},clientHeight:{value:90}});
+  Object.defineProperties(secondVideo,{clientWidth:{value:640},clientHeight:{value:360}});
+  secondPlayer.appendChild(secondVideo);
+  secondPlayer.appendChild(controls);
+  runtime.document.body.appendChild(secondPlayer);
+  await waitForTimers(runtime,80);
+
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  assert.notEqual(overlay,firstOverlay);
+  assert.equal(overlay._tmVolumeVideo,secondVideo);
+  const firstVolumeBeforeInput=fixture.state.volume;
+  slider.value='25';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(secondVolume,.25);
+  assert.equal(fixture.state.volume,firstVolumeBeforeInput);
   runtime.close();
 });
 
@@ -400,7 +450,16 @@ for(const config of platforms){
     const rowStyle=runtime.window.getComputedStyle(row);
     const labelStyle=runtime.window.getComputedStyle(label);
     assert.equal(overlay.dataset.tmAppearance,'new');
-    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(228px, calc(34vw - 92px), 368px)');
+    const overlayStyle=runtime.window.getComputedStyle(overlay);
+    const style=runtime.document.getElementById('tm-volume-slider-style');
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-min-width').trim(),'228px');
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-zoom-adaptive-width').trim(),'calc(34vw - 92px)');
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-max-width').trim(),'368px');
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width))');
+    assert.match(style.textContent,/Browser zoom reduces the CSS viewport width/);
+    assert.match(style.textContent,/@media \(max-width:\s*320px\)\s*{[^}]*--tm-pill-min-width:\s*176px/s);
+    assert.match(style.textContent,/@media \(max-width:\s*320px\)[\s\S]*--tm-pill-zoom-adaptive-width:\s*min\(216px,\s*calc\(64vw - 14px\)\)/);
+    assert.match(style.textContent,/@media \(max-width:\s*320px\)[\s\S]*\.tm-volume-slider-row\s*{[\s\S]*--tm-thumb-size:\s*18px/);
     assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-slider-row-offset').trim(),'62px');
     assert.equal(rowStyle.width,'50px');
     assert.equal(labelStyle.width,'1px');
@@ -444,7 +503,13 @@ for(const config of platforms){
     const rowStyle=runtime.window.getComputedStyle(row);
     const labelStyle=runtime.window.getComputedStyle(label);
     assert.equal(overlay.dataset.tmAppearance,'classic');
-    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(274px, calc(34vw - 46px), 414px)');
+    const overlayStyle=runtime.window.getComputedStyle(overlay);
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-min-width').trim(),'274px');
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-zoom-adaptive-width').trim(),'calc(34vw - 46px)');
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-max-width').trim(),'414px');
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width))');
+    assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/@media \(max-width:\s*320px\)[\s\S]*tm-volume-appearance-classic[\s\S]*--tm-pill-min-width:\s*196px/);
+    assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/@media \(max-width:\s*320px\)[\s\S]*tm-volume-appearance-classic[\s\S]*--tm-pill-zoom-adaptive-width:\s*min\(262px,\s*calc\(64vw \+ 6px\)\)/);
     assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-slider-row-offset').trim(),'108px');
     assert.equal(indicator.dataset.volumeIcon,'high');
     assert.ok(highIcon);
@@ -539,7 +604,8 @@ for(const config of platforms){
     const style=runtime.document.getElementById('tm-volume-slider-style');
     const sliderRowStyle=runtime.window.getComputedStyle(sliderRow);
     const ticksStyle=runtime.window.getComputedStyle(ticks);
-    assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(228px, calc(34vw - 92px), 368px)');
+    const overlayStyle=runtime.window.getComputedStyle(overlay);
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width))');
     assert.equal(sliderRow.style.width,'');
     assert.equal(sliderRow.style.flex,'');
     assert.equal(ticksStyle.opacity,'1');

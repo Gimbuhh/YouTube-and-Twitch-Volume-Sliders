@@ -265,16 +265,40 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!style) return;
         const css = `
 #${OVERLAY_ID} {
-  --tm-pill-expanded-width: clamp(228px, calc(34vw - 92px), 368px);
+  --tm-pill-min-width: 228px;
+  --tm-pill-zoom-adaptive-width: calc(34vw - 92px);
+  --tm-pill-max-width: 368px;
+  /* Browser zoom reduces the CSS viewport width, so this shrinks the expanded pill before it clips offscreen. */
+  --tm-pill-expanded-width: clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width));
   --tm-label-row-width: 50px;
   --tm-slider-row-offset: 62px;
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
 #${OVERLAY_ID}.tm-volume-appearance-classic {
-  --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
+  --tm-pill-min-width: 274px;
+  --tm-pill-zoom-adaptive-width: calc(34vw - 46px);
+  --tm-pill-max-width: 414px;
   --tm-label-row-width: 96px;
   --tm-slider-row-offset: 108px;
+}
+
+@media (max-width: 320px) {
+  #${OVERLAY_ID} {
+    --tm-pill-min-width: 176px;
+    --tm-pill-zoom-adaptive-width: min(216px, calc(64vw - 14px));
+  }
+
+  #${OVERLAY_ID}.tm-volume-appearance-classic {
+    --tm-pill-min-width: 196px;
+    --tm-pill-zoom-adaptive-width: min(262px, calc(64vw + 6px));
+  }
+
+  #${OVERLAY_ID} .tm-volume-slider-row {
+    --tm-active-track-h: 9px;
+    --tm-visual-track-h: 4px;
+    --tm-thumb-size: 18px;
+  }
 }
 
 #${OVERLAY_ID} input[type=range] {

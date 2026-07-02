@@ -2,6 +2,16 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.6.9 - 2026-07-02
+
+### Fixed
+
+- Made the expanded volume slider shrink further at 500% browser zoom so it is less likely to be cut off in YouTube and Twitch controls.
+- Scaled the slider thumb and track down in the same 500% zoom layout so the control no longer feels oversized inside the shortened pill.
+- Reused a medium compact layout on narrow Twitch preview/offline control bars so the expanded slider leaves room for the remaining player buttons without becoming too short at normal page zoom.
+- Rebound the Twitch slider when discovery previews switch videos, so volume changes apply to the newly active preview instead of the first preview video.
+- Documented the zoom-adaptive slider width in the userscript styles and covered both New and Classic slider appearances with integration tests.
+
 ## 2.6.8 - 2026-07-01
 
 ### Fixed

@@ -46,6 +46,7 @@ export function startTwitchVolumeSlider() {
     const TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX = 720;
     const ON_VIDEO_IDLE_BOTTOM_PX = 12;
     const ON_VIDEO_MAX_CONTROLS_OFFSET_PX = 140;
+    const COMPACT_CONTROLS_MAX_WIDTH_PX = 640;
     const VOLUME_ACCENT_LIGHT = '#a970ff';
     const VOLUME_ACCENT_DARK = '#9146ff';
     const VOLUME_ACCENT_MID = '#b38cff';
@@ -239,6 +240,23 @@ export function startTwitchVolumeSlider() {
         );
     }
 
+    function getLayoutWidth(element) {
+        const rectWidth = element?.getBoundingClientRect?.().width || 0;
+        return rectWidth > 0 ? rectWidth : (element?.clientWidth || 0);
+    }
+
+    function updateControlsCompactLayout(overlay, controlsHost) {
+        if (!overlay) return;
+        const controlsWidth =
+            getLayoutWidth(getTwitchPlayerControlsRoot()) ||
+            getLayoutWidth(getTwitchPlayerControlsSection()) ||
+            getLayoutWidth(controlsHost);
+        overlay.classList.toggle(
+            'tm-volume-compact-layout',
+            !isSliderOnVideo() && controlsWidth > 0 && controlsWidth <= COMPACT_CONTROLS_MAX_WIDTH_PX
+        );
+    }
+
     function isNativeSettingsMenuOpen() {
         return getTwitchSettingsButton()?.getAttribute('aria-expanded') === 'true';
     }
@@ -337,6 +355,8 @@ export function startTwitchVolumeSlider() {
             overlay.style.bottom = '';
         }
 
+        updateControlsCompactLayout(overlay, controlsHost);
+
         const expanded = overlay.classList.contains('tm-expanded') || isAlwaysExpandedEnabled();
         setOverlayExpanded(overlay, expanded, true);
         updateOverlayOpacity(overlay);
@@ -367,28 +387,74 @@ export function startTwitchVolumeSlider() {
         style.type = 'text/css';
         const css = `
 #${OVERLAY_ID} {
-  --tm-pill-expanded-width: clamp(228px, calc(34vw - 92px), 368px);
+  --tm-pill-min-width: 228px;
+  --tm-pill-zoom-adaptive-width: calc(34vw - 92px);
+  --tm-pill-max-width: 368px;
+  /* Browser zoom reduces the CSS viewport width, so this shrinks the expanded pill before it clips offscreen. */
+  --tm-pill-expanded-width: clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width));
   --tm-label-row-width: 50px;
   --tm-slider-row-offset: 62px;
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
 #${OVERLAY_ID}.tm-volume-appearance-classic {
-  --tm-pill-expanded-width: clamp(274px, calc(34vw - 46px), 414px);
+  --tm-pill-min-width: 274px;
+  --tm-pill-zoom-adaptive-width: calc(34vw - 46px);
+  --tm-pill-max-width: 414px;
   --tm-label-row-width: 96px;
   --tm-slider-row-offset: 108px;
 }
 
+#${OVERLAY_ID}.tm-volume-compact-layout {
+  --tm-pill-min-width: 208px;
+  --tm-pill-zoom-adaptive-width: min(252px, calc(64vw - 14px));
+}
+
+#${OVERLAY_ID}.tm-volume-compact-layout.tm-volume-appearance-classic {
+  --tm-pill-min-width: 228px;
+  --tm-pill-zoom-adaptive-width: min(292px, calc(64vw + 6px));
+}
+
+#${OVERLAY_ID}.tm-volume-compact-layout .tm-volume-slider-row {
+  --tm-active-track-h: 9px;
+  --tm-visual-track-h: 4px;
+  --tm-thumb-size: 18px;
+}
+
 #${OVERLAY_ID}.tm-twitch-preview-player {
-  --tm-pill-expanded-width: clamp(184px, calc(var(--tm-twitch-preview-player-width, 520px) * 0.48), 260px);
+  --tm-pill-min-width: 184px;
+  --tm-pill-zoom-adaptive-width: calc(var(--tm-twitch-preview-player-width, 520px) * 0.48);
+  --tm-pill-max-width: 260px;
   --tm-label-row-width: 42px;
   --tm-slider-row-offset: 54px;
 }
 
 #${OVERLAY_ID}.tm-twitch-preview-player.tm-volume-appearance-classic {
-  --tm-pill-expanded-width: clamp(220px, calc(var(--tm-twitch-preview-player-width, 520px) * 0.58), 304px);
+  --tm-pill-min-width: 220px;
+  --tm-pill-zoom-adaptive-width: calc(var(--tm-twitch-preview-player-width, 520px) * 0.58);
+  --tm-pill-max-width: 304px;
   --tm-label-row-width: 84px;
   --tm-slider-row-offset: 96px;
+}
+
+@media (max-width: 320px) {
+  #${OVERLAY_ID},
+  #${OVERLAY_ID}.tm-volume-compact-layout {
+    --tm-pill-min-width: 176px;
+    --tm-pill-zoom-adaptive-width: min(216px, calc(64vw - 14px));
+  }
+
+  #${OVERLAY_ID}.tm-volume-appearance-classic,
+  #${OVERLAY_ID}.tm-volume-compact-layout.tm-volume-appearance-classic {
+    --tm-pill-min-width: 196px;
+    --tm-pill-zoom-adaptive-width: min(262px, calc(64vw + 6px));
+  }
+
+  #${OVERLAY_ID} .tm-volume-slider-row {
+    --tm-active-track-h: 9px;
+    --tm-visual-track-h: 4px;
+    --tm-thumb-size: 18px;
+  }
 }
 
 #${OVERLAY_ID} input[type=range] {
@@ -759,14 +825,16 @@ export function startTwitchVolumeSlider() {
      * Get Twitch's internal player API (mediaPlayerInstance) via React fiber.
      * Returns object with getVolume(), setVolume(), isMuted(), setMuted() or null.
      */
-    function getTwitchPlayerApi() {
+    function getTwitchPlayerApi(video) {
         try {
-            const player = getPlayerContainer();
+            const playerSel = 'div[data-a-target="player-overlay-click-handler"], [data-a-target="video-player"], .video-player';
+            const player = getPlayerContainer(video);
             const candidates = [
+                video?.closest?.(playerSel),
                 player,
-                player?.closest?.('div[data-a-target="player-overlay-click-handler"], [data-a-target="video-player"], .video-player'),
-                player?.querySelector?.('div[data-a-target="player-overlay-click-handler"], [data-a-target="video-player"], .video-player'),
-                document.querySelector('div[data-a-target="player-overlay-click-handler"], [data-a-target="video-player"], .video-player')
+                player?.closest?.(playerSel),
+                player?.querySelector?.(playerSel),
+                document.querySelector(playerSel)
             ].filter(Boolean);
             const uniqueCandidates = candidates.filter((candidate, index) => candidates.indexOf(candidate) === index);
             if (cachedApi && uniqueCandidates.includes(cachedApiFromElement)) {
@@ -809,7 +877,7 @@ export function startTwitchVolumeSlider() {
      */
     function getVolume(video) {
         try {
-            const api = getTwitchPlayerApi();
+            const api = getTwitchPlayerApi(video);
             if (api) {
                 if (api.isMuted && api.isMuted()) return 0;
                 const vol = api.getVolume();
@@ -831,7 +899,7 @@ export function startTwitchVolumeSlider() {
     function setVolume(video, value, options = {}) {
         const preserveMute = options.preserveMute === true;
         try {
-            const api = getTwitchPlayerApi();
+            const api = getTwitchPlayerApi(video);
             if (api) {
                 if (!preserveMute && api.isMuted && api.isMuted()) api.setMuted(false);
                 api.setVolume(Math.min(1, Math.max(0, value / 100)));
@@ -849,7 +917,7 @@ export function startTwitchVolumeSlider() {
      */
     function isMuted(video) {
         try {
-            const api = getTwitchPlayerApi();
+            const api = getTwitchPlayerApi(video);
             if (api && api.isMuted) return api.isMuted();
         } catch (e) { /* fall through */ }
         return !!video.muted;
@@ -864,7 +932,7 @@ export function startTwitchVolumeSlider() {
             stopStartupMuteGuard();
         }
         try {
-            const api = getTwitchPlayerApi();
+            const api = getTwitchPlayerApi(video);
             if (api && api.setMuted) {
                 api.setMuted(nextMuted);
                 setNativeVideoMuted(video, nextMuted);
@@ -929,7 +997,7 @@ export function startTwitchVolumeSlider() {
                 return;
             }
             try {
-                const api = getTwitchPlayerApi();
+                const api = getTwitchPlayerApi(video);
                 if (api?.setMuted && (!api.isMuted || !api.isMuted())) {
                     api.setMuted(true);
                 }
@@ -1874,6 +1942,7 @@ export function startTwitchVolumeSlider() {
         const overlay = document.createElement('div');
         overlay.id = OVERLAY_ID;
         overlay.className = 'tm-collapsed';
+        overlay._tmVolumeVideo = video;
 
         Object.assign(overlay.style, {
             position: 'relative',
@@ -2235,6 +2304,8 @@ export function startTwitchVolumeSlider() {
 
     function disposeActiveOverlay() {
         overlayLifecycle.dispose();
+        cachedApi = null;
+        cachedApiFromElement = null;
     }
 
     function removeOverlay() {
@@ -2245,6 +2316,7 @@ export function startTwitchVolumeSlider() {
     }
 
     function attachSliderIfPossible() {
+        resetVideoElement();
         const video = getVideoElement();
         const player = getPlayerContainer(video);
         const controlsHost = getTwitchControlsHost(player);
@@ -2256,7 +2328,11 @@ export function startTwitchVolumeSlider() {
             return !!document.getElementById(OPTIONS_BUTTON_ID);
         }
 
-        const overlay = document.getElementById(OVERLAY_ID);
+        let overlay = document.getElementById(OVERLAY_ID);
+        if (overlay && overlay._tmVolumeVideo !== video) {
+            disposeActiveOverlay();
+            overlay = null;
+        }
         if (!overlay && video) {
             restoreSavedVolumeBeforeControls(video);
         }
@@ -2290,7 +2366,13 @@ export function startTwitchVolumeSlider() {
     }
 
     function getAttachObserverRoot() {
-        return getPlayerContainer() || getTwitchPlayerControlsRoot();
+        return document.body;
+    }
+
+    function mutationAddsVideo(mutations) {
+        return mutations.some((mutation) => [...mutation.addedNodes].some((node) =>
+            node.nodeName === 'VIDEO' || !!node.querySelector?.('video')
+        ));
     }
 
     let lastAttach = 0;
@@ -2305,12 +2387,13 @@ export function startTwitchVolumeSlider() {
         const overlay = document.getElementById(OVERLAY_ID);
         const button = document.getElementById(OPTIONS_BUTTON_ID);
         const overlayMissing = isOverlayEnabled() && (!overlay || !overlay.isConnected);
+        const videoMayHaveChanged = isOverlayEnabled() && !!overlay && mutationAddsVideo(mutations);
         const buttonMissing = !button || !button.isConnected;
         const buttonMisplaced = !buttonMissing && !isOptionsButtonInPreferredSlot();
         if (buttonMissing || buttonMisplaced) {
             injectVolumeOptionsButton();
         }
-        if (!overlayMissing) return;
+        if (!overlayMissing && !videoMayHaveChanged) return;
 
         attachQueued = true;
         requestAnimationFrame(() => {
@@ -2320,7 +2403,7 @@ export function startTwitchVolumeSlider() {
                 return;
             }
             const currentOverlay = document.getElementById(OVERLAY_ID);
-            if (currentOverlay && currentOverlay.isConnected) {
+            if (!videoMayHaveChanged && currentOverlay && currentOverlay.isConnected) {
                 injectVolumeOptionsButton();
                 return;
             }
