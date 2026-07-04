@@ -46,21 +46,22 @@ Both scripts replace or complement the sites' native controls with a small indic
 
 ## Install
 
-- [YouTube Volume Slider 2.6.9](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.6.9/YouTube.Volume.Slider.2.6.9.user.js)
-- [Twitch Volume Slider 2.6.9](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.6.9/Twitch.Volume.Slider.2.6.9.user.js)
+### Requirements
 
-Install a current userscript manager such as Tampermonkey or Violentmonkey in a modern browser. Both scripts update from the committed `dist/` files on `main`.
+- A modern browser
+- A current userscript manager, such as [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/)
 
-### Tampermonkey in Chrome
+### GitHub Releases
 
-1. Install [Tampermonkey from the Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo).  
-Tampermonkey is also available for other browsers from [tampermonkey.net](https://www.tampermonkey.net/).
-2. Open `chrome://extensions`, select **Details** on Tampermonkey, and turn on **Allow user scripts** if the setting is shown. Chrome often requires this before Tampermonkey can run installed userscripts.
-3. Open one of the download links above, or choose a `.user.js` asset from the [Releases page](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases).
-4. Tampermonkey should open an install screen. Review the script name, then select **Install**.
-5. Reload YouTube or Twitch and confirm the script is enabled in the Tampermonkey extension menu.
+Download: [GitHub Releases](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases)
 
-Violentmonkey and other userscript managers use a similar flow: install the extension, open the `.user.js` download, approve the install prompt, then reload the video page.
+Choose the latest YouTube or Twitch `.user.js` asset, approve the install prompt in your userscript manager, then reload the video page.
+
+### Tampermonkey Setup
+
+1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser.
+2. In Chrome, open `chrome://extensions`, select **Details** on Tampermonkey, and enable **Allow user scripts** if it appears.
+3. Open the `.user.js` asset from the latest release and select **Install** when Tampermonkey prompts you.
 
 ## Features
 
