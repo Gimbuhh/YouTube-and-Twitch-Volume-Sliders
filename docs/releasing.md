@@ -11,6 +11,10 @@
 8. Commit the source, release notes, changelog, README, archive, and generated `dist` files; tag the commit (for example, `v2.4.4`).
 9. Push the tag and let the GitHub Release workflow publish dot-named userscript assets, such as `YouTube.Volume.Slider.<version>.user.js`, with digests verified against `archive/releases/<version>/SHA256.json`.
 
+To backfill an existing historical tag, run the Release workflow manually from the current default branch and provide the immutable `v<version>` tag. The workflow validates the current tree's canonical notes, archived scripts, manifest, hashes, and target tag without checking out or executing code from the historical tag. Existing Releases are updated idempotently and assets are replaced only after digest verification.
+
+README install links should remain pinned to the latest supported release assets; historical backfills do not change them.
+
 The release command updates `package.json` and both entry versions together, runs the full check, rejects an existing destination, and writes matching platform artifacts and patch notes to `archive/releases/<version>/`. It snapshots every file it owns and restores the pre-command bytes if packaging fails. Pre-existing worktree changes are preserved, while unexpected new paths abort the transaction. Archives and Git tags are immutable. When Git is unavailable, SHA-256 manifests provide the integrity fallback. Automatic update metadata points at the committed `dist/` files on `main`, and the release workflow verifies uploaded asset digests after publishing.
 
 ## Historical releases

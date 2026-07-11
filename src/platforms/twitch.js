@@ -94,6 +94,7 @@ export function startTwitchVolumeSlider() {
     let optionsControlsHoldTargetKey = null;
     let nativeSettingsObserver = null;
     let nativeSettingsObserverTarget = null;
+    let delayedFirstAttachRestoreTimer = 0;
     const overlayLifecycle = createOverlayLifecycle();
     const { getVideoElement, resetVideoElement, ensurePlayerPositioning } = createVideoLocator(document, window);
     const USER_INTENT_GRACE_MS = 5000;
@@ -898,14 +899,21 @@ export function startTwitchVolumeSlider() {
 
     function setVolume(video, value, options = {}) {
         const preserveMute = options.preserveMute === true;
-        try {
-            const api = getTwitchPlayerApi(video);
-            if (api) {
-                if (!preserveMute && api.isMuted && api.isMuted()) api.setMuted(false);
+        const api = getTwitchPlayerApi(video);
+        if (api) {
+            if (!preserveMute) {
+                try {
+                    if (api.isMuted?.()) {
+                        if (typeof api.setMuted === 'function') api.setMuted(false);
+                        else setNativeVideoMuted(video, false);
+                    }
+                } catch (e) { setNativeVideoMuted(video, false); }
+            }
+            try {
                 api.setVolume(Math.min(1, Math.max(0, value / 100)));
                 return;
-            }
-        } catch (e) { /* fall through */ }
+            } catch (e) { /* fall through */ }
+        }
         video.volume = value / 100;
         if (!preserveMute) {
             setNativeVideoMuted(video, false);
@@ -2111,6 +2119,7 @@ export function startTwitchVolumeSlider() {
         let pointerStartValue = 0;
         let pointerMoved = false;
         let clickSnapHandled = false;
+        let pointerActive = false;
 
         const applySliderValue = (value) => {
             setVolume(video, value);
@@ -2151,7 +2160,7 @@ export function startTwitchVolumeSlider() {
             }
 
             let value = Number(slider.value) || 0;
-            if (!pointerMoved && !clickSnapHandled && value !== pointerStartValue) {
+            if (pointerActive && !pointerMoved && !clickSnapHandled && value !== pointerStartValue) {
                 value = snapTo5(value);
                 slider.value = String(value);
                 clickSnapHandled = true;
@@ -2165,6 +2174,7 @@ export function startTwitchVolumeSlider() {
                 snapDirectClickIfNeeded();
             }
             overlay.dataset.tmDragging = 'false';
+            pointerActive = false;
             if (wasDragging && event?.type !== 'blur') {
                 releaseTwitchVolumeFocusSoon(overlay);
             }
@@ -2177,6 +2187,7 @@ export function startTwitchVolumeSlider() {
             pointerStartValue = Number(slider.value) || 0;
             pointerMoved = false;
             clickSnapHandled = false;
+            pointerActive = true;
             overlay.dataset.tmDragging = 'true';
             setOverlayExpanded(overlay, true);
             updateOverlayOpacity(overlay);
@@ -2223,6 +2234,7 @@ export function startTwitchVolumeSlider() {
             }
             try {
                 setSliderFromPlayer(slider, label, video);
+                saveMute(isMuted(video));
                 if (!isMuted(video)) {
                     scheduleSaveVolume(getVolume(video));
                 }
@@ -2276,13 +2288,6 @@ export function startTwitchVolumeSlider() {
         setOverlayExpanded(overlay, false, true);
         updateSliderThickness(overlay);
 
-        const detachmentObserver = new MutationObserver(() => {
-            if (overlayLifecycle.owns(overlay) && !overlay.isConnected) {
-                disposeActiveOverlay();
-                window.setTimeout(() => attachSliderIfPossible(), 0);
-            }
-        });
-        detachmentObserver.observe(document.body, { childList: true, subtree: true });
         const cleanup = () => {
             video.removeEventListener('volumechange', onVideoVolumeChange);
             window.removeEventListener('pointerup', finishSliderInteraction, true);
@@ -2292,7 +2297,6 @@ export function startTwitchVolumeSlider() {
             window.removeEventListener('pointermove', markPointerIntent, true);
             document.removeEventListener('click', collapseHeldSliderOnVideoClick, true);
             controlsObserver.disconnect();
-            detachmentObserver.disconnect();
             tickOverlay._tmSliderTicksCleanup?.();
             clearPostCloseControlsHold();
             clearExpandedHold(overlay);
@@ -2303,6 +2307,7 @@ export function startTwitchVolumeSlider() {
     }
 
     function disposeActiveOverlay() {
+        cancelDelayedFirstAttachRestore();
         overlayLifecycle.dispose();
         cachedApi = null;
         cachedApiFromElement = null;
@@ -2313,6 +2318,12 @@ export function startTwitchVolumeSlider() {
         disposeActiveOverlay();
         document.getElementById(OVERLAY_ID)?.remove();
         applyNativeVolumeVisibility();
+    }
+
+    function cancelDelayedFirstAttachRestore() {
+        if (!delayedFirstAttachRestoreTimer) return;
+        window.clearTimeout(delayedFirstAttachRestoreTimer);
+        delayedFirstAttachRestoreTimer = 0;
     }
 
     function attachSliderIfPossible() {
@@ -2346,11 +2357,15 @@ export function startTwitchVolumeSlider() {
             // already set by scheduleReattach on channel navigation without shortening it
             startupLockUntil = Math.max(startupLockUntil, Date.now() + 2000);
             restoreSavedVolume(video);
-            createOverlay(video, player, controlsHost);
-            setTimeout(() => {
+            const createdOverlay = createOverlay(video, player, controlsHost);
+            createdOverlay._tmVolumeVideo = video;
+            cancelDelayedFirstAttachRestore();
+            delayedFirstAttachRestoreTimer = window.setTimeout(() => {
+                delayedFirstAttachRestoreTimer = 0;
+                if (!overlayLifecycle.owns(createdOverlay) || !createdOverlay.isConnected ||
+                    createdOverlay._tmVolumeVideo !== video || !video.isConnected) return;
                 restoreSavedVolume(video);
-                const el = document.getElementById(OVERLAY_ID);
-                if (el) updateOverlayOpacity(el);
+                updateOverlayOpacity(createdOverlay);
             }, 1500);
         } else if (!isOverlayInteractionFocused(overlay)) {
             placeOverlay(overlay, player, controlsHost);
@@ -2381,7 +2396,8 @@ export function startTwitchVolumeSlider() {
 
     function handleAttachObserverMutations(mutations) {
         const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
-        if (!hasAddedNodes || attachQueued) return;
+        const hasRemovedNodes = mutations.some((m) => m.removedNodes && m.removedNodes.length > 0);
+        if ((!hasAddedNodes && !hasRemovedNodes) || attachQueued) return;
 
         applyNativeVolumeVisibility();
         const overlay = document.getElementById(OVERLAY_ID);

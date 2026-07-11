@@ -39,6 +39,8 @@ export function startYouTubeVolumeSlider() {
     const NAV_DEBOUNCE_MS = 180;
     const INITIAL_ATTACH_RETRY_MS = 50;
     const INITIAL_ATTACH_MAX_ATTEMPTS = 80;
+    const USER_VOLUME_INTENT_GRACE_MS = 5000;
+    const USER_VOLUME_TOLERANCE = 1;
     const ON_VIDEO_IDLE_BOTTOM_PX = 12;
     const ON_VIDEO_MAX_CONTROLS_OFFSET_PX = 140;
     const VOLUME_ACCENT_LIGHT = '#cc4444';
@@ -78,6 +80,7 @@ export function startYouTubeVolumeSlider() {
     let attachBootstrapObserver = null;
     let playerControlsObserver = null;
     let playerControlsObserverTarget = null;
+    let requestedVolumeIntent = null;
     const overlayLifecycle = createOverlayLifecycle();
     const { getVideoElement, resetVideoElement, ensurePlayerPositioning } = createVideoLocator(document, window);
 
@@ -134,7 +137,7 @@ export function startYouTubeVolumeSlider() {
 
 
     function shouldHideNativeVolume() {
-        return isOverlayEnabled() && isNativeVolumeReplacementEnabled();
+        return isYouTubeSupportedPage() && isOverlayEnabled() && isNativeVolumeReplacementEnabled();
     }
 
     function ensureNativeVolumeVisibilityGuard() {
@@ -155,12 +158,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function applyNativeVolumeVisibility() {
         ensureNativeVolumeVisibilityGuard();
         const shouldHideNative = shouldHideNativeVolume();
-        document.querySelectorAll('.ytp-volume-area').forEach((area) => {
-            const nextDisplay = shouldHideNative ? 'none' : '';
-            if (area.style.display !== nextDisplay) {
-                area.style.display = nextDisplay;
-            }
-        });
 
         if (shouldHideNative) {
             const overlay = document.getElementById(OVERLAY_ID);
@@ -1746,8 +1743,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         let pointerStartValue = 0;
         let pointerMoved = false;
         let clickSnapHandled = false;
+        let pointerActive = false;
 
         const applySliderValue = (value) => {
+            requestedVolumeIntent = { value, until: Date.now() + USER_VOLUME_INTENT_GRACE_MS, overlay };
             setVolume(video, value);
             saveMute(false);
             label.textContent = `${value}%`;
@@ -1785,7 +1784,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             }
 
             let value = Number(slider.value) || 0;
-            if (!pointerMoved && !clickSnapHandled && value !== pointerStartValue) {
+            if (pointerActive && !pointerMoved && !clickSnapHandled && value !== pointerStartValue) {
                 value = snapTo5(value);
                 slider.value = String(value);
                 clickSnapHandled = true;
@@ -1799,6 +1798,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
                 snapDirectClickIfNeeded();
             }
             overlay.dataset.tmDragging = 'false';
+            pointerActive = false;
             updateOverlayOpacity(overlay);
             collapseOverlayIfIdle(overlay, !overlay.matches(':hover'));
         };
@@ -1808,6 +1808,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             pointerStartValue = Number(slider.value) || 0;
             pointerMoved = false;
             clickSnapHandled = false;
+            pointerActive = true;
             overlay.dataset.tmDragging = 'true';
             setOverlayExpanded(overlay, true);
             updateOverlayOpacity(overlay);
@@ -1836,10 +1837,21 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
         const onVideoVolumeChange = () => {
             if (!document.getElementById(OVERLAY_ID)) return;
-            setSliderFromPlayer(slider, label, video);
             const muted = isMuted(video);
             saveMute(muted);
-            if (!muted) scheduleSaveVolume(getVolume(video));
+            const playerVolume = getVolume(video);
+            const intent = requestedVolumeIntent;
+            if (intent?.overlay === overlay) {
+                if (Math.abs(playerVolume - intent.value) <= USER_VOLUME_TOLERANCE) {
+                    requestedVolumeIntent = null;
+                } else if (Date.now() <= intent.until && !muted) {
+                    return;
+                } else {
+                    requestedVolumeIntent = null;
+                }
+            }
+            setSliderFromPlayer(slider, label, video);
+            if (!muted) scheduleSaveVolume(playerVolume);
         };
         video.addEventListener('volumechange', onVideoVolumeChange);
 
@@ -1856,7 +1868,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }
 
         placeOverlay(overlay, player, controlsHost);
-        setSliderFromPlayer(slider, label, video);
+        if (initVol === null) setSliderFromPlayer(slider, label, video);
+        else syncInitialSliderState(initVol, isMuted(video));
         setOverlayExpanded(overlay, false, true);
         updateSliderThickness(overlay);
         updateVideoOverlayPosition(overlay, player);
@@ -1867,14 +1880,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         window.addEventListener('resize', onLayoutChange);
         const controlsObserver = new MutationObserver(onLayoutChange);
         controlsObserver.observe(player, { attributes: true, attributeFilter: ['class'] });
-        const detachmentObserver = new MutationObserver(() => {
-            if (overlayLifecycle.owns(overlay) && !overlay.isConnected) {
-                disposeActiveOverlay();
-                window.setTimeout(() => attachSliderIfPossible(), 0);
-            }
-        });
-        detachmentObserver.observe(document.body, { childList: true, subtree: true });
         const cleanup = () => {
+            if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
             video.removeEventListener('volumechange', onVideoVolumeChange);
             window.removeEventListener('pointerup', finishSliderInteraction, true);
             window.removeEventListener('pointercancel', finishSliderInteraction, true);
@@ -1883,7 +1890,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             window.removeEventListener('pointermove', markPointerIntent, true);
             document.removeEventListener('click', collapseHeldSliderOnVideoClick, true);
             controlsObserver.disconnect();
-            detachmentObserver.disconnect();
             tickOverlay._tmSliderTicksCleanup?.();
             clearExpandedHold(overlay);
         };
@@ -1893,6 +1899,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function disposeActiveOverlay() {
+        requestedVolumeIntent = null;
         overlayLifecycle.dispose();
     }
 
@@ -1904,6 +1911,13 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function attachSliderIfPossible() {
+        if (!isYouTubeSupportedPage()) {
+            removeOverlay();
+            removeVolumeOptionsButton();
+            disconnectPlayerControlsObserver();
+            disconnectAttachObserver();
+            return false;
+        }
         const video = getVideoElement();
         const player = getPlayerContainer(video);
         const controlsHost = getYouTubeControlsHost(player);
@@ -1924,12 +1938,17 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             injectVolumeOptionsButton();
             return false;
         }
-        const existingOverlay = document.getElementById(OVERLAY_ID);
+        let existingOverlay = document.getElementById(OVERLAY_ID);
+        if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
+            disposeActiveOverlay();
+            existingOverlay = null;
+        }
         if (existingOverlay) {
             placeOverlay(existingOverlay, player, controlsHost);
         } else {
             restoreSavedVolume(video);
-            createOverlay(video, player, controlsHost);
+            const overlay = createOverlay(video, player, controlsHost);
+            overlay._tmVolumeVideo = video;
         }
         applyNativeVolumeVisibility();
         injectVolumeOptionsButton();
@@ -1939,20 +1958,32 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function getAttachObserverRoot() {
-        if (document.location.pathname !== '/watch') return null;
+        if (!isYouTubeSupportedPage()) return null;
         return document.getElementById('movie_player') ||
             document.querySelector('.html5-video-player') ||
             document.getElementById('primary');
     }
 
+    function mutationAddsVideo(mutations) {
+        return mutations.some((mutation) => [...mutation.addedNodes].some((node) =>
+            node.nodeName === 'VIDEO' || !!node.querySelector?.('video')
+        ));
+    }
+
     let lastAttach = 0;
     const ATTACH_COOLDOWN_MS = 1000;
     let attachQueued = false;
+    let trailingAttachTimer = 0;
+
+    function isYouTubeSupportedPage() {
+        return document.location.pathname === '/watch';
+    }
 
     function handleAttachObserverMutations(mutations) {
-        if (document.location.pathname !== '/watch') return;
+        if (!isYouTubeSupportedPage()) return;
         const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
-        if (!hasAddedNodes || attachQueued) return;
+        const hasRemovedNodes = mutations.some((m) => m.removedNodes && m.removedNodes.length > 0);
+        if ((!hasAddedNodes && !hasRemovedNodes) || attachQueued) return;
 
         applyNativeVolumeVisibility();
         const overlay = document.getElementById(OVERLAY_ID);
@@ -1963,14 +1994,24 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (buttonMissing || buttonMisplaced) {
             injectVolumeOptionsButton();
         }
-        if (!overlayMissing) return;
+        const videoMayHaveChanged = isOverlayEnabled() && !!overlay && mutationAddsVideo(mutations);
+        if (!overlayMissing && !videoMayHaveChanged) return;
 
         attachQueued = true;
         requestAnimationFrame(() => {
             attachQueued = false;
+            if (videoMayHaveChanged) resetVideoElement();
             const now = Date.now();
-            if (now - lastAttach < ATTACH_COOLDOWN_MS) return;
-            if (document.location.pathname !== '/watch') return;
+            if (now - lastAttach < ATTACH_COOLDOWN_MS) {
+                clearTimeout(trailingAttachTimer);
+                trailingAttachTimer = window.setTimeout(() => {
+                    trailingAttachTimer = 0;
+                    resetVideoElement();
+                    if (isYouTubeSupportedPage() && attachSliderIfPossible()) lastAttach = Date.now();
+                }, ATTACH_COOLDOWN_MS - (now - lastAttach));
+                return;
+            }
+            if (!isYouTubeSupportedPage()) return;
             if (attachSliderIfPossible()) {
                 lastAttach = now;
             }

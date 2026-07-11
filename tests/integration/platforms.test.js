@@ -163,6 +163,52 @@ test('YouTube: native mute volumechange persists mute state',async()=>{
   runtime.close();
 });
 
+test('YouTube: unsupported routes leave preview videos and native controls untouched',async()=>{
+  const config=platforms[0];
+  const runtime=createRuntime('https://www.youtube.com/shorts/test',{runScripts:'outside-only'});
+  const fixture=config.fixture(runtime.document);
+  const nativeArea=fixture.player.querySelector('.ytp-volume-area');
+  nativeArea.style.display='inline-flex';
+  runtime.window.localStorage.setItem(config.modeKey,'replace-native');
+  const source=await readFile(new URL('../../dist/youtube-volume-slider.user.js',import.meta.url),'utf8');
+  runtime.window.eval(source); await waitForTimers(runtime,60);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+  assert.equal(runtime.document.getElementById('tm-volume-options-button'),null);
+  assert.equal(nativeArea.style.display,'inline-flex');
+  assert.equal(fixture.state.volume,50);
+  runtime.close();
+});
+
+for(const config of platforms){
+  test(`${config.name}: keyboard input preserves exact steps when snapping is disabled`,async()=>{
+    const {runtime,fixture}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.volumeKey,'52');
+      current.window.localStorage.setItem(config.file==='youtube'?'tm-yt-volume-slider-snap-to-5':'tm-twitch-volume-slider-snap-to-5','false');
+    });
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    slider.value='53';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(slider.value,'53');
+    assert.equal(fixture.state.volume,config.file==='youtube'?53:.53);
+    runtime.close();
+  });
+}
+
+test('Twitch: volume API remains usable when optional mute methods are missing',async()=>{
+  const config=platforms[1];
+  const runtime=createRuntime(config.url,{runScripts:'outside-only'});
+  const fixture=config.fixture(runtime.document);
+  let calls=0;
+  fixture.player._tmPlayerApi={getVolume:()=>.5,setVolume:value=>{calls++; assert.equal(value,.6);},isMuted:()=>true};
+  fixture.player.__reactFiber$test={return:{memoizedProps:{mediaPlayerInstance:fixture.player._tmPlayerApi},return:null}};
+  const source=await readFile(new URL('../../dist/twitch-volume-slider.user.js',import.meta.url),'utf8');
+  runtime.window.eval(source); await waitForTimers(runtime);
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.value='60'; slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(calls,1);
+  runtime.close();
+});
+
 test('Twitch: options button mounts when native controls appear before video',async()=>{
   const config=platforms[1];
   const runtime=await startBuiltArtifact(config);

@@ -2,6 +2,23 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.7 - 2026-07-11
+
+### Fixed
+
+- Kept YouTube volume changes made while a video is loading from snapping back to a stale player value.
+- Rebound YouTube controls when a new primary video replaces or overtakes the previous video during navigation.
+- Limited YouTube volume restoration and custom controls to supported watch pages, leaving previews and Shorts untouched.
+- Preserved YouTube's existing native-control visibility state when toggling native replacement.
+- Preserved exact one-percent keyboard volume steps when snap-to-five is disabled on both platforms.
+- Cancelled stale delayed Twitch restores when an overlay or video is replaced.
+- Persisted genuine native Twitch mute changes after startup protection ends.
+- Kept Twitch volume control working with partial player APIs whose mute methods are absent or fail.
+
+### Changed
+
+- Reduced redundant whole-document lifecycle observation while retaining player replacement and overlay reattachment.
+
 ## 2.6.9 - 2026-07-02
 
 ### Fixed
