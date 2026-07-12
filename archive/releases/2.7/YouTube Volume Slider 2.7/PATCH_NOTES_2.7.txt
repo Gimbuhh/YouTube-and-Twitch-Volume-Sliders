@@ -7,6 +7,7 @@
 - **Both:** The muted indicator now keeps its gray `M` while showing the saved-volume arc, making it clear what volume will return when sound is unmuted.
 - **YouTube:** Keyboard volume adjustments now preserve the expected one-percent step when snap-to-five is disabled instead of unexpectedly rounding to a five-percent value.
 - **YouTube:** Pressing Arrow Up or Arrow Down immediately after dragging the custom slider now updates the volume icon and bar without a temporary delay.
+- **YouTube:** Clicking the custom mute icon and then using an arrow key no longer leaves a white keyboard-focus ring around the icon; keyboard navigation still receives its normal focus indicator.
 - **YouTube:** A volume selected while a video is loading now remains visible and saved instead of snapping back when the player reports a stale startup value.
 - **YouTube:** The custom controls now follow the current primary video when YouTube replaces the player during navigation, so changes no longer affect an older video.
 - **YouTube:** Volume restoration and custom controls now stay limited to supported watch pages, leaving home-page previews, search results, and Shorts untouched.

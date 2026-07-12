@@ -2824,6 +2824,9 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       indicator.className = "tm-volume-indicator";
       indicator.appendChild(makeVolumeIndicatorSvg());
       iconCell.appendChild(indicator);
+      iconCell.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+      });
       iconCell.addEventListener("click", (e) => {
         e.stopPropagation();
         e.preventDefault();

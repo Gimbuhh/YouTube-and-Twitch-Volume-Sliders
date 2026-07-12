@@ -163,6 +163,22 @@ test('YouTube: native mute volumechange persists mute state',async()=>{
   runtime.close();
 });
 
+test('YouTube: mouse mute interaction does not move focus to the icon',async()=>{
+  const config=platforms[0];
+  const {runtime}=await loadPlatform(config);
+  const icon=runtime.document.querySelector('button.tm-volume-icon-cell');
+  runtime.document.body.tabIndex=-1;
+  runtime.document.body.focus();
+  const mouseDown=new runtime.window.MouseEvent('mousedown',{bubbles:true,cancelable:true});
+  icon.dispatchEvent(mouseDown);
+  assert.equal(mouseDown.defaultPrevented,true);
+  assert.equal(runtime.document.activeElement,runtime.document.body);
+
+  icon.focus();
+  assert.equal(runtime.document.activeElement,icon);
+  runtime.close();
+});
+
 test('YouTube: unsupported routes leave preview videos and native controls untouched',async()=>{
   const config=platforms[0];
   const runtime=createRuntime('https://www.youtube.com/shorts/test',{runScripts:'outside-only'});
