@@ -36,6 +36,7 @@ export function startTwitchVolumeSlider() {
     const WHEEL_VOLUME_STEP = 5;
     const VOLUME_LABEL_ROW_WIDTH_PX = 50;
     const TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS = 5000;
+    const KEYBOARD_CONTROLS_HOLD_MS = 3000;
     const TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR =
         '[data-a-target="player-settings-button"], button[aria-label="Settings"]';
     const TWITCH_NATIVE_SETTINGS_UI_SELECTOR =
@@ -1552,6 +1553,7 @@ export function startTwitchVolumeSlider() {
     let optionsPopupOpener = null;
     let optionsPostCloseOutsideHandler = null;
     let optionsPostCloseControlsTimer = 0;
+    let keyboardControlsTimer = 0;
 
     function getOptionsPopup() {
         return document.getElementById(OPTIONS_POPUP_ID);
@@ -1734,6 +1736,7 @@ export function startTwitchVolumeSlider() {
     }
 
     function releaseTwitchControlsVisibility() {
+        if (keyboardControlsTimer || isOptionsPopupOpen() || optionsPostCloseControlsTimer) return;
         const controlsRoot = getTwitchPlayerControlsRoot();
         const controlsShell = getTwitchPlayerControlsShell();
         const controls = getTwitchPlayerControlsSection();
@@ -1744,6 +1747,16 @@ export function startTwitchVolumeSlider() {
             el?.style?.removeProperty('visibility');
             el?.style?.removeProperty('pointer-events');
         });
+    }
+
+    function startKeyboardControlsHold() {
+        if (keyboardControlsTimer) window.clearTimeout(keyboardControlsTimer);
+        keepTwitchControlsVisible();
+        ensureOptionsControlsHoldObserver();
+        keyboardControlsTimer = window.setTimeout(() => {
+            keyboardControlsTimer = 0;
+            releaseTwitchControlsVisibility();
+        }, KEYBOARD_CONTROLS_HOLD_MS);
     }
 
     function startOptionsControlsHold() {
@@ -1951,7 +1964,7 @@ export function startTwitchVolumeSlider() {
         disconnectOptionsControlsHoldObserver();
         optionsControlsHoldTargetKey = targetKey;
         optionsControlsHoldObserver = new MutationObserver(() => {
-            if (areTwitchControlsHidden() && (isOptionsPopupOpen() || optionsPostCloseControlsTimer)) {
+            if (areTwitchControlsHidden() && (isOptionsPopupOpen() || optionsPostCloseControlsTimer || keyboardControlsTimer)) {
                 keepTwitchControlsVisible();
             }
         });
@@ -2164,9 +2177,12 @@ export function startTwitchVolumeSlider() {
         };
 
         const applyKeyboardVolumeStep = (event) => {
-            const direction = event.key === 'ArrowUp' || event.key === 'ArrowRight'
-                ? 1
-                : event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? -1 : 0;
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+            }
+            const direction = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
             if (!direction) return;
             event.preventDefault();
             event.stopPropagation();
@@ -2176,6 +2192,7 @@ export function startTwitchVolumeSlider() {
             markUserVolumeIntent();
             slider.value = String(nextValue);
             applySliderValue(nextValue, { preserveMute: true, markInteraction: false });
+            startKeyboardControlsHold();
         };
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
@@ -2355,6 +2372,10 @@ export function startTwitchVolumeSlider() {
             window.removeEventListener('pointermove', markPointerIntent, true);
             document.removeEventListener('click', collapseHeldSliderOnVideoClick, true);
             document.removeEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
+            if (keyboardControlsTimer) {
+                window.clearTimeout(keyboardControlsTimer);
+                keyboardControlsTimer = 0;
+            }
             controlsObserver.disconnect();
             tickOverlay._tmSliderTicksCleanup?.();
             clearPostCloseControlsHold();

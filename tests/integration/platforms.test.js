@@ -201,7 +201,7 @@ test('Twitch: arrow keys adjust by five percent while preserving mute and saved 
   });
   const slider=runtime.document.getElementById('tm-volume-slider-range');
   const label=runtime.document.getElementById('tm-volume-slider-value');
-  for(const [key,expected] of [['ArrowUp',55],['ArrowRight',60],['ArrowDown',55],['ArrowLeft',50]]){
+  for(const [key,expected] of [['ArrowUp',55],['ArrowDown',50]]){
     const event=new runtime.window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true});
     slider.dispatchEvent(event);
     assert.equal(event.defaultPrevented,true);
@@ -210,6 +210,13 @@ test('Twitch: arrow keys adjust by five percent while preserving mute and saved 
     assert.equal(fixture.state.muted,true);
     assert.equal(label.textContent,'Muted');
     assert.equal(runtime.window.localStorage.getItem(config.muteKey),'true');
+  }
+  for(const key of ['ArrowLeft','ArrowRight']){
+    const event=new runtime.window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true});
+    slider.dispatchEvent(event);
+    assert.equal(event.defaultPrevented,true);
+    assert.equal(slider.value,'50');
+    assert.equal(fixture.state.volume,.5);
   }
   slider.value='100';
   slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
@@ -226,20 +233,36 @@ test('Twitch: player-level up and down arrows adjust volume without stealing tex
   });
   const slider=runtime.document.getElementById('tm-volume-slider-range');
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const controls=runtime.document.querySelector('[data-a-target="player-controls"]');
+  let keyboardHoldCallback=null;
+  const originalSetTimeout=runtime.window.setTimeout;
+  runtime.window.setTimeout=(callback,delay,...args)=>{
+    if(delay===3000){
+      keyboardHoldCallback=callback;
+      return 3000;
+    }
+    return originalSetTimeout(callback,delay,...args);
+  };
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
   runtime.document.body.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
   assert.equal(slider.value,'55');
   assert.equal(fixture.state.volume,.55);
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  assert.equal(controls.style.opacity,'1');
+  assert.ok(keyboardHoldCallback);
   runtime.document.body.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
   assert.equal(slider.value,'50');
   assert.equal(fixture.state.volume,.5);
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  assert.equal(controls.style.opacity,'1');
 
   const input=runtime.document.createElement('input');
   runtime.document.body.appendChild(input);
   input.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
   assert.equal(slider.value,'50');
+  keyboardHoldCallback();
+  assert.equal(controls.style.opacity,'');
+  runtime.window.setTimeout=originalSetTimeout;
   runtime.close();
 });
 

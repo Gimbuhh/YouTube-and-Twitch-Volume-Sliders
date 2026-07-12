@@ -6,7 +6,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Added
 
-- **Twitch:** Added 5% arrow-key volume adjustments that preserve mute and save the underlying volume for unmuting.
+- **Twitch:** Added 5% Up/Down arrow-key volume adjustments that preserve mute, save the underlying volume for unmuting, and keep player controls visible for three seconds after input.
 
 ### Fixed
 
