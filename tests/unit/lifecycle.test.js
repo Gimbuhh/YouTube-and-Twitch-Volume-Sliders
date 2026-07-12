@@ -1,12 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { createOverlayLifecycle, createVideoLocator } from '../../src/shared/lifecycle.js';
+import { createOverlayLifecycle, createRafCoalescer, createVideoLocator } from '../../src/shared/lifecycle.js';
 
 test('overlay lifecycle owns and idempotently disposes detached roots',()=>{
   let cleaned=0,removed=0; const root={remove:()=>removed++}; const lifecycle=createOverlayLifecycle();
   lifecycle.set(root,()=>cleaned++); assert.equal(lifecycle.owns(root),true); lifecycle.dispose(); lifecycle.dispose();
   assert.equal(cleaned,1); assert.equal(removed,1); assert.equal(lifecycle.active,null);
+});
+
+test('RAF coalescer schedules once and invalidates queued generations',()=>{
+  const callbacks=[];
+  const window={requestAnimationFrame:fn=>(callbacks.push(fn),callbacks.length),cancelAnimationFrame:()=>{}};
+  let runs=0; const coalescer=createRafCoalescer(window,()=>runs++);
+  coalescer.schedule(); coalescer.schedule(); assert.equal(callbacks.length,1);
+  coalescer.invalidate(); callbacks.shift()(); assert.equal(runs,0);
+  coalescer.schedule(); callbacks.shift()(); assert.equal(runs,1);
 });
 
 test('video locator chooses the largest connected video and resets cache',()=>{

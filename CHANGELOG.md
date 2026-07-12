@@ -2,6 +2,31 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.7 - 2026-07-11
+
+### Added
+
+- **Twitch:** Added player-focused 5% Up/Down volume adjustments that preserve mute, save the underlying volume for unmuting, and keep player controls visible for three seconds after input.
+
+### Fixed
+
+- **Both:** Kept the saved-volume arc visible while muted while retaining the gray `M` indicator.
+- **YouTube:** Preserved exact one-percent keyboard volume steps when snap-to-five is disabled.
+- **YouTube:** Kept volume visuals responsive to Up/Down input immediately after dragging the custom slider.
+- **YouTube:** Prevented mouse clicks on the mute icon from leaving a keyboard-focus outline on the next arrow-key input.
+- **YouTube:** Prevented stale startup volume events from overriding volume selected while a video is loading.
+- **YouTube:** Rebound custom controls to the current primary video after player replacement.
+- **YouTube:** Restricted volume restoration and custom controls to supported watch pages.
+- **YouTube:** Preserved existing native-control visibility values when toggling native replacement.
+- **Twitch:** Cancelled delayed volume restoration when its owning player or overlay is replaced.
+- **Twitch:** Persisted native mute and unmute changes after startup protection ends.
+- **Twitch:** Supported volume control through partial player APIs and failing optional mute methods.
+- **Twitch:** Prevented the custom slider from shifting the player controls vertically.
+
+### Changed
+
+- **Both:** Reduced redundant page-observer work while retaining player replacement and overlay reattachment.
+
 ## 2.6.9 - 2026-07-02
 
 ### Fixed

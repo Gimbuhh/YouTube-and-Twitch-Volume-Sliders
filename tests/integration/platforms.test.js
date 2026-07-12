@@ -6,7 +6,7 @@ import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
   { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', muteKey:'tm-yt-muted', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', appearanceKey:'tm-yt-volume-slider-appearance' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', appearanceKey:'tm-twitch-volume-slider-appearance' }
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', muteKey:'tm-twitch-muted', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
 
 const waitForTimers = (runtime, delay = 0) => new Promise(resolve=>runtime.window.setTimeout(resolve,delay));
@@ -160,6 +160,188 @@ test('YouTube: native mute volumechange persists mute state',async()=>{
   fixture.player.unMute();
   fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
   assert.equal(runtime.window.localStorage.getItem(config.muteKey),'false');
+  runtime.close();
+});
+
+test('YouTube: mouse mute interaction does not move focus to the icon',async()=>{
+  const config=platforms[0];
+  const {runtime}=await loadPlatform(config);
+  const icon=runtime.document.querySelector('button.tm-volume-icon-cell');
+  runtime.document.body.tabIndex=-1;
+  runtime.document.body.focus();
+  const mouseDown=new runtime.window.MouseEvent('mousedown',{bubbles:true,cancelable:true});
+  icon.dispatchEvent(mouseDown);
+  assert.equal(mouseDown.defaultPrevented,true);
+  assert.equal(runtime.document.activeElement,runtime.document.body);
+
+  icon.focus();
+  assert.equal(runtime.document.activeElement,icon);
+  runtime.close();
+});
+
+test('YouTube: unsupported routes leave preview videos and native controls untouched',async()=>{
+  const config=platforms[0];
+  const runtime=createRuntime('https://www.youtube.com/shorts/test',{runScripts:'outside-only'});
+  const fixture=config.fixture(runtime.document);
+  const nativeArea=fixture.player.querySelector('.ytp-volume-area');
+  nativeArea.style.display='inline-flex';
+  runtime.window.localStorage.setItem(config.modeKey,'replace-native');
+  const source=await readFile(new URL('../../dist/youtube-volume-slider.user.js',import.meta.url),'utf8');
+  runtime.window.eval(source); await waitForTimers(runtime,60);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+  assert.equal(runtime.document.getElementById('tm-volume-options-button'),null);
+  assert.equal(nativeArea.style.display,'inline-flex');
+  assert.equal(fixture.state.volume,50);
+  runtime.close();
+});
+
+test('YouTube: keyboard input preserves exact steps when snapping is disabled',async()=>{
+  const config=platforms[0];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'52');
+    current.window.localStorage.setItem('tm-yt-volume-slider-snap-to-5','false');
+  });
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.value='53';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(slider.value,'53');
+  assert.equal(fixture.state.volume,53);
+  runtime.close();
+});
+
+test('YouTube: arrow volume updates remain responsive immediately after slider input',async()=>{
+  const config=platforms[0];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'50');
+  });
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.value='60';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(fixture.state.volume,60);
+
+  slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  fixture.player.setVolume(65);
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+
+  assert.equal(slider.value,'65');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'65%');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').getAttribute('aria-label'),'Volume 65%');
+  runtime.close();
+});
+
+test('Twitch: arrow keys adjust by five percent while preserving mute and saved volume',async()=>{
+  const config=platforms[1];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'50');
+    current.window.localStorage.setItem(config.muteKey,'true');
+  });
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  const label=runtime.document.getElementById('tm-volume-slider-value');
+  for(const [key,expected] of [['ArrowUp',55],['ArrowDown',50]]){
+    const event=new runtime.window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true});
+    slider.dispatchEvent(event);
+    assert.equal(event.defaultPrevented,true);
+    assert.equal(Number(slider.value),expected);
+    assert.equal(fixture.state.volume,expected/100);
+    assert.equal(fixture.state.muted,true);
+    assert.equal(label.textContent,'Muted');
+    assert.equal(runtime.window.localStorage.getItem(config.muteKey),'true');
+  }
+  for(const key of ['ArrowLeft','ArrowRight']){
+    const event=new runtime.window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true});
+    slider.dispatchEvent(event);
+    assert.equal(event.defaultPrevented,true);
+    assert.equal(slider.value,'50');
+    assert.equal(fixture.state.volume,.5);
+  }
+  slider.value='100';
+  slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  assert.equal(slider.value,'100');
+  await waitForTimers(runtime,180);
+  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'50');
+  runtime.close();
+});
+
+test('Twitch: player-level arrows require the player to be the last pressed area',async()=>{
+  const config=platforms[1];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'50');
+  });
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const controls=runtime.document.querySelector('[data-a-target="player-controls"]');
+  let keyboardHoldCallback=null;
+  const originalSetTimeout=runtime.window.setTimeout;
+  runtime.window.setTimeout=(callback,delay,...args)=>{
+    if(delay===3000){
+      keyboardHoldCallback=callback;
+      return 3000;
+    }
+    return originalSetTimeout(callback,delay,...args);
+  };
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  const unfocusedArrow=new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true});
+  runtime.document.body.dispatchEvent(unfocusedArrow);
+  assert.equal(unfocusedArrow.defaultPrevented,false);
+  assert.equal(slider.value,'50');
+
+  fixture.player.dispatchEvent(new runtime.window.MouseEvent('pointerdown',{bubbles:true}));
+  runtime.document.body.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  assert.equal(slider.value,'55');
+  assert.equal(fixture.state.volume,.55);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  assert.equal(controls.style.opacity,'1');
+  assert.ok(keyboardHoldCallback);
+  runtime.document.body.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
+  assert.equal(slider.value,'50');
+  assert.equal(fixture.state.volume,.5);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  assert.equal(controls.style.opacity,'1');
+
+  const outside=runtime.document.createElement('div');
+  runtime.document.body.appendChild(outside);
+  outside.dispatchEvent(new runtime.window.MouseEvent('pointerdown',{bubbles:true}));
+  const outsideArrow=new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true});
+  runtime.document.body.dispatchEvent(outsideArrow);
+  assert.equal(outsideArrow.defaultPrevented,false);
+  assert.equal(slider.value,'50');
+  keyboardHoldCallback();
+  assert.equal(controls.style.opacity,'');
+  runtime.window.setTimeout=originalSetTimeout;
+  runtime.close();
+});
+
+test('Twitch: in-controls slider keeps 40px visuals on a native-height footprint',async()=>{
+  const config=platforms[1];
+  const {runtime}=await loadPlatform(config);
+  const style=runtime.document.getElementById('tm-volume-slider-style').textContent;
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\s*{[^}]*height:\s*32px\s*!important;[^}]*min-height:\s*32px\s*!important;[^}]*overflow:\s*clip\s*!important;[^}]*overflow-clip-margin:\s*4px;[^}]*translateY\(0\)/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls \.tm-volume-panel-bg\s*{[^}]*top:\s*-4px;[^}]*height:\s*40px/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls \.tm-volume-icon-cell\s*{[^}]*top:\s*-4px/s);
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const icon=overlay.querySelector('.tm-volume-icon-cell');
+  const indicator=overlay.querySelector('.tm-volume-indicator');
+  assert.equal(overlay.style.width,'40px');
+  assert.equal(icon.style.width,'');
+  assert.equal(indicator.querySelector('svg').getAttribute('width'),'40');
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.focus();
+  assert.equal(runtime.document.activeElement,slider);
+  runtime.close();
+});
+
+test('Twitch: volume API remains usable when optional mute methods are missing',async()=>{
+  const config=platforms[1];
+  const runtime=createRuntime(config.url,{runScripts:'outside-only'});
+  const fixture=config.fixture(runtime.document);
+  let calls=0;
+  fixture.player._tmPlayerApi={getVolume:()=>.5,setVolume:value=>{calls++; assert.equal(value,.6);},isMuted:()=>true};
+  fixture.player.__reactFiber$test={return:{memoizedProps:{mediaPlayerInstance:fixture.player._tmPlayerApi},return:null}};
+  const source=await readFile(new URL('../../dist/twitch-volume-slider.user.js',import.meta.url),'utf8');
+  runtime.window.eval(source); await waitForTimers(runtime);
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.value='60'; slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(calls,1);
   runtime.close();
 });
 
@@ -644,14 +826,23 @@ for(const config of platforms){
 
   test(`${config.name}: muted volume indicator uses M inside the arc`,async()=>{
     const {runtime}=await loadPlatform(config,(current,currentFixture)=>{
+      current.window.localStorage.setItem(config.volumeKey,'35');
       if(config.file==='youtube')currentFixture.player.mute();else currentFixture.player._tmPlayerApi.setMuted(true);
     });
     const percent=runtime.document.querySelector('.tm-volume-percent');
+    const indicator=runtime.document.querySelector('.tm-volume-indicator');
+    const arc=runtime.document.querySelector('.tm-volume-arc');
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const label=runtime.document.getElementById('tm-volume-slider-value');
     assert.equal(percent.textContent,'M');
     assert.equal(percent.getAttribute('x'),'20');
     assert.equal(percent.getAttribute('y'),'20');
     assert.equal(label.textContent,'Muted');
+    assert.equal(arc.style.visibility,'visible');
+    assert.equal(arc.style.strokeDasharray,'35 100');
+    assert.equal(indicator.classList.contains('muted'),true);
+    assert.equal(runtime.window.getComputedStyle(indicator).opacity,'0.78');
+    assert.equal(overlay.getAttribute('aria-label'),'Muted, volume 35%');
     runtime.close();
   });
 

@@ -1,0 +1,22 @@
+## Added
+
+- **Twitch:** When the video player was the last area pressed, Arrow Up and Arrow Down adjust volume in 5% steps without expanding the slider. Clicking outside the player returns those keys to normal page scrolling. Adjustments keep the current mute state, save the new underlying volume for the next unmute, and keep the player controls visible until keyboard input has stopped for three seconds.
+
+## Fixed
+
+- **Both:** The muted indicator now keeps its gray `M` while showing the saved-volume arc, making it clear what volume will return when sound is unmuted.
+- **YouTube:** Keyboard volume adjustments now preserve the expected one-percent step when snap-to-five is disabled instead of unexpectedly rounding to a five-percent value.
+- **YouTube:** Pressing Arrow Up or Arrow Down immediately after dragging the custom slider now updates the volume icon and bar without a temporary delay.
+- **YouTube:** Clicking the custom mute icon and then using an arrow key no longer leaves a white keyboard-focus ring around the icon; keyboard navigation still receives its normal focus indicator.
+- **YouTube:** A volume selected while a video is loading now remains visible and saved instead of snapping back when the player reports a stale startup value.
+- **YouTube:** The custom controls now follow the current primary video when YouTube replaces the player during navigation, so changes no longer affect an older video.
+- **YouTube:** Volume restoration and custom controls now stay limited to supported watch pages, leaving home-page previews, search results, and Shorts untouched.
+- **YouTube:** Toggling native-volume replacement now preserves visibility values already owned by YouTube or another integration.
+- **Twitch:** Delayed startup restoration is now cancelled when the player or custom controls are replaced, preventing stale videos from being changed after navigation.
+- **Twitch:** Mute and unmute changes made through Twitch's native controls are now saved after startup protection finishes.
+- **Twitch:** Volume changes continue to work when Twitch exposes only part of its player API or an optional mute method fails.
+- **Twitch:** Enabling the custom slider no longer nudges the entire player control row upward.
+
+## Changed
+
+- **Both:** Reduced background page-observer work while preserving reliable player replacement detection and slider reattachment.
