@@ -1,7 +1,11 @@
+## Added
+
+- **Twitch:** The slider now responds to the Arrow Up, Arrow Right, Arrow Down, and Arrow Left keys in 5% steps. Adjustments keep the current mute state and save the new underlying volume for the next unmute.
+
 ## Fixed
 
 - **Both:** The muted indicator now keeps its gray `M` while showing the saved-volume arc, making it clear what volume will return when sound is unmuted.
-- **Both:** Keyboard volume adjustments now preserve the expected one-percent step when snap-to-five is disabled instead of unexpectedly rounding to a five-percent value.
+- **YouTube:** Keyboard volume adjustments now preserve the expected one-percent step when snap-to-five is disabled instead of unexpectedly rounding to a five-percent value.
 - **YouTube:** A volume selected while a video is loading now remains visible and saved instead of snapping back when the player reports a stale startup value.
 - **YouTube:** The custom controls now follow the current primary video when YouTube replaces the player during navigation, so changes no longer affect an older video.
 - **YouTube:** Volume restoration and custom controls now stay limited to supported watch pages, leaving home-page previews, search results, and Shorts untouched.
@@ -9,6 +13,7 @@
 - **Twitch:** Delayed startup restoration is now cancelled when the player or custom controls are replaced, preventing stale videos from being changed after navigation.
 - **Twitch:** Mute and unmute changes made through Twitch's native controls are now saved after startup protection finishes.
 - **Twitch:** Volume changes continue to work when Twitch exposes only part of its player API or an optional mute method fails.
+- **Twitch:** Enabling the custom slider no longer nudges the entire player control row upward.
 
 ## Changed
 

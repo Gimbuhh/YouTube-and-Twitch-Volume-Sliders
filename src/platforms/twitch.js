@@ -398,6 +398,13 @@ export function startTwitchVolumeSlider() {
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
+/* Keep the 40px control visually centered without increasing Twitch's control-row height. */
+#${OVERLAY_ID}.tm-in-controls {
+  height: 0 !important;
+  min-height: 0 !important;
+  transform: translateY(-20px) !important;
+}
+
 #${OVERLAY_ID}.tm-volume-appearance-classic {
   --tm-pill-min-width: 274px;
   --tm-pill-zoom-adaptive-width: calc(34vw - 46px);
@@ -2132,15 +2139,32 @@ export function startTwitchVolumeSlider() {
         let clickSnapHandled = false;
         let pointerActive = false;
 
-        const applySliderValue = (value) => {
-            setVolume(video, value);
-            saveMute(false);
-            label.textContent = `${value}%`;
+        const applySliderValue = (value, { preserveMute = false } = {}) => {
+            setVolume(video, value, { preserveMute });
+            const muted = isMuted(video);
+            saveMute(muted);
+            label.textContent = muted ? 'Muted' : `${value}%`;
             updateSliderBar(slider);
-            updateVolumeIndicator(overlay, value, isMuted(video));
+            updateVolumeIndicator(overlay, value, muted);
             scheduleSaveVolume(value);
             markTwitchVolumeInteraction(overlay);
         };
+
+        const applyKeyboardVolumeStep = (event) => {
+            const direction = event.key === 'ArrowUp' || event.key === 'ArrowRight'
+                ? 1
+                : event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? -1 : 0;
+            if (!direction) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const currentValue = Number(slider.value) || 0;
+            const nextValue = Math.min(100, Math.max(0, currentValue + (direction * WHEEL_VOLUME_STEP)));
+            if (nextValue === currentValue) return;
+            markUserVolumeIntent();
+            slider.value = String(nextValue);
+            applySliderValue(nextValue, { preserveMute: true });
+        };
+        slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
         const applyWheelVolumeStep = (event) => {
             if (event.deltaY === 0) return;

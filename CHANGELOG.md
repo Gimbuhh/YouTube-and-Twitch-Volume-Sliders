@@ -4,10 +4,14 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ## 2.7 - 2026-07-11
 
+### Added
+
+- **Twitch:** Added 5% arrow-key volume adjustments that preserve mute and save the underlying volume for unmuting.
+
 ### Fixed
 
 - **Both:** Kept the saved-volume arc visible while muted while retaining the gray `M` indicator.
-- **Both:** Preserved exact one-percent keyboard volume steps when snap-to-five is disabled.
+- **YouTube:** Preserved exact one-percent keyboard volume steps when snap-to-five is disabled.
 - **YouTube:** Prevented stale startup volume events from overriding volume selected while a video is loading.
 - **YouTube:** Rebound custom controls to the current primary video after player replacement.
 - **YouTube:** Restricted volume restoration and custom controls to supported watch pages.
@@ -15,6 +19,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 - **Twitch:** Cancelled delayed volume restoration when its owning player or overlay is replaced.
 - **Twitch:** Persisted native mute and unmute changes after startup protection ends.
 - **Twitch:** Supported volume control through partial player APIs and failing optional mute methods.
+- **Twitch:** Prevented the custom slider from shifting the player controls vertically.
 
 ### Changed
 

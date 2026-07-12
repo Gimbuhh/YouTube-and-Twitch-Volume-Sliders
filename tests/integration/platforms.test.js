@@ -6,7 +6,7 @@ import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
   { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', muteKey:'tm-yt-muted', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', appearanceKey:'tm-yt-volume-slider-appearance' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', appearanceKey:'tm-twitch-volume-slider-appearance' }
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', muteKey:'tm-twitch-muted', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
 
 const waitForTimers = (runtime, delay = 0) => new Promise(resolve=>runtime.window.setTimeout(resolve,delay));
@@ -179,20 +179,53 @@ test('YouTube: unsupported routes leave preview videos and native controls untou
   runtime.close();
 });
 
-for(const config of platforms){
-  test(`${config.name}: keyboard input preserves exact steps when snapping is disabled`,async()=>{
-    const {runtime,fixture}=await loadPlatform(config,current=>{
-      current.window.localStorage.setItem(config.volumeKey,'52');
-      current.window.localStorage.setItem(config.file==='youtube'?'tm-yt-volume-slider-snap-to-5':'tm-twitch-volume-slider-snap-to-5','false');
-    });
-    const slider=runtime.document.getElementById('tm-volume-slider-range');
-    slider.value='53';
-    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
-    assert.equal(slider.value,'53');
-    assert.equal(fixture.state.volume,config.file==='youtube'?53:.53);
-    runtime.close();
+test('YouTube: keyboard input preserves exact steps when snapping is disabled',async()=>{
+  const config=platforms[0];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'52');
+    current.window.localStorage.setItem('tm-yt-volume-slider-snap-to-5','false');
   });
-}
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.value='53';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(slider.value,'53');
+  assert.equal(fixture.state.volume,53);
+  runtime.close();
+});
+
+test('Twitch: arrow keys adjust by five percent while preserving mute and saved volume',async()=>{
+  const config=platforms[1];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'50');
+    current.window.localStorage.setItem(config.muteKey,'true');
+  });
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  const label=runtime.document.getElementById('tm-volume-slider-value');
+  for(const [key,expected] of [['ArrowUp',55],['ArrowRight',60],['ArrowDown',55],['ArrowLeft',50]]){
+    const event=new runtime.window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true});
+    slider.dispatchEvent(event);
+    assert.equal(event.defaultPrevented,true);
+    assert.equal(Number(slider.value),expected);
+    assert.equal(fixture.state.volume,expected/100);
+    assert.equal(fixture.state.muted,true);
+    assert.equal(label.textContent,'Muted');
+    assert.equal(runtime.window.localStorage.getItem(config.muteKey),'true');
+  }
+  slider.value='100';
+  slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  assert.equal(slider.value,'100');
+  await waitForTimers(runtime,180);
+  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'50');
+  runtime.close();
+});
+
+test('Twitch: in-controls slider does not contribute to the control-row height',async()=>{
+  const config=platforms[1];
+  const {runtime}=await loadPlatform(config);
+  const style=runtime.document.getElementById('tm-volume-slider-style').textContent;
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\s*{[^}]*height:\s*0\s*!important;[^}]*min-height:\s*0\s*!important;[^}]*translateY\(-20px\)/s);
+  runtime.close();
+});
 
 test('Twitch: volume API remains usable when optional mute methods are missing',async()=>{
   const config=platforms[1];

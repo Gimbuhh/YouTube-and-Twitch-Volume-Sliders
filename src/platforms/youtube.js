@@ -2025,6 +2025,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function disconnectAttachObserver() {
+        if (trailingAttachTimer) {
+            window.clearTimeout(trailingAttachTimer);
+            trailingAttachTimer = 0;
+        }
         attachObserver?.disconnect();
         attachObserver = null;
         attachObserverTarget = null;
