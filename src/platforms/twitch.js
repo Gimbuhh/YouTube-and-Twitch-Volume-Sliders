@@ -402,34 +402,20 @@ export function startTwitchVolumeSlider() {
 #${OVERLAY_ID}.tm-in-controls {
   height: 32px !important;
   min-height: 32px !important;
-  border-radius: 16px !important;
+  overflow: clip !important;
+  overflow-clip-margin: 4px;
   transform: translateY(0) !important;
 }
 
-#${OVERLAY_ID}.tm-in-controls.tm-collapsed {
-  width: 32px !important;
+#${OVERLAY_ID}.tm-in-controls .tm-volume-panel-bg {
+  top: -4px;
+  bottom: auto;
+  height: 40px;
 }
 
 #${OVERLAY_ID}.tm-in-controls .tm-volume-icon-cell {
+  top: -4px;
   left: 0;
-  width: 32px;
-}
-
-#${OVERLAY_ID}.tm-in-controls .tm-volume-icon-cell,
-#${OVERLAY_ID}.tm-in-controls .tm-volume-indicator,
-#${OVERLAY_ID}.tm-in-controls .tm-volume-indicator svg,
-#${OVERLAY_ID}.tm-in-controls .tm-volume-top-row,
-#${OVERLAY_ID}.tm-in-controls .tm-volume-slider-row {
-  height: 32px;
-}
-
-#${OVERLAY_ID}.tm-in-controls .tm-volume-indicator,
-#${OVERLAY_ID}.tm-in-controls .tm-volume-indicator svg {
-  width: 32px;
-}
-
-#${OVERLAY_ID}.tm-in-controls input[type=range] {
-  height: 32px;
 }
 
 #${OVERLAY_ID}.tm-volume-appearance-classic {
@@ -2166,7 +2152,7 @@ export function startTwitchVolumeSlider() {
         let clickSnapHandled = false;
         let pointerActive = false;
 
-        const applySliderValue = (value, { preserveMute = false } = {}) => {
+        const applySliderValue = (value, { preserveMute = false, markInteraction = true } = {}) => {
             setVolume(video, value, { preserveMute });
             const muted = isMuted(video);
             saveMute(muted);
@@ -2174,7 +2160,7 @@ export function startTwitchVolumeSlider() {
             updateSliderBar(slider);
             updateVolumeIndicator(overlay, value, muted);
             scheduleSaveVolume(value);
-            markTwitchVolumeInteraction(overlay);
+            if (markInteraction) markTwitchVolumeInteraction(overlay);
         };
 
         const applyKeyboardVolumeStep = (event) => {
@@ -2189,7 +2175,7 @@ export function startTwitchVolumeSlider() {
             if (nextValue === currentValue) return;
             markUserVolumeIntent();
             slider.value = String(nextValue);
-            applySliderValue(nextValue, { preserveMute: true });
+            applySliderValue(nextValue, { preserveMute: true, markInteraction: false });
         };
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
 

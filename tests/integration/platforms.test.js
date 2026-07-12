@@ -225,12 +225,16 @@ test('Twitch: player-level up and down arrows adjust volume without stealing tex
     current.window.localStorage.setItem(config.volumeKey,'50');
   });
   const slider=runtime.document.getElementById('tm-volume-slider-range');
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
   runtime.document.body.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
   assert.equal(slider.value,'55');
   assert.equal(fixture.state.volume,.55);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
   runtime.document.body.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
   assert.equal(slider.value,'50');
   assert.equal(fixture.state.volume,.5);
+  assert.equal(overlay.classList.contains('tm-collapsed'),true);
 
   const input=runtime.document.createElement('input');
   runtime.document.body.appendChild(input);
@@ -239,13 +243,19 @@ test('Twitch: player-level up and down arrows adjust volume without stealing tex
   runtime.close();
 });
 
-test('Twitch: in-controls slider remains visible at Twitch native control height',async()=>{
+test('Twitch: in-controls slider keeps 40px visuals on a native-height footprint',async()=>{
   const config=platforms[1];
   const {runtime}=await loadPlatform(config);
   const style=runtime.document.getElementById('tm-volume-slider-style').textContent;
-  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\s*{[^}]*height:\s*32px\s*!important;[^}]*min-height:\s*32px\s*!important;[^}]*translateY\(0\)/s);
-  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\.tm-collapsed\s*{[^}]*width:\s*32px\s*!important/s);
-  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls \.tm-volume-icon-cell,[^}]*height:\s*32px/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\s*{[^}]*height:\s*32px\s*!important;[^}]*min-height:\s*32px\s*!important;[^}]*overflow:\s*clip\s*!important;[^}]*overflow-clip-margin:\s*4px;[^}]*translateY\(0\)/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls \.tm-volume-panel-bg\s*{[^}]*top:\s*-4px;[^}]*height:\s*40px/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls \.tm-volume-icon-cell\s*{[^}]*top:\s*-4px/s);
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const icon=overlay.querySelector('.tm-volume-icon-cell');
+  const indicator=overlay.querySelector('.tm-volume-indicator');
+  assert.equal(overlay.style.width,'40px');
+  assert.equal(icon.style.width,'');
+  assert.equal(indicator.querySelector('svg').getAttribute('width'),'40');
   const slider=runtime.document.getElementById('tm-volume-slider-range');
   slider.focus();
   assert.equal(runtime.document.activeElement,slider);
