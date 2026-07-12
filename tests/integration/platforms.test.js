@@ -219,12 +219,33 @@ test('Twitch: arrow keys adjust by five percent while preserving mute and saved 
   runtime.close();
 });
 
+test('Twitch: player-level up and down arrows adjust volume without stealing text-input keys',async()=>{
+  const config=platforms[1];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'50');
+  });
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  runtime.document.body.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  assert.equal(slider.value,'55');
+  assert.equal(fixture.state.volume,.55);
+  runtime.document.body.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
+  assert.equal(slider.value,'50');
+  assert.equal(fixture.state.volume,.5);
+
+  const input=runtime.document.createElement('input');
+  runtime.document.body.appendChild(input);
+  input.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  assert.equal(slider.value,'50');
+  runtime.close();
+});
+
 test('Twitch: in-controls slider remains visible at Twitch native control height',async()=>{
   const config=platforms[1];
   const {runtime}=await loadPlatform(config);
   const style=runtime.document.getElementById('tm-volume-slider-style').textContent;
-  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\s*{[^}]*height:\s*30px\s*!important;[^}]*min-height:\s*30px\s*!important;[^}]*translateY\(0\)/s);
-  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls \.tm-volume-icon-cell,[^}]*height:\s*30px/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\s*{[^}]*height:\s*32px\s*!important;[^}]*min-height:\s*32px\s*!important;[^}]*translateY\(0\)/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\.tm-collapsed\s*{[^}]*width:\s*32px\s*!important/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls \.tm-volume-icon-cell,[^}]*height:\s*32px/s);
   const slider=runtime.document.getElementById('tm-volume-slider-range');
   slider.focus();
   assert.equal(runtime.document.activeElement,slider);

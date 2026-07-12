@@ -400,14 +400,19 @@ export function startTwitchVolumeSlider() {
 
 /* Match Twitch's native control footprint so the custom control does not raise the control row. */
 #${OVERLAY_ID}.tm-in-controls {
-  height: 30px !important;
-  min-height: 30px !important;
-  border-radius: 15px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  border-radius: 16px !important;
   transform: translateY(0) !important;
 }
 
+#${OVERLAY_ID}.tm-in-controls.tm-collapsed {
+  width: 32px !important;
+}
+
 #${OVERLAY_ID}.tm-in-controls .tm-volume-icon-cell {
-  left: 5px;
+  left: 0;
+  width: 32px;
 }
 
 #${OVERLAY_ID}.tm-in-controls .tm-volume-icon-cell,
@@ -415,16 +420,16 @@ export function startTwitchVolumeSlider() {
 #${OVERLAY_ID}.tm-in-controls .tm-volume-indicator svg,
 #${OVERLAY_ID}.tm-in-controls .tm-volume-top-row,
 #${OVERLAY_ID}.tm-in-controls .tm-volume-slider-row {
-  height: 30px;
+  height: 32px;
 }
 
 #${OVERLAY_ID}.tm-in-controls .tm-volume-indicator,
 #${OVERLAY_ID}.tm-in-controls .tm-volume-indicator svg {
-  width: 30px;
+  width: 32px;
 }
 
 #${OVERLAY_ID}.tm-in-controls input[type=range] {
-  height: 30px;
+  height: 32px;
 }
 
 #${OVERLAY_ID}.tm-volume-appearance-classic {
@@ -2188,6 +2193,16 @@ export function startTwitchVolumeSlider() {
         };
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
+        const applyPlayerKeyboardVolumeStep = (event) => {
+            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+            if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            if (isOptionsPopupOpen()) return;
+            const target = event.target;
+            if (target instanceof window.Element && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+            applyKeyboardVolumeStep(event);
+        };
+        document.addEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
+
         const applyWheelVolumeStep = (event) => {
             if (event.deltaY === 0) return;
             event.preventDefault();
@@ -2353,6 +2368,7 @@ export function startTwitchVolumeSlider() {
             window.removeEventListener('resize', onLayoutChange);
             window.removeEventListener('pointermove', markPointerIntent, true);
             document.removeEventListener('click', collapseHeldSliderOnVideoClick, true);
+            document.removeEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
             controlsObserver.disconnect();
             tickOverlay._tmSliderTicksCleanup?.();
             clearPostCloseControlsHold();
