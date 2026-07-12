@@ -193,6 +193,26 @@ test('YouTube: keyboard input preserves exact steps when snapping is disabled',a
   runtime.close();
 });
 
+test('YouTube: arrow volume updates remain responsive immediately after slider input',async()=>{
+  const config=platforms[0];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'50');
+  });
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.value='60';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(fixture.state.volume,60);
+
+  slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  fixture.player.setVolume(65);
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+
+  assert.equal(slider.value,'65');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'65%');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').getAttribute('aria-label'),'Volume 65%');
+  runtime.close();
+});
+
 test('Twitch: arrow keys adjust by five percent while preserving mute and saved volume',async()=>{
   const config=platforms[1];
   const {runtime,fixture}=await loadPlatform(config,current=>{

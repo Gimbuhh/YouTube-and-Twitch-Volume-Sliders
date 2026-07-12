@@ -2963,6 +2963,11 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         cancelScheduledSaveVolume();
         saveVolume(Number(slider.value) || 0);
       });
+      const clearCompletedDragIntentForKeyboard = (event) => {
+        if (event.target !== slider || event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
+      };
+      window.addEventListener("keydown", clearCompletedDragIntentForKeyboard, true);
       const onVideoVolumeChange = () => {
         if (!document.getElementById(OVERLAY_ID)) return;
         const muted = isMuted(video);
@@ -3012,6 +3017,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         window.removeEventListener("pointerup", finishSliderInteraction, true);
         window.removeEventListener("pointercancel", finishSliderInteraction, true);
         window.removeEventListener("blur", finishSliderInteraction);
+        window.removeEventListener("keydown", clearCompletedDragIntentForKeyboard, true);
         window.removeEventListener("resize", onLayoutChange);
         window.removeEventListener("pointermove", markPointerIntent, true);
         document.removeEventListener("click", collapseHeldSliderOnVideoClick, true);
