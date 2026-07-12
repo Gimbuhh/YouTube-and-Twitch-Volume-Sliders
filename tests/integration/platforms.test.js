@@ -219,11 +219,15 @@ test('Twitch: arrow keys adjust by five percent while preserving mute and saved 
   runtime.close();
 });
 
-test('Twitch: in-controls slider does not contribute to the control-row height',async()=>{
+test('Twitch: in-controls slider remains visible at Twitch native control height',async()=>{
   const config=platforms[1];
   const {runtime}=await loadPlatform(config);
   const style=runtime.document.getElementById('tm-volume-slider-style').textContent;
-  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\s*{[^}]*height:\s*0\s*!important;[^}]*min-height:\s*0\s*!important;[^}]*translateY\(-20px\)/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls\s*{[^}]*height:\s*30px\s*!important;[^}]*min-height:\s*30px\s*!important;[^}]*translateY\(0\)/s);
+  assert.match(style,/#tm-volume-slider-overlay\.tm-in-controls \.tm-volume-icon-cell,[^}]*height:\s*30px/s);
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.focus();
+  assert.equal(runtime.document.activeElement,slider);
   runtime.close();
 });
 

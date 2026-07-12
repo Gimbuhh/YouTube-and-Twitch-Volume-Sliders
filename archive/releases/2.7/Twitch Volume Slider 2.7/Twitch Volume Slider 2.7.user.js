@@ -1607,11 +1607,33 @@
   filter: ${VOLUME_PANEL_DROP_SHADOW};
 }
 
-/* Keep the 40px control visually centered without increasing Twitch's control-row height. */
+/* Match Twitch's native control footprint so the custom control does not raise the control row. */
 #${OVERLAY_ID}.tm-in-controls {
-  height: 0 !important;
-  min-height: 0 !important;
-  transform: translateY(-20px) !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  border-radius: 15px !important;
+  transform: translateY(0) !important;
+}
+
+#${OVERLAY_ID}.tm-in-controls .tm-volume-icon-cell {
+  left: 5px;
+}
+
+#${OVERLAY_ID}.tm-in-controls .tm-volume-icon-cell,
+#${OVERLAY_ID}.tm-in-controls .tm-volume-indicator,
+#${OVERLAY_ID}.tm-in-controls .tm-volume-indicator svg,
+#${OVERLAY_ID}.tm-in-controls .tm-volume-top-row,
+#${OVERLAY_ID}.tm-in-controls .tm-volume-slider-row {
+  height: 30px;
+}
+
+#${OVERLAY_ID}.tm-in-controls .tm-volume-indicator,
+#${OVERLAY_ID}.tm-in-controls .tm-volume-indicator svg {
+  width: 30px;
+}
+
+#${OVERLAY_ID}.tm-in-controls input[type=range] {
+  height: 30px;
 }
 
 #${OVERLAY_ID}.tm-volume-appearance-classic {
