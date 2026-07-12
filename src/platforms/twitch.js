@@ -889,6 +889,17 @@ export function startTwitchVolumeSlider() {
         return Math.round(vol * 100);
     }
 
+    function getUnderlyingVolume(video) {
+        try {
+            const api = getTwitchPlayerApi(video);
+            if (api) {
+                const vol = api.getVolume();
+                return Math.round((typeof vol === 'number' ? vol : 0) * 100);
+            }
+        } catch (e) { /* fall through */ }
+        return Math.round((Number(video?.volume) || 0) * 100);
+    }
+
     /**
      * Set volume via Twitch API (preferred) or video element from percentage (0-100).
      */
@@ -1054,7 +1065,7 @@ export function startTwitchVolumeSlider() {
     function setSliderFromPlayer(slider, label, video) {
         try {
             const muted = isMuted(video);
-            const displayValue = getVolume(video);
+            const displayValue = muted ? getUnderlyingVolume(video) : getVolume(video);
             slider.value = String(displayValue);
             if (label) {
                 label.textContent = muted ? 'Muted' : `${displayValue}%`;

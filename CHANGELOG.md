@@ -6,6 +6,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Fixed
 
+- **Both:** Kept the saved-volume arc visible while muted while retaining the gray `M` indicator.
 - **Both:** Preserved exact one-percent keyboard volume steps when snap-to-five is disabled.
 - **YouTube:** Prevented stale startup volume events from overriding volume selected while a video is loading.
 - **YouTube:** Rebound custom controls to the current primary video after player replacement.

@@ -691,6 +691,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         return Math.round(vol * 100);
     }
 
+    function getUnderlyingVolume(video) {
+        const ytPlayer = getYouTubePlayer();
+        if (ytPlayer) return Math.round(ytPlayer.getVolume());
+        return Math.round((Number(video?.volume) || 0) * 100);
+    }
+
     /**
      * Check muted state via YouTube API or video element.
      */
@@ -795,7 +801,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
     function setSliderFromPlayer(slider, label, video) {
         const muted = isMuted(video);
-        const displayValue = getVolume(video);
+        const displayValue = muted ? getUnderlyingVolume(video) : getVolume(video);
         slider.value = String(displayValue);
         if (label) {
             label.textContent = muted ? 'Muted' : `${displayValue}%`;

@@ -73,9 +73,9 @@
     }
     function updateVolumeIndicator(overlay, value, muted) {
       if (!overlay) return;
-      const pct = muted ? 0 : Math.min(Math.max(Number(value) || 0, 0), 100);
+      const pct = Math.min(Math.max(Number(value) || 0, 0), 100);
       overlay.removeAttribute("title");
-      overlay.setAttribute("aria-label", muted ? "Muted" : `Volume ${Math.round(pct)}%`);
+      overlay.setAttribute("aria-label", muted ? `Muted, volume ${Math.round(pct)}%` : `Volume ${Math.round(pct)}%`);
       const muteButton = overlay.querySelector(".tm-volume-icon-cell");
       if (muteButton) {
         const action = muted ? "Unmute" : "Mute";
@@ -2087,6 +2087,17 @@
       const vol = (video.muted ? 0 : video.volume) || 0;
       return Math.round(vol * 100);
     }
+    function getUnderlyingVolume(video) {
+      try {
+        const api = getTwitchPlayerApi(video);
+        if (api) {
+          const vol = api.getVolume();
+          return Math.round((typeof vol === "number" ? vol : 0) * 100);
+        }
+      } catch (e) {
+      }
+      return Math.round((Number(video?.volume) || 0) * 100);
+    }
     function setNativeVideoMuted(video, muted) {
       if (!video) return;
       video.muted = video.defaultMuted = !!muted;
@@ -2219,7 +2230,7 @@
     function setSliderFromPlayer(slider, label, video) {
       try {
         const muted = isMuted(video);
-        const displayValue = getVolume(video);
+        const displayValue = muted ? getUnderlyingVolume(video) : getVolume(video);
         slider.value = String(displayValue);
         if (label) {
           label.textContent = muted ? "Muted" : `${displayValue}%`;

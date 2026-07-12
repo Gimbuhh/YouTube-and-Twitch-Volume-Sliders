@@ -73,9 +73,9 @@
     }
     function updateVolumeIndicator(overlay, value, muted) {
       if (!overlay) return;
-      const pct = muted ? 0 : Math.min(Math.max(Number(value) || 0, 0), 100);
+      const pct = Math.min(Math.max(Number(value) || 0, 0), 100);
       overlay.removeAttribute("title");
-      overlay.setAttribute("aria-label", muted ? "Muted" : `Volume ${Math.round(pct)}%`);
+      overlay.setAttribute("aria-label", muted ? `Muted, volume ${Math.round(pct)}%` : `Volume ${Math.round(pct)}%`);
       const muteButton = overlay.querySelector(".tm-volume-icon-cell");
       if (muteButton) {
         const action = muted ? "Unmute" : "Mute";
@@ -1944,6 +1944,11 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       const vol = (video.muted ? 0 : video.volume) || 0;
       return Math.round(vol * 100);
     }
+    function getUnderlyingVolume(video) {
+      const ytPlayer = getYouTubePlayer();
+      if (ytPlayer) return Math.round(ytPlayer.getVolume());
+      return Math.round((Number(video?.volume) || 0) * 100);
+    }
     function isMuted(video) {
       const ytPlayer = getYouTubePlayer();
       if (ytPlayer && typeof ytPlayer.isMuted === "function") {
@@ -2013,7 +2018,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
     function setSliderFromPlayer(slider, label, video) {
       const muted = isMuted(video);
-      const displayValue = getVolume(video);
+      const displayValue = muted ? getUnderlyingVolume(video) : getVolume(video);
       slider.value = String(displayValue);
       if (label) {
         label.textContent = muted ? "Muted" : `${displayValue}%`;

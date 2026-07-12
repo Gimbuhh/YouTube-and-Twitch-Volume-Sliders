@@ -690,14 +690,23 @@ for(const config of platforms){
 
   test(`${config.name}: muted volume indicator uses M inside the arc`,async()=>{
     const {runtime}=await loadPlatform(config,(current,currentFixture)=>{
+      current.window.localStorage.setItem(config.volumeKey,'35');
       if(config.file==='youtube')currentFixture.player.mute();else currentFixture.player._tmPlayerApi.setMuted(true);
     });
     const percent=runtime.document.querySelector('.tm-volume-percent');
+    const indicator=runtime.document.querySelector('.tm-volume-indicator');
+    const arc=runtime.document.querySelector('.tm-volume-arc');
+    const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const label=runtime.document.getElementById('tm-volume-slider-value');
     assert.equal(percent.textContent,'M');
     assert.equal(percent.getAttribute('x'),'20');
     assert.equal(percent.getAttribute('y'),'20');
     assert.equal(label.textContent,'Muted');
+    assert.equal(arc.style.visibility,'visible');
+    assert.equal(arc.style.strokeDasharray,'35 100');
+    assert.equal(indicator.classList.contains('muted'),true);
+    assert.equal(runtime.window.getComputedStyle(indicator).opacity,'0.78');
+    assert.equal(overlay.getAttribute('aria-label'),'Muted, volume 35%');
     runtime.close();
   });
 
