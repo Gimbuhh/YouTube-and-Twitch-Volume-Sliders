@@ -80,13 +80,15 @@ jobs:
           version="${tag#v}"
           youtube="release-stage/YouTube.Volume.Slider.$version.user.js"
           twitch="release-stage/Twitch.Volume.Slider.$version.user.js"
-          test "$(sha256sum "$youtube" | cut -d' ' -f1)" = "$(jq -r .expectedHashes.youtube release-stage/manifest.json)"
-          test "$(sha256sum "$twitch" | cut -d' ' -f1)" = "$(jq -r .expectedHashes.twitch release-stage/manifest.json)"
+          youtube_hash="$(jq -r '.expectedHashes.youtube | ascii_downcase' release-stage/manifest.json)"
+          twitch_hash="$(jq -r '.expectedHashes.twitch | ascii_downcase' release-stage/manifest.json)"
+          test "$(sha256sum "$youtube" | cut -d' ' -f1)" = "$youtube_hash"
+          test "$(sha256sum "$twitch" | cut -d' ' -f1)" = "$twitch_hash"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "Volume Sliders $version" --notes-file release-stage/notes.md
           else
             gh release create "$tag" --verify-tag --title "Volume Sliders $version" --notes-file release-stage/notes.md
           fi
           gh release upload "$tag" "$youtube" "$twitch" --clobber
-          test "$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"YouTube.Volume.Slider.$version.user.js\") | .digest")" = "sha256:$(jq -r .expectedHashes.youtube release-stage/manifest.json)"
-          test "$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"Twitch.Volume.Slider.$version.user.js\") | .digest")" = "sha256:$(jq -r .expectedHashes.twitch release-stage/manifest.json)"
+          test "$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"YouTube.Volume.Slider.$version.user.js\") | .digest")" = "sha256:$youtube_hash"
+          test "$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"Twitch.Volume.Slider.$version.user.js\") | .digest")" = "sha256:$twitch_hash"
