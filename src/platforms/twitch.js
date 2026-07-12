@@ -2196,12 +2196,21 @@ export function startTwitchVolumeSlider() {
         };
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
+        let playerWasLastPressed = false;
+        const trackLastPressedArea = (event) => {
+            const activePlayer = getPlayerContainer(video) || player;
+            playerWasLastPressed = !!activePlayer?.contains?.(event.target);
+        };
+        document.addEventListener('pointerdown', trackLastPressedArea, true);
+
         const applyPlayerKeyboardVolumeStep = (event) => {
             if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
             if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
             if (isOptionsPopupOpen()) return;
             const target = event.target;
             if (target instanceof window.Element && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+            const activePlayer = getPlayerContainer(video) || player;
+            if (!playerWasLastPressed && !activePlayer?.contains?.(document.activeElement)) return;
             applyKeyboardVolumeStep(event);
         };
         document.addEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
@@ -2372,6 +2381,7 @@ export function startTwitchVolumeSlider() {
             window.removeEventListener('pointermove', markPointerIntent, true);
             document.removeEventListener('click', collapseHeldSliderOnVideoClick, true);
             document.removeEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
+            document.removeEventListener('pointerdown', trackLastPressedArea, true);
             if (keyboardControlsTimer) {
                 window.clearTimeout(keyboardControlsTimer);
                 keyboardControlsTimer = 0;

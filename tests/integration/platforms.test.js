@@ -246,7 +246,7 @@ test('Twitch: arrow keys adjust by five percent while preserving mute and saved 
   runtime.close();
 });
 
-test('Twitch: player-level up and down arrows adjust volume without stealing text-input keys',async()=>{
+test('Twitch: player-level arrows require the player to be the last pressed area',async()=>{
   const config=platforms[1];
   const {runtime,fixture}=await loadPlatform(config,current=>{
     current.window.localStorage.setItem(config.volumeKey,'50');
@@ -264,6 +264,12 @@ test('Twitch: player-level up and down arrows adjust volume without stealing tex
     return originalSetTimeout(callback,delay,...args);
   };
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
+  const unfocusedArrow=new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true});
+  runtime.document.body.dispatchEvent(unfocusedArrow);
+  assert.equal(unfocusedArrow.defaultPrevented,false);
+  assert.equal(slider.value,'50');
+
+  fixture.player.dispatchEvent(new runtime.window.MouseEvent('pointerdown',{bubbles:true}));
   runtime.document.body.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
   assert.equal(slider.value,'55');
   assert.equal(fixture.state.volume,.55);
@@ -276,9 +282,12 @@ test('Twitch: player-level up and down arrows adjust volume without stealing tex
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
   assert.equal(controls.style.opacity,'1');
 
-  const input=runtime.document.createElement('input');
-  runtime.document.body.appendChild(input);
-  input.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  const outside=runtime.document.createElement('div');
+  runtime.document.body.appendChild(outside);
+  outside.dispatchEvent(new runtime.window.MouseEvent('pointerdown',{bubbles:true}));
+  const outsideArrow=new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true});
+  runtime.document.body.dispatchEvent(outsideArrow);
+  assert.equal(outsideArrow.defaultPrevented,false);
   assert.equal(slider.value,'50');
   keyboardHoldCallback();
   assert.equal(controls.style.opacity,'');
