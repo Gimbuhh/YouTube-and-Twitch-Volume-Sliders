@@ -1,5 +1,7 @@
 # Advisor implementation plans
 
+Plans are organized by their target version: `2.7/` preserves the completed implementation record, while `2.8/` contains proposed follow-up improvements. Plan numbers remain continuous across version folders so references stay unambiguous.
+
 Audit baseline: `b454d8a` (2026-07-11). These plans were selected after the standard-depth audit and the reported YouTube loading-state volume regression.
 
 | Order | Plan | Status | Depends on |
