@@ -22,7 +22,7 @@ Audit baseline: `b454d8a` (2026-07-11). These plans were selected after the stan
 
 Plans 001 and 002 may be implemented independently but their fixtures must distinguish startup event ordering from video-identity replacement. Both deliberately land before the observer refactor. Plan 003 is independent runtime work. Plans 004 and 005 are CI-only; plan 004 must first define the current-ref manual backfill contract that plan 005 isolates. Plans 007–011 are focused follow-ups; 009 and 011 are small, high-leverage compatibility fixes.
 
-Every executor must run `pnpm install --frozen-lockfile` if dependencies are absent, then `pnpm check`. The audit machine did not have `node_modules`, so the complete baseline could not be executed without a prohibited audit-time install.
+Every executor must run `npm ci` if dependencies are absent, then `npm run check`. The audit machine did not have `node_modules`, so the complete baseline could not be executed without a prohibited audit-time install.
 
 ## Completed 2.7.1 plans
 

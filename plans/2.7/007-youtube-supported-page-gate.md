@@ -31,8 +31,8 @@ In scope: YouTube route predicate, init/navigation/attach cleanup, integration f
 
 ## Verification
 
-- `pnpm test:integration`
-- `pnpm check`
+- `npm run test:integration`
+- `npm run check`
 
 ## Done criteria
 

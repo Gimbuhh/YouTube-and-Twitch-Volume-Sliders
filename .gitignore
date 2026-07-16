@@ -1,5 +1,4 @@
 node_modules/
-.pnpm-store/
 __node_modules/
 
 .DS_Store

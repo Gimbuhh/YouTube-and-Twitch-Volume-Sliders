@@ -26,8 +26,8 @@ In scope: `src/platforms/twitch.js`, `tests/integration/platforms.test.js`, rege
 
 ## Verification
 
-- `pnpm test:integration`
-- `pnpm check`
+- `npm run test:integration`
+- `npm run check`
 - Confirm the new test demonstrates failure on baseline before accepting the fix.
 
 ## Done criteria

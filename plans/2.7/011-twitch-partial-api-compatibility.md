@@ -25,8 +25,8 @@ In scope: Twitch API capability checks/fallback semantics, integration fixture/t
 
 ## Verification
 
-- `pnpm test:integration`
-- `pnpm check`
+- `npm run test:integration`
+- `npm run check`
 
 ## Done criteria
 

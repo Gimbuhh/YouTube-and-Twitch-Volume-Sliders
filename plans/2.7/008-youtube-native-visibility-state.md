@@ -25,8 +25,8 @@ In scope: YouTube native visibility logic, integration tests, generated YouTube 
 
 ## Verification
 
-- `pnpm test:integration`
-- `pnpm check`
+- `npm run test:integration`
+- `npm run check`
 
 ## Done criteria
 

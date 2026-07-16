@@ -26,8 +26,8 @@ In scope: Twitch volumechange ownership/startup guard, integration tests, genera
 
 ## Verification
 
-- `pnpm test:integration`
-- `pnpm check`
+- `npm run test:integration`
+- `npm run check`
 
 ## Done criteria
 
