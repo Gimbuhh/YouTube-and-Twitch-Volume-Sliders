@@ -89,6 +89,47 @@ test('YouTube: replace-native guard activates at navigation start before the wat
   runtime.close();
 });
 
+test('YouTube: navigation completion mounts the custom control without the reattach delay',async()=>{
+  const config=platforms[0];
+  const runtime=createRuntime('https://www.youtube.com/',{runScripts:'outside-only'});
+  const fixture=config.fixture(runtime.document);
+  runtime.window.localStorage.setItem(config.modeKey,'replace-native');
+  const source=await readFile(new URL('../../dist/youtube-volume-slider.user.js',import.meta.url),'utf8');
+  runtime.window.eval(source);
+  await waitForTimers(runtime);
+
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-start'));
+  runtime.window.history.pushState({},'', '/watch?v=next');
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-finish'));
+
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  assert.ok(overlay);
+  assert.equal(overlay._tmVolumeVideo,fixture.video);
+  runtime.close();
+});
+
+test('YouTube: navigation completion immediately rebinds a replaced video',async()=>{
+  const config=platforms[0];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.modeKey,'replace-native');
+  });
+  const firstOverlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const secondVideo=runtime.document.createElement('video');
+  secondVideo.className='html5-main-video';
+  fixture.video.replaceWith(secondVideo);
+
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-start'));
+  runtime.window.history.pushState({},'', '/watch?v=next');
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-finish'));
+
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  assert.notEqual(overlay,firstOverlay);
+  assert.equal(overlay._tmVolumeVideo,secondVideo);
+  assert.equal(runtime.document.querySelectorAll('#tm-volume-slider-overlay').length,1);
+  runtime.close();
+});
+
 test('YouTube: document-start bootstrap mounts the slider when the player arrives',async()=>{
   const config=platforms[0];
   const runtime=createRuntime(config.url,{runScripts:'outside-only'});

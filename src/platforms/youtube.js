@@ -1850,6 +1850,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         let existingOverlay = document.getElementById(OVERLAY_ID);
         if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
             disposeActiveOverlay();
+            existingOverlay.remove();
             existingOverlay = null;
         }
         if (existingOverlay) {
@@ -1982,11 +1983,19 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (window.__tmYtVolumeNavBound) return;
         window.__tmYtVolumeNavBound = true;
 
-        const runReattach = () => {
+        const cancelPendingReattach = () => {
+            if (navDebounceTimer) {
+                clearTimeout(navDebounceTimer);
+                navDebounceTimer = 0;
+            }
             if (navReattachTimer) {
                 clearTimeout(navReattachTimer);
                 navReattachTimer = 0;
             }
+        };
+
+        const runReattach = () => {
+            cancelPendingReattach();
 
             resetVideoElement();
             cachedYtPlayer = null;
@@ -2004,10 +2013,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         };
 
         const scheduleReattach = () => {
-            if (navDebounceTimer) {
-                clearTimeout(navDebounceTimer);
-                navDebounceTimer = 0;
-            }
+            cancelPendingReattach();
             navDebounceTimer = window.setTimeout(() => {
                 navDebounceTimer = 0;
                 runReattach();
@@ -2024,9 +2030,18 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         };
 
         const handleNavigationComplete = () => {
-            // Reconcile unsupported destinations immediately, then let the delayed
-            // reattach wait for YouTube to finish replacing player ownership.
+            // YouTube usually has its incoming video and controls ready by this
+            // event. Mount synchronously so the custom icon replaces the hidden
+            // native control in the same frame, retaining the delayed path only as
+            // a fallback for unusually late player creation.
+            resetVideoElement();
+            cachedYtPlayer = null;
             applyNativeVolumeVisibility();
+            const attached = attachSliderIfPossible();
+            if (attached || !isYouTubeSupportedPage()) {
+                cancelPendingReattach();
+                return;
+            }
             scheduleReattach();
         };
 

@@ -3167,6 +3167,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       let existingOverlay = document.getElementById(OVERLAY_ID);
       if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
         disposeActiveOverlay();
+        existingOverlay.remove();
         existingOverlay = null;
       }
       if (existingOverlay) {
@@ -3281,11 +3282,18 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function setupYtNavigationHandler() {
       if (window.__tmYtVolumeNavBound) return;
       window.__tmYtVolumeNavBound = true;
-      const runReattach = () => {
+      const cancelPendingReattach = () => {
+        if (navDebounceTimer) {
+          clearTimeout(navDebounceTimer);
+          navDebounceTimer = 0;
+        }
         if (navReattachTimer) {
           clearTimeout(navReattachTimer);
           navReattachTimer = 0;
         }
+      };
+      const runReattach = () => {
+        cancelPendingReattach();
         resetVideoElement();
         cachedYtPlayer = null;
         closeVolumeOptionsPopup();
@@ -3300,10 +3308,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }, NAV_REATTACH_DELAY_MS);
       };
       const scheduleReattach = () => {
-        if (navDebounceTimer) {
-          clearTimeout(navDebounceTimer);
-          navDebounceTimer = 0;
-        }
+        cancelPendingReattach();
         navDebounceTimer = window.setTimeout(() => {
           navDebounceTimer = 0;
           runReattach();
@@ -3315,7 +3320,14 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }
       };
       const handleNavigationComplete = () => {
+        resetVideoElement();
+        cachedYtPlayer = null;
         applyNativeVolumeVisibility();
+        const attached = attachSliderIfPossible();
+        if (attached || !isYouTubeSupportedPage()) {
+          cancelPendingReattach();
+          return;
+        }
         scheduleReattach();
       };
       window.addEventListener("yt-navigate-start", handleNavigationStart, true);
