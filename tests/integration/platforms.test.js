@@ -28,26 +28,6 @@ async function loadPlatform(config, setup = () => {}) {
   return {runtime,fixture};
 }
 
-for (const config of platforms) test(`${config.name}: Alt+Shift+D captures the rolling diagnostic timeline`,async()=>{
-  const {runtime}=await loadPlatform(config);
-  const captures=[];
-  const originalInfo=runtime.window.console.info;
-  runtime.window.console.info=(message,payload)=>captures.push({message,payload});
-  try{
-    const hotkey=new runtime.window.KeyboardEvent('keydown',{key:'D',code:'KeyD',altKey:true,shiftKey:true,bubbles:true,cancelable:true});
-    runtime.document.dispatchEvent(hotkey);
-    assert.equal(hotkey.defaultPrevented,true);
-    assert.equal(captures.length,1);
-    assert.equal(captures[0].payload.platform,config.file);
-    assert.equal(captures[0].payload.windowMs,10000);
-    assert.ok(captures[0].payload.events.some(event=>event.type==='start'));
-    assert.ok(captures[0].payload.events.some(event=>event.type==='capture'));
-  } finally {
-    runtime.window.console.info=originalInfo;
-    runtime.close();
-  }
-});
-
 function addYouTubeVideoToEarlyControls(runtime) {
   const player=runtime.document.getElementById('movie_player');
   const video=runtime.document.createElement('video');
@@ -77,6 +57,27 @@ test('YouTube: replace-native guard hides native volume areas as soon as they ap
   lateNativeArea.className='ytp-volume-area';
   runtime.document.body.appendChild(lateNativeArea);
   assert.equal(runtime.window.getComputedStyle(lateNativeArea).display,'none');
+  runtime.close();
+});
+
+test('YouTube: replace-native guard activates immediately when history enters a watch page',async()=>{
+  const config=platforms[0];
+  const runtime=createRuntime('https://www.youtube.com/',{runScripts:'outside-only'});
+  const fixture=config.fixture(runtime.document);
+  const nativeArea=fixture.player.querySelector('.ytp-volume-area');
+  runtime.window.localStorage.setItem(config.modeKey,'replace-native');
+  const source=await readFile(new URL('../../dist/youtube-volume-slider.user.js',import.meta.url),'utf8');
+  runtime.window.eval(source);
+  await waitForTimers(runtime);
+
+  assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),false);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+
+  runtime.window.history.pushState({},'', '/watch?v=next');
+
+  assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),true);
+  assert.equal(runtime.window.getComputedStyle(nativeArea).display,'none');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
   runtime.close();
 });
 
@@ -279,6 +280,45 @@ test('Twitch: arrow keys adjust by five percent while preserving mute and saved 
   assert.equal(slider.value,'100');
   await waitForTimers(runtime,180);
   assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'50');
+  runtime.close();
+});
+
+test('Twitch: replace-native mode restores unmarked player volume resets',async()=>{
+  const config=platforms[1];
+  let now=10_000;
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.Date.now=()=>now;
+    current.window.localStorage.setItem(config.volumeKey,'40');
+    current.window.localStorage.setItem(config.modeKey,'replace-native');
+  });
+  now=20_000;
+
+  fixture.player._tmPlayerApi.setVolume(.15);
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+
+  assert.equal(fixture.state.volume,.4);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-range').value,'40');
+  await waitForTimers(runtime,180);
+  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'40');
+  runtime.close();
+});
+
+test('Twitch: native-visible mode still persists external player volume changes',async()=>{
+  const config=platforms[1];
+  let now=10_000;
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.Date.now=()=>now;
+    current.window.localStorage.setItem(config.volumeKey,'40');
+    current.window.localStorage.setItem(config.modeKey,'on');
+  });
+  now=20_000;
+
+  fixture.player._tmPlayerApi.setVolume(.15);
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+
+  assert.equal(runtime.document.getElementById('tm-volume-slider-range').value,'15');
+  await waitForTimers(runtime,180);
+  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'15');
   runtime.close();
 });
 

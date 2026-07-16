@@ -6,7 +6,6 @@ import { createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/
 import { createCleanupRegistry, createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
 import { createStyleElement } from '../shared/styles.js';
 import { bindRangePointerInteraction, bindWheelVolumeStep, createVolumeControlElements, syncVolumeControl } from '../shared/slider-interactions.js';
-import { createDebugNodeIdentifier, createRollingDebugRecorder } from '../shared/debug-recorder.js';
 import { createTwitchControlsVisibilityManager } from './twitch-controls-visibility.js';
 
 export function startTwitchVolumeSlider() {
@@ -141,38 +140,6 @@ export function startTwitchVolumeSlider() {
             areControlsHidden: () => areTwitchControlsHidden()
         });
     let controlsVisibility = makeControlsVisibilityManager();
-    const debugNodeId = createDebugNodeIdentifier('twitch');
-    const debugRecorder = createRollingDebugRecorder({
-        window,
-        document,
-        platform: 'twitch',
-        getSnapshot: () => {
-            const video = getVideoElement();
-            const player = getPlayerContainer(video);
-            const overlay = document.getElementById(OVERLAY_ID);
-            let api = null;
-            try { api = video ? getTwitchPlayerApi(video) : null; } catch { /* diagnostic snapshot only */ }
-            return {
-                path: `${window.location.pathname}${window.location.search}`,
-                savedVolume: getSavedVolume(),
-                savedMute: readDebugStorage(MUTE_STORAGE_KEY),
-                mode: getVolumeSliderMode(),
-                video: video ? { id: debugNodeId(video), connected: video.isConnected, src: video.currentSrc || video.src, readyState: video.readyState, nativeVolume: video.volume, nativeMuted: video.muted, apiVolume: getVolume(video), apiMuted: isMuted(video) } : null,
-                api: api ? { getVolume: typeof api.getVolume, setVolume: typeof api.setVolume, isMuted: typeof api.isMuted, setMuted: typeof api.setMuted } : null,
-                player: player ? { id: debugNodeId(player), className: player.className } : null,
-                overlay: overlay ? { id: debugNodeId(overlay), connected: overlay.isConnected, ownsVideo: overlay._tmVolumeVideo === video, className: overlay.className } : null,
-                startupLockRemainingMs: startupLockUntil - Date.now(),
-                userIntentRemainingMs: userIntentUntil - Date.now(),
-                controlsHidden: areTwitchControlsHidden(player),
-                controlsHolds: controlsVisibility.size
-            };
-        }
-    });
-
-    function readDebugStorage(key) {
-        try { return localStorage.getItem(key); } catch { return '[unavailable]'; }
-    }
-
 
 
 
@@ -975,7 +942,6 @@ export function startTwitchVolumeSlider() {
     function setVolume(video, value, options = {}) {
         const preserveMute = options.preserveMute === true;
         const api = getTwitchPlayerApi(video);
-        debugRecorder.record('set-volume', { value, preserveMute, viaPlayerApi: !!api, before: getVolume(video), muted: isMuted(video) });
         if (api) {
             if (!preserveMute) {
                 try {
@@ -1040,7 +1006,6 @@ export function startTwitchVolumeSlider() {
             setMuted(video, true);
         }
         const value = getSavedVolume();
-        debugRecorder.record('restore-start', { value, savedMute, wasMuted, startupLockRemainingMs: startupLockUntil - Date.now() });
         if (value !== null) {
             setVolume(video, value, { preserveMute: wasMuted });
         }
@@ -1048,7 +1013,6 @@ export function startTwitchVolumeSlider() {
         if (wasMuted) {
             startStartupMuteGuard(video);
         }
-        debugRecorder.record('restore-finish', { volume: getVolume(video), muted: isMuted(video) });
     }
 
     function readSavedMute() {
@@ -2170,36 +2134,38 @@ export function startTwitchVolumeSlider() {
             releaseTwitchVolumeFocusSoon(overlay);
         });
 
-        // Sync slider UI and persist volume on any external/native change
-        // During startup lock, re-apply our saved volume if Twitch's player init overrides it
+        // Sync slider UI and persist volume on native changes. In replace-native
+        // mode, the custom controls own volume and unmarked player writes are resets.
         const onVideoVolumeChange = () => {
-            debugRecorder.record('volumechange', {
-                volume: getVolume(video),
-                muted: isMuted(video),
-                savedVolume: getSavedVolume(),
-                startupLockRemainingMs: startupLockUntil - Date.now(),
-                userIntentRemainingMs: userIntentUntil - Date.now(),
-                startupCorrectionApplied
-            });
-            if (Date.now() <= startupLockUntil) {
-                if (Date.now() <= userIntentUntil || startupCorrectionApplied) {
-                    debugRecorder.record('volumechange-ignored-during-lock', { userIntent: Date.now() <= userIntentUntil, startupCorrectionApplied });
+            const now = Date.now();
+            if (now <= startupLockUntil) {
+                if (now <= userIntentUntil || startupCorrectionApplied) {
                     return;
                 }
                 // Actively re-apply saved volume when Twitch overrides it during player initialization
                 const savedValue = getSavedVolume();
                 if (savedValue !== null && Math.abs(getVolume(video) - savedValue) > 1) {
-                    debugRecorder.record('volumechange-corrected-during-lock', { from: getVolume(video), to: savedValue });
                     setVolume(video, savedValue);
                 }
                 startupCorrectionApplied = true;
                 return;
             }
             try {
+                const muted = isMuted(video);
+                const playerVolume = getVolume(video);
+                const savedValue = getSavedVolume();
+                if (isNativeVolumeReplacementEnabled() && now > userIntentUntil &&
+                    savedValue !== null && Math.abs(playerVolume - savedValue) > 1) {
+                    cancelScheduledSaveVolume();
+                    setVolume(video, savedValue, { preserveMute: muted });
+                    saveMute(muted);
+                    setSliderFromPlayer(slider, label, video);
+                    return;
+                }
                 setSliderFromPlayer(slider, label, video);
-                saveMute(isMuted(video));
-                if (!isMuted(video)) {
-                    scheduleSaveVolume(getVolume(video));
+                saveMute(muted);
+                if (!muted) {
+                    scheduleSaveVolume(playerVolume);
                 }
             } catch (e) { /* prevent crash */ }
         };
@@ -2289,8 +2255,6 @@ export function startTwitchVolumeSlider() {
         const video = getVideoElement();
         const player = getPlayerContainer(video);
         const controlsHost = getTwitchControlsHost(player);
-        debugRecorder.record('attach-attempt', { videoPresent: !!video, playerPresent: !!player, controlsPresent: !!controlsHost });
-
         // Keep the options button available even when the slider is off.
         if (!isOverlayEnabled()) {
             removeOverlay();
@@ -2300,7 +2264,6 @@ export function startTwitchVolumeSlider() {
 
         let overlay = document.getElementById(OVERLAY_ID);
         if (overlay && overlay._tmVolumeVideo !== video) {
-            debugRecorder.record('attach-video-replaced', { oldVideoId: debugNodeId(overlay._tmVolumeVideo), newVideoId: debugNodeId(video), oldConnected: overlay._tmVolumeVideo?.isConnected, newConnected: video?.isConnected });
             disposeActiveOverlay();
             overlay = null;
         }
@@ -2452,7 +2415,6 @@ export function startTwitchVolumeSlider() {
         };
 
         const runReattach = () => {
-            debugRecorder.record('navigation-reattach-start', { path: window.location.pathname });
             if (navReattachTimer) {
                 clearTimeout(navReattachTimer);
                 navReattachTimer = 0;
@@ -2489,7 +2451,6 @@ export function startTwitchVolumeSlider() {
                 removeVolumeOptionsButton();
                 attachSliderIfPossible();
                 navReattachTimer = 0;
-                debugRecorder.record('navigation-reattach-finish', { path: window.location.pathname });
             }, NAV_REATTACH_DELAY_MS);
 
             // Late recovery restore: catches cases where Twitch's player finishes its own
@@ -2501,7 +2462,6 @@ export function startTwitchVolumeSlider() {
                 if (!vid) return;
                     const saved = getSavedVolume();
                     if (saved !== null && Math.abs(getVolume(vid) - saved) > 1) {
-                        debugRecorder.record('late-restore-correction', { from: getVolume(vid), to: saved });
                         restoreSavedVolume(vid);
                         const sliderEl = document.getElementById(SLIDER_ID);
                         const labelEl = document.getElementById(VALUE_LABEL_ID);
@@ -2513,7 +2473,6 @@ export function startTwitchVolumeSlider() {
         const scheduleReattachIfPathChanged = (nextPath) => {
             const targetPath = nextPath || window.location.pathname;
             if (targetPath === lastKnownPath) return;
-            debugRecorder.record('navigation-scheduled', { from: lastKnownPath, to: targetPath });
             lastKnownPath = targetPath;
             if (navDebounceTimer) {
                 clearTimeout(navDebounceTimer);

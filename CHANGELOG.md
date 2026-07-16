@@ -4,6 +4,11 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ## 2.7.1 - 2026-07-16
 
+### Fixed
+
+- **YouTube:** Hid the native volume control immediately on single-page watch-route changes so the default icon no longer flashes before the custom control attaches.
+- **Twitch:** Reapplied the saved volume instead of persisting unexpected player resets while native replacement is active, preventing blocked-ad transitions from sticking at 15%.
+
 ### Changed
 
 - **Both:** Consolidated matching pointer, click-snap, wheel, overlay-markup, and cleanup behavior into shared interaction modules to keep the two userscripts consistent.

@@ -1500,128 +1500,6 @@
     };
   }
 
-  // src/shared/debug-recorder.js
-  var DEBUG_WINDOW_MS = 1e4;
-  var SAMPLE_INTERVAL_MS = 100;
-  var MAX_EVENTS = 600;
-  function createDebugNodeIdentifier(prefix = "node") {
-    const ids = /* @__PURE__ */ new WeakMap();
-    let next = 1;
-    return (node) => {
-      if (!node || typeof node !== "object" && typeof node !== "function") return null;
-      if (!ids.has(node)) ids.set(node, `${prefix}-${next++}`);
-      return ids.get(node);
-    };
-  }
-  function compactValue(value, depth = 0) {
-    if (depth > 3) return "[depth-limit]";
-    if (value == null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-    if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack };
-    if (Array.isArray(value)) return value.slice(0, 20).map((item) => compactValue(item, depth + 1));
-    if (typeof value === "object") {
-      const result = {};
-      for (const [key, item] of Object.entries(value).slice(0, 40)) {
-        try {
-          result[key] = compactValue(item, depth + 1);
-        } catch {
-          result[key] = "[unavailable]";
-        }
-      }
-      return result;
-    }
-    return String(value);
-  }
-  function createRollingDebugRecorder({ window: window2, document: document2, platform, getSnapshot }) {
-    const events = [];
-    let lastSample = "";
-    let lastSampleAt = 0;
-    const startedAt = Date.now();
-    function trim(now = Date.now()) {
-      const cutoff = now - DEBUG_WINDOW_MS;
-      while (events.length && events[0].time < cutoff) events.shift();
-      if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
-    }
-    function record(type, detail = {}) {
-      const now = Date.now();
-      events.push({
-        time: now,
-        offsetMs: Math.round(window2.performance?.now?.() ?? now - startedAt),
-        type,
-        detail: compactValue(detail)
-      });
-      trim(now);
-    }
-    function readSnapshot() {
-      try {
-        return compactValue(getSnapshot?.() ?? {});
-      } catch (error) {
-        return { snapshotError: compactValue(error) };
-      }
-    }
-    const sampleTimer = window2.setInterval(() => {
-      const snapshot = readSnapshot();
-      const serialized = JSON.stringify(snapshot);
-      const now = Date.now();
-      if (serialized !== lastSample || now - lastSampleAt >= 1e3) {
-        record("sample", snapshot);
-        lastSample = serialized;
-        lastSampleAt = now;
-      }
-    }, SAMPLE_INTERVAL_MS);
-    function capture() {
-      record("capture", readSnapshot());
-      trim();
-      const payload = {
-        format: "volume-slider-debug-v1",
-        platform,
-        capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        page: { href: window2.location.href, visibilityState: document2.visibilityState },
-        userAgent: window2.navigator?.userAgent,
-        windowMs: DEBUG_WINDOW_MS,
-        events: [...events]
-      };
-      const json = JSON.stringify(payload, null, 2);
-      try {
-        const blob = new window2.Blob([json], { type: "application/json" });
-        const url = window2.URL.createObjectURL(blob);
-        const link = document2.createElement("a");
-        const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-        link.download = `volume-slider-${platform}-debug-${stamp}.json`;
-        link.href = url;
-        link.style.display = "none";
-        document2.documentElement.appendChild(link);
-        link.click();
-        link.remove();
-        window2.setTimeout(() => window2.URL.revokeObjectURL(url), 1e3);
-      } catch (error) {
-        record("capture-download-error", error);
-      }
-      window2.console?.info?.(`[Volume Slider] ${platform} debug capture`, payload);
-      return payload;
-    }
-    const hotkeyHandler = (event) => {
-      if (event.code !== "KeyD" || !event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return;
-      event.preventDefault();
-      event.stopPropagation();
-      capture();
-    };
-    document2.addEventListener("keydown", hotkeyHandler, true);
-    const recordPageEvent = (event) => record(`page:${event.type}`, { href: window2.location.href });
-    ["popstate", "hashchange", "pageshow", "pagehide"].forEach((type) => window2.addEventListener(type, recordPageEvent, true));
-    document2.addEventListener("visibilitychange", recordPageEvent, true);
-    record("start", readSnapshot());
-    return {
-      record,
-      capture,
-      dispose() {
-        window2.clearInterval(sampleTimer);
-        document2.removeEventListener("keydown", hotkeyHandler, true);
-        ["popstate", "hashchange", "pageshow", "pagehide"].forEach((type) => window2.removeEventListener(type, recordPageEvent, true));
-        document2.removeEventListener("visibilitychange", recordPageEvent, true);
-      }
-    };
-  }
-
   // src/platforms/youtube.js
   function startYouTubeVolumeSlider() {
     "use strict";
@@ -1732,41 +1610,6 @@
       debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
       isSnapEnabled: () => isSnapTo5Enabled()
     });
-    const debugNodeId = createDebugNodeIdentifier("yt");
-    const debugRecorder = createRollingDebugRecorder({
-      window,
-      document,
-      platform: "youtube",
-      getSnapshot: () => {
-        const video = getVideoElement();
-        const player = getPlayerContainer(video);
-        const nativeArea = getNativeVolumeArea(getYouTubeControlsHost(player));
-        const nativeStyle = nativeArea ? window.getComputedStyle(nativeArea) : null;
-        const overlay = document.getElementById(OVERLAY_ID);
-        return {
-          path: `${window.location.pathname}${window.location.search}`,
-          savedVolume: getSavedVolume(),
-          savedMute: readDebugStorage(MUTE_STORAGE_KEY),
-          mode: getVolumeSliderMode(),
-          supportedPage: isYouTubeSupportedPage(),
-          replacementClass: document.documentElement.classList.contains("tm-yt-volume-native-replacement-active"),
-          visibilityStylePresent: !!document.getElementById("tm-volume-native-visibility-style"),
-          nativeVolume: nativeArea ? { id: debugNodeId(nativeArea), connected: nativeArea.isConnected, display: nativeStyle?.display, visibility: nativeStyle?.visibility, opacity: nativeStyle?.opacity } : null,
-          customIconPresent: !!overlay?.querySelector?.(".tm-volume-icon-cell"),
-          overlay: overlay ? { id: debugNodeId(overlay), connected: overlay.isConnected, className: overlay.className, parentClass: overlay.parentElement?.className } : null,
-          video: video ? { id: debugNodeId(video), connected: video.isConnected, src: video.currentSrc || video.src, readyState: video.readyState, volume: getVolume(video), muted: isMuted(video) } : null,
-          player: player ? { id: debugNodeId(player), className: player.className } : null,
-          requestedVolumeIntent: requestedVolumeIntent ? { value: requestedVolumeIntent.value, remainingMs: requestedVolumeIntent.until - Date.now() } : null
-        };
-      }
-    });
-    function readDebugStorage(key) {
-      try {
-        return localStorage.getItem(key);
-      } catch {
-        return "[unavailable]";
-      }
-    }
     function shouldHideNativeVolume() {
       return isYouTubeSupportedPage() && isOverlayEnabled() && isNativeVolumeReplacementEnabled();
     }
@@ -1787,11 +1630,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function applyNativeVolumeVisibility() {
       ensureNativeVolumeVisibilityGuard();
       const shouldHideNative = shouldHideNativeVolume();
-      debugRecorder.record("native-visibility", {
-        shouldHideNative,
-        path: window.location.pathname,
-        nativeAreaPresent: !!getNativeVolumeArea(getYouTubeControlsHost(getPlayerContainer()))
-      });
       if (shouldHideNative) {
         const overlay = document.getElementById(OVERLAY_ID);
         const player = getPlayerContainer();
@@ -2326,7 +2164,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
     function setVolume(video, value) {
       const ytPlayer = getYouTubePlayer();
-      debugRecorder.record("set-volume", { value, viaPlayerApi: !!ytPlayer, before: getVolume(video), muted: isMuted(video) });
       if (ytPlayer) {
         if (ytPlayer.isMuted()) {
           ytPlayer.unMute();
@@ -2340,7 +2177,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function restoreSavedVolume(video) {
       const wasMuted = isMuted(video);
       const value = getSavedVolume();
-      debugRecorder.record("restore-start", { value, savedMute: readDebugStorage(MUTE_STORAGE_KEY), wasMuted });
       if (value !== null) {
         setVolume(video, value);
       }
@@ -2355,7 +2191,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }
       } catch (e) {
       }
-      debugRecorder.record("restore-finish", { volume: getVolume(video), muted: isMuted(video) });
     }
     function saveMute(muted) {
       try {
@@ -3253,12 +3088,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         saveMute(muted);
         const playerVolume = getVolume(video);
         const intent = requestedVolumeIntent;
-        debugRecorder.record("volumechange", { playerVolume, muted, intentValue: intent?.value ?? null, intentRemainingMs: intent ? intent.until - Date.now() : null });
         if (intent?.overlay === overlay) {
           if (Math.abs(playerVolume - intent.value) <= USER_VOLUME_TOLERANCE) {
             requestedVolumeIntent = null;
           } else if (Date.now() <= intent.until && !muted) {
-            debugRecorder.record("volumechange-ignored-stale", { playerVolume, requested: intent.value });
             return;
           } else {
             requestedVolumeIntent = null;
@@ -3308,7 +3141,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       applyNativeVolumeVisibility();
     }
     function attachSliderIfPossible() {
-      debugRecorder.record("attach-attempt", { path: window.location.pathname, supported: isYouTubeSupportedPage() });
       if (!isYouTubeSupportedPage()) {
         removeOverlay();
         removeVolumeOptionsButton();
@@ -3334,7 +3166,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       }
       let existingOverlay = document.getElementById(OVERLAY_ID);
       if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
-        debugRecorder.record("attach-video-replaced", { oldVideoId: debugNodeId(existingOverlay._tmVolumeVideo), newVideoId: debugNodeId(video), oldConnected: existingOverlay._tmVolumeVideo?.isConnected, newConnected: video?.isConnected });
         disposeActiveOverlay();
         existingOverlay = null;
       }
@@ -3451,7 +3282,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       if (window.__tmYtVolumeNavBound) return;
       window.__tmYtVolumeNavBound = true;
       const runReattach = () => {
-        debugRecorder.record("navigation-reattach-start", { path: window.location.pathname });
         if (navReattachTimer) {
           clearTimeout(navReattachTimer);
           navReattachTimer = 0;
@@ -3467,11 +3297,9 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
           removeOverlay();
           removeVolumeOptionsButton();
           attachSliderIfPossible();
-          debugRecorder.record("navigation-reattach-finish", { path: window.location.pathname });
         }, NAV_REATTACH_DELAY_MS);
       };
       const scheduleReattach = () => {
-        debugRecorder.record("navigation-scheduled", { path: window.location.pathname });
         if (navDebounceTimer) {
           clearTimeout(navDebounceTimer);
           navDebounceTimer = 0;
@@ -3481,8 +3309,22 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
           runReattach();
         }, NAV_DEBOUNCE_MS);
       };
+      const handleHistoryRouteChange = () => {
+        applyNativeVolumeVisibility();
+        scheduleReattach();
+      };
+      for (const methodName of ["pushState", "replaceState"]) {
+        const original = window.history?.[methodName];
+        if (typeof original !== "function") continue;
+        window.history[methodName] = function(...args) {
+          const result = Reflect.apply(original, this, args);
+          handleHistoryRouteChange();
+          return result;
+        };
+      }
       window.addEventListener("yt-navigate-finish", scheduleReattach, true);
       window.addEventListener("yt-page-data-updated", scheduleReattach, true);
+      window.addEventListener("popstate", handleHistoryRouteChange, true);
     }
     function init() {
       applyNativeVolumeVisibility();

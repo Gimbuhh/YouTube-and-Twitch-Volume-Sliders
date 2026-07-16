@@ -1500,128 +1500,6 @@
     };
   }
 
-  // src/shared/debug-recorder.js
-  var DEBUG_WINDOW_MS = 1e4;
-  var SAMPLE_INTERVAL_MS = 100;
-  var MAX_EVENTS = 600;
-  function createDebugNodeIdentifier(prefix = "node") {
-    const ids = /* @__PURE__ */ new WeakMap();
-    let next = 1;
-    return (node) => {
-      if (!node || typeof node !== "object" && typeof node !== "function") return null;
-      if (!ids.has(node)) ids.set(node, `${prefix}-${next++}`);
-      return ids.get(node);
-    };
-  }
-  function compactValue(value, depth = 0) {
-    if (depth > 3) return "[depth-limit]";
-    if (value == null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-    if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack };
-    if (Array.isArray(value)) return value.slice(0, 20).map((item) => compactValue(item, depth + 1));
-    if (typeof value === "object") {
-      const result = {};
-      for (const [key, item] of Object.entries(value).slice(0, 40)) {
-        try {
-          result[key] = compactValue(item, depth + 1);
-        } catch {
-          result[key] = "[unavailable]";
-        }
-      }
-      return result;
-    }
-    return String(value);
-  }
-  function createRollingDebugRecorder({ window: window2, document: document2, platform, getSnapshot }) {
-    const events = [];
-    let lastSample = "";
-    let lastSampleAt = 0;
-    const startedAt = Date.now();
-    function trim(now = Date.now()) {
-      const cutoff = now - DEBUG_WINDOW_MS;
-      while (events.length && events[0].time < cutoff) events.shift();
-      if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
-    }
-    function record(type, detail = {}) {
-      const now = Date.now();
-      events.push({
-        time: now,
-        offsetMs: Math.round(window2.performance?.now?.() ?? now - startedAt),
-        type,
-        detail: compactValue(detail)
-      });
-      trim(now);
-    }
-    function readSnapshot() {
-      try {
-        return compactValue(getSnapshot?.() ?? {});
-      } catch (error) {
-        return { snapshotError: compactValue(error) };
-      }
-    }
-    const sampleTimer = window2.setInterval(() => {
-      const snapshot = readSnapshot();
-      const serialized = JSON.stringify(snapshot);
-      const now = Date.now();
-      if (serialized !== lastSample || now - lastSampleAt >= 1e3) {
-        record("sample", snapshot);
-        lastSample = serialized;
-        lastSampleAt = now;
-      }
-    }, SAMPLE_INTERVAL_MS);
-    function capture() {
-      record("capture", readSnapshot());
-      trim();
-      const payload = {
-        format: "volume-slider-debug-v1",
-        platform,
-        capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        page: { href: window2.location.href, visibilityState: document2.visibilityState },
-        userAgent: window2.navigator?.userAgent,
-        windowMs: DEBUG_WINDOW_MS,
-        events: [...events]
-      };
-      const json = JSON.stringify(payload, null, 2);
-      try {
-        const blob = new window2.Blob([json], { type: "application/json" });
-        const url = window2.URL.createObjectURL(blob);
-        const link = document2.createElement("a");
-        const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-        link.download = `volume-slider-${platform}-debug-${stamp}.json`;
-        link.href = url;
-        link.style.display = "none";
-        document2.documentElement.appendChild(link);
-        link.click();
-        link.remove();
-        window2.setTimeout(() => window2.URL.revokeObjectURL(url), 1e3);
-      } catch (error) {
-        record("capture-download-error", error);
-      }
-      window2.console?.info?.(`[Volume Slider] ${platform} debug capture`, payload);
-      return payload;
-    }
-    const hotkeyHandler = (event) => {
-      if (event.code !== "KeyD" || !event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return;
-      event.preventDefault();
-      event.stopPropagation();
-      capture();
-    };
-    document2.addEventListener("keydown", hotkeyHandler, true);
-    const recordPageEvent = (event) => record(`page:${event.type}`, { href: window2.location.href });
-    ["popstate", "hashchange", "pageshow", "pagehide"].forEach((type) => window2.addEventListener(type, recordPageEvent, true));
-    document2.addEventListener("visibilitychange", recordPageEvent, true);
-    record("start", readSnapshot());
-    return {
-      record,
-      capture,
-      dispose() {
-        window2.clearInterval(sampleTimer);
-        document2.removeEventListener("keydown", hotkeyHandler, true);
-        ["popstate", "hashchange", "pageshow", "pagehide"].forEach((type) => window2.removeEventListener(type, recordPageEvent, true));
-        document2.removeEventListener("visibilitychange", recordPageEvent, true);
-      }
-    };
-  }
-
   // src/platforms/twitch-controls-visibility.js
   function createTwitchControlsVisibilityManager({
     window: window2,
@@ -1871,43 +1749,6 @@
       areControlsHidden: () => areTwitchControlsHidden()
     });
     let controlsVisibility = makeControlsVisibilityManager();
-    const debugNodeId = createDebugNodeIdentifier("twitch");
-    const debugRecorder = createRollingDebugRecorder({
-      window,
-      document,
-      platform: "twitch",
-      getSnapshot: () => {
-        const video = getVideoElement();
-        const player = getPlayerContainer(video);
-        const overlay = document.getElementById(OVERLAY_ID);
-        let api = null;
-        try {
-          api = video ? getTwitchPlayerApi(video) : null;
-        } catch {
-        }
-        return {
-          path: `${window.location.pathname}${window.location.search}`,
-          savedVolume: getSavedVolume(),
-          savedMute: readDebugStorage(MUTE_STORAGE_KEY),
-          mode: getVolumeSliderMode(),
-          video: video ? { id: debugNodeId(video), connected: video.isConnected, src: video.currentSrc || video.src, readyState: video.readyState, nativeVolume: video.volume, nativeMuted: video.muted, apiVolume: getVolume(video), apiMuted: isMuted(video) } : null,
-          api: api ? { getVolume: typeof api.getVolume, setVolume: typeof api.setVolume, isMuted: typeof api.isMuted, setMuted: typeof api.setMuted } : null,
-          player: player ? { id: debugNodeId(player), className: player.className } : null,
-          overlay: overlay ? { id: debugNodeId(overlay), connected: overlay.isConnected, ownsVideo: overlay._tmVolumeVideo === video, className: overlay.className } : null,
-          startupLockRemainingMs: startupLockUntil - Date.now(),
-          userIntentRemainingMs: userIntentUntil - Date.now(),
-          controlsHidden: areTwitchControlsHidden(player),
-          controlsHolds: controlsVisibility.size
-        };
-      }
-    });
-    function readDebugStorage(key) {
-      try {
-        return localStorage.getItem(key);
-      } catch {
-        return "[unavailable]";
-      }
-    }
     function getPlayerContainer(video = getVideoElement()) {
       if (!video) {
         return null;
@@ -2592,7 +2433,6 @@
     function setVolume(video, value, options = {}) {
       const preserveMute = options.preserveMute === true;
       const api = getTwitchPlayerApi(video);
-      debugRecorder.record("set-volume", { value, preserveMute, viaPlayerApi: !!api, before: getVolume(video), muted: isMuted(video) });
       if (api) {
         if (!preserveMute) {
           try {
@@ -2649,7 +2489,6 @@
         setMuted(video, true);
       }
       const value = getSavedVolume();
-      debugRecorder.record("restore-start", { value, savedMute, wasMuted, startupLockRemainingMs: startupLockUntil - Date.now() });
       if (value !== null) {
         setVolume(video, value, { preserveMute: wasMuted });
       }
@@ -2657,7 +2496,6 @@
       if (wasMuted) {
         startStartupMuteGuard(video);
       }
-      debugRecorder.record("restore-finish", { volume: getVolume(video), muted: isMuted(video) });
     }
     function readSavedMute() {
       try {
@@ -3690,32 +3528,33 @@
         releaseTwitchVolumeFocusSoon(overlay);
       });
       const onVideoVolumeChange = () => {
-        debugRecorder.record("volumechange", {
-          volume: getVolume(video),
-          muted: isMuted(video),
-          savedVolume: getSavedVolume(),
-          startupLockRemainingMs: startupLockUntil - Date.now(),
-          userIntentRemainingMs: userIntentUntil - Date.now(),
-          startupCorrectionApplied
-        });
-        if (Date.now() <= startupLockUntil) {
-          if (Date.now() <= userIntentUntil || startupCorrectionApplied) {
-            debugRecorder.record("volumechange-ignored-during-lock", { userIntent: Date.now() <= userIntentUntil, startupCorrectionApplied });
+        const now = Date.now();
+        if (now <= startupLockUntil) {
+          if (now <= userIntentUntil || startupCorrectionApplied) {
             return;
           }
           const savedValue = getSavedVolume();
           if (savedValue !== null && Math.abs(getVolume(video) - savedValue) > 1) {
-            debugRecorder.record("volumechange-corrected-during-lock", { from: getVolume(video), to: savedValue });
             setVolume(video, savedValue);
           }
           startupCorrectionApplied = true;
           return;
         }
         try {
+          const muted = isMuted(video);
+          const playerVolume = getVolume(video);
+          const savedValue = getSavedVolume();
+          if (isNativeVolumeReplacementEnabled() && now > userIntentUntil && savedValue !== null && Math.abs(playerVolume - savedValue) > 1) {
+            cancelScheduledSaveVolume();
+            setVolume(video, savedValue, { preserveMute: muted });
+            saveMute(muted);
+            setSliderFromPlayer(slider, label, video);
+            return;
+          }
           setSliderFromPlayer(slider, label, video);
-          saveMute(isMuted(video));
-          if (!isMuted(video)) {
-            scheduleSaveVolume(getVolume(video));
+          saveMute(muted);
+          if (!muted) {
+            scheduleSaveVolume(playerVolume);
           }
         } catch (e) {
         }
@@ -3798,7 +3637,6 @@
       const video = getVideoElement();
       const player = getPlayerContainer(video);
       const controlsHost = getTwitchControlsHost(player);
-      debugRecorder.record("attach-attempt", { videoPresent: !!video, playerPresent: !!player, controlsPresent: !!controlsHost });
       if (!isOverlayEnabled()) {
         removeOverlay();
         injectVolumeOptionsButton();
@@ -3806,7 +3644,6 @@
       }
       let overlay = document.getElementById(OVERLAY_ID);
       if (overlay && overlay._tmVolumeVideo !== video) {
-        debugRecorder.record("attach-video-replaced", { oldVideoId: debugNodeId(overlay._tmVolumeVideo), newVideoId: debugNodeId(video), oldConnected: overlay._tmVolumeVideo?.isConnected, newConnected: video?.isConnected });
         disposeActiveOverlay();
         overlay = null;
       }
@@ -3939,7 +3776,6 @@
         }
       };
       const runReattach = () => {
-        debugRecorder.record("navigation-reattach-start", { path: window.location.pathname });
         if (navReattachTimer) {
           clearTimeout(navReattachTimer);
           navReattachTimer = 0;
@@ -3963,7 +3799,6 @@
           removeVolumeOptionsButton();
           attachSliderIfPossible();
           navReattachTimer = 0;
-          debugRecorder.record("navigation-reattach-finish", { path: window.location.pathname });
         }, NAV_REATTACH_DELAY_MS);
         navLateRestoreTimer = window.setTimeout(() => {
           navLateRestoreTimer = 0;
@@ -3972,7 +3807,6 @@
           if (!vid) return;
           const saved = getSavedVolume();
           if (saved !== null && Math.abs(getVolume(vid) - saved) > 1) {
-            debugRecorder.record("late-restore-correction", { from: getVolume(vid), to: saved });
             restoreSavedVolume(vid);
             const sliderEl = document.getElementById(SLIDER_ID);
             const labelEl = document.getElementById(VALUE_LABEL_ID);
@@ -3983,7 +3817,6 @@
       const scheduleReattachIfPathChanged = (nextPath) => {
         const targetPath = nextPath || window.location.pathname;
         if (targetPath === lastKnownPath) return;
-        debugRecorder.record("navigation-scheduled", { from: lastKnownPath, to: targetPath });
         lastKnownPath = targetPath;
         if (navDebounceTimer) {
           clearTimeout(navDebounceTimer);
