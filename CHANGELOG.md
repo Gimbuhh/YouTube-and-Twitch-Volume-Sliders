@@ -6,7 +6,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Fixed
 
-- **YouTube:** Hid the native volume control immediately on single-page watch-route changes so the default icon no longer flashes before the custom control attaches.
+- **YouTube:** Prevented the native volume icon from flashing during navigation and mounted the custom control as soon as the incoming player was ready, avoiding a blank control gap.
 - **Twitch:** Reapplied the saved volume instead of persisting unexpected player resets while native replacement is active, preventing blocked-ad transitions from sticking at 15%.
 
 ### Changed
