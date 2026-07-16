@@ -28,6 +28,26 @@ async function loadPlatform(config, setup = () => {}) {
   return {runtime,fixture};
 }
 
+for (const config of platforms) test(`${config.name}: Alt+Shift+D captures the rolling diagnostic timeline`,async()=>{
+  const {runtime}=await loadPlatform(config);
+  const captures=[];
+  const originalInfo=runtime.window.console.info;
+  runtime.window.console.info=(message,payload)=>captures.push({message,payload});
+  try{
+    const hotkey=new runtime.window.KeyboardEvent('keydown',{key:'D',code:'KeyD',altKey:true,shiftKey:true,bubbles:true,cancelable:true});
+    runtime.document.dispatchEvent(hotkey);
+    assert.equal(hotkey.defaultPrevented,true);
+    assert.equal(captures.length,1);
+    assert.equal(captures[0].payload.platform,config.file);
+    assert.equal(captures[0].payload.windowMs,10000);
+    assert.ok(captures[0].payload.events.some(event=>event.type==='start'));
+    assert.ok(captures[0].payload.events.some(event=>event.type==='capture'));
+  } finally {
+    runtime.window.console.info=originalInfo;
+    runtime.close();
+  }
+});
+
 function addYouTubeVideoToEarlyControls(runtime) {
   const player=runtime.document.getElementById('movie_player');
   const video=runtime.document.createElement('video');

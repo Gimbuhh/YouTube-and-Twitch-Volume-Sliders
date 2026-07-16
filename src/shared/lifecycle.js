@@ -24,6 +24,35 @@ export function createOverlayLifecycle() {
   };
 }
 
+export function createCleanupRegistry() {
+  const cleanups = [];
+  let disposed = false;
+
+  function add(cleanup) {
+    if (typeof cleanup !== 'function') return cleanup;
+    if (disposed) cleanup();
+    else cleanups.push(cleanup);
+    return cleanup;
+  }
+
+  function listen(target, type, handler, options) {
+    target?.addEventListener?.(type, handler, options);
+    add(() => target?.removeEventListener?.(type, handler, options));
+    return handler;
+  }
+
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    for (let index = cleanups.length - 1; index >= 0; index -= 1) {
+      cleanups[index]();
+    }
+    cleanups.length = 0;
+  }
+
+  return { add, listen, dispose, get disposed() { return disposed; } };
+}
+
 export function createVideoLocator(document, window) {
   let cachedVideo = null;
 

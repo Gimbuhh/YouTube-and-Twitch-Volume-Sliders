@@ -1,6 +1,6 @@
 # Add real-browser smoke coverage
 
-Status: PROPOSED for 2.8  
+Status: DONE in 2.7.1
 Priority: P1 regression prevention
 
 ## Objective

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.7
+// @version      2.7.1
 // @description  Compact in-bar volume indicator that expands into a wide YouTube volume slider.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://www.youtube.com/favicon.ico
@@ -1271,6 +1271,32 @@
       }
     };
   }
+  function createCleanupRegistry() {
+    const cleanups = [];
+    let disposed = false;
+    function add(cleanup) {
+      if (typeof cleanup !== "function") return cleanup;
+      if (disposed) cleanup();
+      else cleanups.push(cleanup);
+      return cleanup;
+    }
+    function listen(target, type, handler, options) {
+      target?.addEventListener?.(type, handler, options);
+      add(() => target?.removeEventListener?.(type, handler, options));
+      return handler;
+    }
+    function dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (let index = cleanups.length - 1; index >= 0; index -= 1) {
+        cleanups[index]();
+      }
+      cleanups.length = 0;
+    }
+    return { add, listen, dispose, get disposed() {
+      return disposed;
+    } };
+  }
   function createVideoLocator(document2, window2) {
     let cachedVideo = null;
     function getVideoElement() {
@@ -1305,6 +1331,295 @@
     style.id = id;
     parent.appendChild(style);
     return style;
+  }
+
+  // src/shared/slider-interactions.js
+  function createVolumeControlElements({
+    document: document2,
+    overlay,
+    sliderId,
+    valueLabelId,
+    makeVolumeIndicatorSvg,
+    populateSliderTicks
+  }) {
+    const iconCell = document2.createElement("button");
+    iconCell.type = "button";
+    iconCell.className = "tm-volume-icon-cell";
+    const indicator = document2.createElement("div");
+    indicator.className = "tm-volume-indicator";
+    indicator.appendChild(makeVolumeIndicatorSvg());
+    iconCell.appendChild(indicator);
+    const panelBg = document2.createElement("div");
+    panelBg.className = "tm-volume-panel-bg";
+    const topRow = document2.createElement("div");
+    topRow.className = "tm-volume-controls tm-volume-top-row";
+    const label = document2.createElement("div");
+    label.id = valueLabelId;
+    label.textContent = "100%";
+    topRow.appendChild(label);
+    const sliderWrap = document2.createElement("div");
+    sliderWrap.className = "tm-volume-controls tm-volume-slider-row";
+    Object.assign(sliderWrap.style, {
+      position: "relative",
+      height: "40px",
+      display: "flex",
+      alignItems: "center"
+    });
+    const tickOverlay = document2.createElement("div");
+    tickOverlay.className = "tm-slider-ticks";
+    populateSliderTicks(tickOverlay);
+    const sliderTrack = document2.createElement("div");
+    sliderTrack.className = "tm-slider-track";
+    const slider = document2.createElement("input");
+    slider.id = sliderId;
+    slider.type = "range";
+    slider.min = "0";
+    slider.max = "100";
+    slider.step = "1";
+    Object.assign(slider.style, {
+      width: "100%",
+      display: "block",
+      margin: "0",
+      cursor: "pointer"
+    });
+    slider.setAttribute("aria-label", "Volume");
+    slider.setAttribute("aria-describedby", valueLabelId);
+    sliderWrap.append(sliderTrack, slider, tickOverlay);
+    overlay.append(panelBg, iconCell, topRow, sliderWrap);
+    return { iconCell, indicator, panelBg, topRow, label, sliderWrap, tickOverlay, sliderTrack, slider };
+  }
+  function syncVolumeControl({ slider, label, overlay, value, muted, updateSliderBar, updateVolumeIndicator }) {
+    slider.value = String(value);
+    label.textContent = muted ? "Muted" : `${value}%`;
+    updateSliderBar(slider);
+    updateVolumeIndicator(overlay, value, muted);
+  }
+  function bindWheelVolumeStep({ target, slider, step = 5, beforeApply, applyValue }) {
+    const handler = (event) => {
+      if (event.deltaY === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const currentValue = Number(slider.value) || 0;
+      const direction = event.deltaY < 0 ? 1 : -1;
+      const nextValue = Math.min(100, Math.max(0, currentValue + direction * step));
+      if (nextValue === currentValue) return;
+      beforeApply?.(event, nextValue);
+      slider.value = String(nextValue);
+      applyValue(nextValue);
+    };
+    target.addEventListener("wheel", handler, { passive: false });
+    return () => target.removeEventListener("wheel", handler, { passive: false });
+  }
+  function bindRangePointerInteraction({
+    window: window2,
+    slider,
+    overlay,
+    isSnapEnabled,
+    readSnappedValue,
+    snapValue,
+    applyValue,
+    setExpanded,
+    updateOpacity,
+    collapseIfIdle,
+    onFinish,
+    finishLayout
+  }) {
+    let pointerStartX = 0;
+    let pointerStartY = 0;
+    let pointerStartValue = 0;
+    let pointerMoved = false;
+    let clickSnapHandled = false;
+    let pointerActive = false;
+    const snapDirectClickIfNeeded = () => {
+      const currentValue = Number(slider.value) || 0;
+      if (clickSnapHandled || pointerMoved || currentValue === pointerStartValue) return;
+      const snappedValue = snapValue(currentValue);
+      slider.value = String(snappedValue);
+      applyValue(snappedValue);
+      clickSnapHandled = true;
+    };
+    const readPressAwareValue = () => {
+      if (isSnapEnabled()) return readSnappedValue(slider);
+      let value = Number(slider.value) || 0;
+      if (pointerActive && !pointerMoved && !clickSnapHandled && value !== pointerStartValue) {
+        value = snapValue(value);
+        slider.value = String(value);
+        clickSnapHandled = true;
+      }
+      return value;
+    };
+    const finish = (event) => {
+      const wasDragging = overlay.dataset.tmDragging === "true";
+      if (event?.type === "pointerup" && wasDragging) snapDirectClickIfNeeded();
+      overlay.dataset.tmDragging = "false";
+      pointerActive = false;
+      onFinish?.(event, wasDragging);
+      if (finishLayout) {
+        finishLayout(!overlay.matches(":hover"));
+        return;
+      }
+      updateOpacity();
+      collapseIfIdle(!overlay.matches(":hover"));
+    };
+    const start = (event) => {
+      pointerStartX = event.clientX;
+      pointerStartY = event.clientY;
+      pointerStartValue = Number(slider.value) || 0;
+      pointerMoved = false;
+      clickSnapHandled = false;
+      pointerActive = true;
+      overlay.dataset.tmDragging = "true";
+      setExpanded();
+      updateOpacity();
+    };
+    const move = (event) => {
+      if (Math.abs(event.clientX - pointerStartX) > 3 || Math.abs(event.clientY - pointerStartY) > 3) {
+        pointerMoved = true;
+      }
+    };
+    slider.addEventListener("pointerdown", start);
+    slider.addEventListener("pointermove", move);
+    slider.addEventListener("pointerup", finish);
+    slider.addEventListener("click", snapDirectClickIfNeeded);
+    slider.addEventListener("pointercancel", finish);
+    window2.addEventListener("pointerup", finish, true);
+    window2.addEventListener("pointercancel", finish, true);
+    window2.addEventListener("blur", finish);
+    return {
+      readPressAwareValue,
+      dispose() {
+        slider.removeEventListener("pointerdown", start);
+        slider.removeEventListener("pointermove", move);
+        slider.removeEventListener("pointerup", finish);
+        slider.removeEventListener("click", snapDirectClickIfNeeded);
+        slider.removeEventListener("pointercancel", finish);
+        window2.removeEventListener("pointerup", finish, true);
+        window2.removeEventListener("pointercancel", finish, true);
+        window2.removeEventListener("blur", finish);
+      }
+    };
+  }
+
+  // src/shared/debug-recorder.js
+  var DEBUG_WINDOW_MS = 1e4;
+  var SAMPLE_INTERVAL_MS = 100;
+  var MAX_EVENTS = 600;
+  function createDebugNodeIdentifier(prefix = "node") {
+    const ids = /* @__PURE__ */ new WeakMap();
+    let next = 1;
+    return (node) => {
+      if (!node || typeof node !== "object" && typeof node !== "function") return null;
+      if (!ids.has(node)) ids.set(node, `${prefix}-${next++}`);
+      return ids.get(node);
+    };
+  }
+  function compactValue(value, depth = 0) {
+    if (depth > 3) return "[depth-limit]";
+    if (value == null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+    if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack };
+    if (Array.isArray(value)) return value.slice(0, 20).map((item) => compactValue(item, depth + 1));
+    if (typeof value === "object") {
+      const result = {};
+      for (const [key, item] of Object.entries(value).slice(0, 40)) {
+        try {
+          result[key] = compactValue(item, depth + 1);
+        } catch {
+          result[key] = "[unavailable]";
+        }
+      }
+      return result;
+    }
+    return String(value);
+  }
+  function createRollingDebugRecorder({ window: window2, document: document2, platform, getSnapshot }) {
+    const events = [];
+    let lastSample = "";
+    let lastSampleAt = 0;
+    const startedAt = Date.now();
+    function trim(now = Date.now()) {
+      const cutoff = now - DEBUG_WINDOW_MS;
+      while (events.length && events[0].time < cutoff) events.shift();
+      if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
+    }
+    function record(type, detail = {}) {
+      const now = Date.now();
+      events.push({
+        time: now,
+        offsetMs: Math.round(window2.performance?.now?.() ?? now - startedAt),
+        type,
+        detail: compactValue(detail)
+      });
+      trim(now);
+    }
+    function readSnapshot() {
+      try {
+        return compactValue(getSnapshot?.() ?? {});
+      } catch (error) {
+        return { snapshotError: compactValue(error) };
+      }
+    }
+    const sampleTimer = window2.setInterval(() => {
+      const snapshot = readSnapshot();
+      const serialized = JSON.stringify(snapshot);
+      const now = Date.now();
+      if (serialized !== lastSample || now - lastSampleAt >= 1e3) {
+        record("sample", snapshot);
+        lastSample = serialized;
+        lastSampleAt = now;
+      }
+    }, SAMPLE_INTERVAL_MS);
+    function capture() {
+      record("capture", readSnapshot());
+      trim();
+      const payload = {
+        format: "volume-slider-debug-v1",
+        platform,
+        capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        page: { href: window2.location.href, visibilityState: document2.visibilityState },
+        userAgent: window2.navigator?.userAgent,
+        windowMs: DEBUG_WINDOW_MS,
+        events: [...events]
+      };
+      const json = JSON.stringify(payload, null, 2);
+      try {
+        const blob = new window2.Blob([json], { type: "application/json" });
+        const url = window2.URL.createObjectURL(blob);
+        const link = document2.createElement("a");
+        const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+        link.download = `volume-slider-${platform}-debug-${stamp}.json`;
+        link.href = url;
+        link.style.display = "none";
+        document2.documentElement.appendChild(link);
+        link.click();
+        link.remove();
+        window2.setTimeout(() => window2.URL.revokeObjectURL(url), 1e3);
+      } catch (error) {
+        record("capture-download-error", error);
+      }
+      window2.console?.info?.(`[Volume Slider] ${platform} debug capture`, payload);
+      return payload;
+    }
+    const hotkeyHandler = (event) => {
+      if (event.code !== "KeyD" || !event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      capture();
+    };
+    document2.addEventListener("keydown", hotkeyHandler, true);
+    const recordPageEvent = (event) => record(`page:${event.type}`, { href: window2.location.href });
+    ["popstate", "hashchange", "pageshow", "pagehide"].forEach((type) => window2.addEventListener(type, recordPageEvent, true));
+    document2.addEventListener("visibilitychange", recordPageEvent, true);
+    record("start", readSnapshot());
+    return {
+      record,
+      capture,
+      dispose() {
+        window2.clearInterval(sampleTimer);
+        document2.removeEventListener("keydown", hotkeyHandler, true);
+        ["popstate", "hashchange", "pageshow", "pagehide"].forEach((type) => window2.removeEventListener(type, recordPageEvent, true));
+        document2.removeEventListener("visibilitychange", recordPageEvent, true);
+      }
+    };
   }
 
   // src/platforms/youtube.js
@@ -1417,6 +1732,41 @@
       debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
       isSnapEnabled: () => isSnapTo5Enabled()
     });
+    const debugNodeId = createDebugNodeIdentifier("yt");
+    const debugRecorder = createRollingDebugRecorder({
+      window,
+      document,
+      platform: "youtube",
+      getSnapshot: () => {
+        const video = getVideoElement();
+        const player = getPlayerContainer(video);
+        const nativeArea = getNativeVolumeArea(getYouTubeControlsHost(player));
+        const nativeStyle = nativeArea ? window.getComputedStyle(nativeArea) : null;
+        const overlay = document.getElementById(OVERLAY_ID);
+        return {
+          path: `${window.location.pathname}${window.location.search}`,
+          savedVolume: getSavedVolume(),
+          savedMute: readDebugStorage(MUTE_STORAGE_KEY),
+          mode: getVolumeSliderMode(),
+          supportedPage: isYouTubeSupportedPage(),
+          replacementClass: document.documentElement.classList.contains("tm-yt-volume-native-replacement-active"),
+          visibilityStylePresent: !!document.getElementById("tm-volume-native-visibility-style"),
+          nativeVolume: nativeArea ? { id: debugNodeId(nativeArea), connected: nativeArea.isConnected, display: nativeStyle?.display, visibility: nativeStyle?.visibility, opacity: nativeStyle?.opacity } : null,
+          customIconPresent: !!overlay?.querySelector?.(".tm-volume-icon-cell"),
+          overlay: overlay ? { id: debugNodeId(overlay), connected: overlay.isConnected, className: overlay.className, parentClass: overlay.parentElement?.className } : null,
+          video: video ? { id: debugNodeId(video), connected: video.isConnected, src: video.currentSrc || video.src, readyState: video.readyState, volume: getVolume(video), muted: isMuted(video) } : null,
+          player: player ? { id: debugNodeId(player), className: player.className } : null,
+          requestedVolumeIntent: requestedVolumeIntent ? { value: requestedVolumeIntent.value, remainingMs: requestedVolumeIntent.until - Date.now() } : null
+        };
+      }
+    });
+    function readDebugStorage(key) {
+      try {
+        return localStorage.getItem(key);
+      } catch {
+        return "[unavailable]";
+      }
+    }
     function shouldHideNativeVolume() {
       return isYouTubeSupportedPage() && isOverlayEnabled() && isNativeVolumeReplacementEnabled();
     }
@@ -1437,6 +1787,11 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function applyNativeVolumeVisibility() {
       ensureNativeVolumeVisibilityGuard();
       const shouldHideNative = shouldHideNativeVolume();
+      debugRecorder.record("native-visibility", {
+        shouldHideNative,
+        path: window.location.pathname,
+        nativeAreaPresent: !!getNativeVolumeArea(getYouTubeControlsHost(getPlayerContainer()))
+      });
       if (shouldHideNative) {
         const overlay = document.getElementById(OVERLAY_ID);
         const player = getPlayerContainer();
@@ -1971,6 +2326,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
     function setVolume(video, value) {
       const ytPlayer = getYouTubePlayer();
+      debugRecorder.record("set-volume", { value, viaPlayerApi: !!ytPlayer, before: getVolume(video), muted: isMuted(video) });
       if (ytPlayer) {
         if (ytPlayer.isMuted()) {
           ytPlayer.unMute();
@@ -1984,6 +2340,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function restoreSavedVolume(video) {
       const wasMuted = isMuted(video);
       const value = getSavedVolume();
+      debugRecorder.record("restore-start", { value, savedMute: readDebugStorage(MUTE_STORAGE_KEY), wasMuted });
       if (value !== null) {
         setVolume(video, value);
       }
@@ -1998,6 +2355,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }
       } catch (e) {
       }
+      debugRecorder.record("restore-finish", { volume: getVolume(video), muted: isMuted(video) });
     }
     function saveMute(muted) {
       try {
@@ -2785,12 +3143,13 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         alignSelf: "center",
         transition: "width 0.22s cubic-bezier(0.16, 1, 0.3, 1)"
       });
+      const cleanupRegistry = createCleanupRegistry();
       let hasPointerIntent = false;
       const markPointerIntent = () => {
         hasPointerIntent = true;
         window.removeEventListener("pointermove", markPointerIntent, true);
       };
-      window.addEventListener("pointermove", markPointerIntent, true);
+      cleanupRegistry.listen(window, "pointermove", markPointerIntent, true);
       overlay.addEventListener("mouseenter", () => {
         if (!hasPointerIntent) return;
         overlay.dataset.tmHovering = "true";
@@ -2816,14 +3175,16 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         clearExpandedHold(overlay);
         setOverlayExpanded(overlay, false);
       };
-      document.addEventListener("click", collapseHeldSliderOnVideoClick, true);
-      const iconCell = document.createElement("button");
-      iconCell.type = "button";
-      iconCell.className = "tm-volume-icon-cell";
-      const indicator = document.createElement("div");
-      indicator.className = "tm-volume-indicator";
-      indicator.appendChild(makeVolumeIndicatorSvg());
-      iconCell.appendChild(indicator);
+      cleanupRegistry.listen(document, "click", collapseHeldSliderOnVideoClick, true);
+      const { iconCell, panelBg, topRow, label, sliderWrap, tickOverlay, slider } = createVolumeControlElements({
+        document,
+        overlay,
+        sliderId: SLIDER_ID,
+        valueLabelId: VALUE_LABEL_ID,
+        makeVolumeIndicatorSvg,
+        populateSliderTicks
+      });
+      cleanupRegistry.add(() => tickOverlay._tmSliderTicksCleanup?.());
       iconCell.addEventListener("mousedown", (event) => {
         event.preventDefault();
       });
@@ -2835,42 +3196,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         setSliderFromPlayer(slider, label, video);
         markVolumeChangedWhileExpanded(overlay);
       });
-      const panelBg = document.createElement("div");
-      panelBg.className = "tm-volume-panel-bg";
-      const topRow = document.createElement("div");
-      topRow.className = "tm-volume-controls tm-volume-top-row";
-      const label = document.createElement("div");
-      label.id = VALUE_LABEL_ID;
-      label.textContent = "100%";
-      topRow.appendChild(label);
-      const sliderWrap = document.createElement("div");
-      sliderWrap.className = "tm-volume-controls tm-volume-slider-row";
-      sliderWrap.style.position = "relative";
-      sliderWrap.style.height = "40px";
-      sliderWrap.style.display = "flex";
-      sliderWrap.style.alignItems = "center";
-      const tickOverlay = document.createElement("div");
-      tickOverlay.className = "tm-slider-ticks";
-      populateSliderTicks(tickOverlay);
-      const sliderTrack = document.createElement("div");
-      sliderTrack.className = "tm-slider-track";
-      const slider = document.createElement("input");
-      slider.id = SLIDER_ID;
-      slider.type = "range";
-      slider.min = "0";
-      slider.max = "100";
-      slider.step = "1";
-      slider.style.width = "100%";
-      slider.style.display = "block";
-      slider.style.margin = "0";
-      slider.style.cursor = "pointer";
-      slider.setAttribute("aria-label", "Volume");
-      slider.setAttribute("aria-describedby", VALUE_LABEL_ID);
       const syncInitialSliderState = (value, muted = false) => {
-        slider.value = String(value);
-        label.textContent = muted ? "Muted" : `${value}%`;
-        updateSliderBar(slider);
-        updateVolumeIndicator(overlay, value, muted);
+        syncVolumeControl({ slider, label, overlay, value, muted, updateSliderBar, updateVolumeIndicator });
       };
       const initVol = getSavedVolume();
       if (initVol !== null) {
@@ -2878,12 +3205,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       } else {
         syncInitialSliderState(getVolume(video), isMuted(video));
       }
-      let pointerStartX = 0;
-      let pointerStartY = 0;
-      let pointerStartValue = 0;
-      let pointerMoved = false;
-      let clickSnapHandled = false;
-      let pointerActive = false;
       const applySliderValue = (value) => {
         requestedVolumeIntent = { value, until: Date.now() + USER_VOLUME_INTENT_GRACE_MS, overlay };
         setVolume(video, value);
@@ -2894,72 +3215,27 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         scheduleSaveVolume(value);
         markVolumeChangedWhileExpanded(overlay);
       };
-      const applyWheelVolumeStep = (event) => {
-        if (event.deltaY === 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const currentValue = Number(slider.value) || 0;
-        const direction = event.deltaY < 0 ? 1 : -1;
-        const nextValue = Math.min(100, Math.max(0, currentValue + direction * WHEEL_VOLUME_STEP));
-        if (nextValue === currentValue) return;
-        slider.value = String(nextValue);
-        applySliderValue(nextValue);
-      };
-      iconCell.addEventListener("wheel", applyWheelVolumeStep, { passive: false });
-      const snapDirectClickIfNeeded = () => {
-        const currentValue = Number(slider.value) || 0;
-        if (clickSnapHandled || pointerMoved || currentValue === pointerStartValue) return;
-        const snappedValue = snapTo5(currentValue);
-        slider.value = String(snappedValue);
-        applySliderValue(snappedValue);
-        clickSnapHandled = true;
-      };
-      const readPressAwareSliderValue = () => {
-        if (isSnapTo5Enabled()) {
-          return readSnappedSliderValue(slider);
-        }
-        let value = Number(slider.value) || 0;
-        if (pointerActive && !pointerMoved && !clickSnapHandled && value !== pointerStartValue) {
-          value = snapTo5(value);
-          slider.value = String(value);
-          clickSnapHandled = true;
-        }
-        return value;
-      };
-      const finishSliderInteraction = (event) => {
-        const wasDragging = overlay.dataset.tmDragging === "true";
-        if (event?.type === "pointerup" && wasDragging) {
-          snapDirectClickIfNeeded();
-        }
-        overlay.dataset.tmDragging = "false";
-        pointerActive = false;
-        updateOverlayOpacity(overlay);
-        collapseOverlayIfIdle(overlay, !overlay.matches(":hover"));
-      };
-      slider.addEventListener("pointerdown", (event) => {
-        pointerStartX = event.clientX;
-        pointerStartY = event.clientY;
-        pointerStartValue = Number(slider.value) || 0;
-        pointerMoved = false;
-        clickSnapHandled = false;
-        pointerActive = true;
-        overlay.dataset.tmDragging = "true";
-        setOverlayExpanded(overlay, true);
-        updateOverlayOpacity(overlay);
+      cleanupRegistry.add(bindWheelVolumeStep({
+        target: iconCell,
+        slider,
+        step: WHEEL_VOLUME_STEP,
+        applyValue: applySliderValue
+      }));
+      const rangePointer = bindRangePointerInteraction({
+        window,
+        slider,
+        overlay,
+        isSnapEnabled: isSnapTo5Enabled,
+        readSnappedValue: readSnappedSliderValue,
+        snapValue: snapTo5,
+        applyValue: applySliderValue,
+        setExpanded: () => setOverlayExpanded(overlay, true),
+        updateOpacity: () => updateOverlayOpacity(overlay),
+        collapseIfIdle: (force) => collapseOverlayIfIdle(overlay, force)
       });
-      slider.addEventListener("pointermove", (event) => {
-        if (Math.abs(event.clientX - pointerStartX) > 3 || Math.abs(event.clientY - pointerStartY) > 3) {
-          pointerMoved = true;
-        }
-      });
-      slider.addEventListener("pointerup", finishSliderInteraction);
-      slider.addEventListener("click", snapDirectClickIfNeeded);
-      slider.addEventListener("pointercancel", finishSliderInteraction);
-      window.addEventListener("pointerup", finishSliderInteraction, true);
-      window.addEventListener("pointercancel", finishSliderInteraction, true);
-      window.addEventListener("blur", finishSliderInteraction);
+      cleanupRegistry.add(() => rangePointer.dispose());
       slider.addEventListener("input", () => {
-        applySliderValue(readPressAwareSliderValue());
+        applySliderValue(rangePointer.readPressAwareValue());
       });
       slider.addEventListener("change", () => {
         applySliderValue(readSnappedSliderValue(slider));
@@ -2977,10 +3253,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         saveMute(muted);
         const playerVolume = getVolume(video);
         const intent = requestedVolumeIntent;
+        debugRecorder.record("volumechange", { playerVolume, muted, intentValue: intent?.value ?? null, intentRemainingMs: intent ? intent.until - Date.now() : null });
         if (intent?.overlay === overlay) {
           if (Math.abs(playerVolume - intent.value) <= USER_VOLUME_TOLERANCE) {
             requestedVolumeIntent = null;
           } else if (Date.now() <= intent.until && !muted) {
+            debugRecorder.record("volumechange-ignored-stale", { playerVolume, requested: intent.value });
             return;
           } else {
             requestedVolumeIntent = null;
@@ -2990,13 +3268,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!muted) scheduleSaveVolume(playerVolume);
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
-      sliderWrap.appendChild(sliderTrack);
-      sliderWrap.appendChild(slider);
-      sliderWrap.appendChild(tickOverlay);
-      overlay.appendChild(panelBg);
-      overlay.appendChild(iconCell);
-      overlay.appendChild(topRow);
-      overlay.appendChild(sliderWrap);
       updateOverlayAppearance(overlay);
       if (isAlwaysExpandedEnabled()) {
         setOverlayExpanded(overlay, true, true);
@@ -3017,15 +3288,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       const cleanup = () => {
         if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
         video.removeEventListener("volumechange", onVideoVolumeChange);
-        window.removeEventListener("pointerup", finishSliderInteraction, true);
-        window.removeEventListener("pointercancel", finishSliderInteraction, true);
-        window.removeEventListener("blur", finishSliderInteraction);
         window.removeEventListener("keydown", clearCompletedDragIntentForKeyboard, true);
         window.removeEventListener("resize", onLayoutChange);
-        window.removeEventListener("pointermove", markPointerIntent, true);
-        document.removeEventListener("click", collapseHeldSliderOnVideoClick, true);
         controlsObserver.disconnect();
-        tickOverlay._tmSliderTicksCleanup?.();
+        cleanupRegistry.dispose();
         clearExpandedHold(overlay);
       };
       overlayLifecycle.set(overlay, cleanup);
@@ -3042,6 +3308,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       applyNativeVolumeVisibility();
     }
     function attachSliderIfPossible() {
+      debugRecorder.record("attach-attempt", { path: window.location.pathname, supported: isYouTubeSupportedPage() });
       if (!isYouTubeSupportedPage()) {
         removeOverlay();
         removeVolumeOptionsButton();
@@ -3067,6 +3334,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       }
       let existingOverlay = document.getElementById(OVERLAY_ID);
       if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
+        debugRecorder.record("attach-video-replaced", { oldVideoId: debugNodeId(existingOverlay._tmVolumeVideo), newVideoId: debugNodeId(video), oldConnected: existingOverlay._tmVolumeVideo?.isConnected, newConnected: video?.isConnected });
         disposeActiveOverlay();
         existingOverlay = null;
       }
@@ -3183,6 +3451,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       if (window.__tmYtVolumeNavBound) return;
       window.__tmYtVolumeNavBound = true;
       const runReattach = () => {
+        debugRecorder.record("navigation-reattach-start", { path: window.location.pathname });
         if (navReattachTimer) {
           clearTimeout(navReattachTimer);
           navReattachTimer = 0;
@@ -3198,9 +3467,11 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
           removeOverlay();
           removeVolumeOptionsButton();
           attachSliderIfPossible();
+          debugRecorder.record("navigation-reattach-finish", { path: window.location.pathname });
         }, NAV_REATTACH_DELAY_MS);
       };
       const scheduleReattach = () => {
+        debugRecorder.record("navigation-scheduled", { path: window.location.pathname });
         if (navDebounceTimer) {
           clearTimeout(navDebounceTimer);
           navDebounceTimer = 0;

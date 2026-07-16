@@ -1,6 +1,6 @@
 # Extract shared platform interaction modules
 
-Status: PROPOSED for 2.8  
+Status: DONE in 2.7.1
 Priority: P2 code quality  
 Depends on: plan 012; plan 013 should land first
 

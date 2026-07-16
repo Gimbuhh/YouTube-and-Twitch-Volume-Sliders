@@ -2,6 +2,13 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.7.1 - 2026-07-16
+
+### Changed
+
+- **Both:** Consolidated matching pointer, click-snap, wheel, overlay-markup, and cleanup behavior into shared interaction modules to keep the two userscripts consistent.
+- **Twitch:** Coordinated options, post-close, and keyboard controls-visibility holds so overlapping interactions no longer release each other's controls state.
+
 ## 2.7 - 2026-07-11
 
 ### Added

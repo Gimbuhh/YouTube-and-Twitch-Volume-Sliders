@@ -5,3 +5,15 @@
 Unit tests cover shared settings and volume functions. Integration tests execute the generated `dist/*.user.js` files in explicit YouTube and Twitch fixtures. They verify standalone startup, mute-safe restoration, direct slider intent, accessible controls, options-dialog focus, mode off, external detachment, and reattachment. This prevents source-only scaffolding from passing while production artifacts are broken.
 
 Tests do not contact either service. A frozen install is the only step that may access a package registry.
+
+## Real-browser smoke checks
+
+Run the opt-in Chrome smoke suite when changing input defaults, focus modality, rendered geometry, overflow, or Twitch controls-visibility timing:
+
+```sh
+pnpm test:browser
+```
+
+The suite uses deterministic local YouTube and Twitch player contracts while routing pages onto their real origins. It uses an installed Chrome or Edge executable without downloading a browser and prints a clear skip when neither is available. Set `VOLUME_SLIDER_CHROME` to choose a specific executable. Set `VOLUME_SLIDER_SMOKE_DIST` to exercise a preserved pair of `youtube-volume-slider.user.js` and `twitch-volume-slider.user.js` artifacts, including preserved known-bad regression artifacts.
+
+The regular `pnpm check` remains browser-independent and deterministic.
