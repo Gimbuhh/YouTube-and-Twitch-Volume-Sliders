@@ -3309,22 +3309,19 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
           runReattach();
         }, NAV_DEBOUNCE_MS);
       };
-      const handleHistoryRouteChange = () => {
+      const handleNavigationStart = () => {
+        if (isOverlayEnabled() && isNativeVolumeReplacementEnabled()) {
+          document.documentElement.classList.add("tm-yt-volume-native-replacement-active");
+        }
+      };
+      const handleNavigationComplete = () => {
         applyNativeVolumeVisibility();
         scheduleReattach();
       };
-      for (const methodName of ["pushState", "replaceState"]) {
-        const original = window.history?.[methodName];
-        if (typeof original !== "function") continue;
-        window.history[methodName] = function(...args) {
-          const result = Reflect.apply(original, this, args);
-          handleHistoryRouteChange();
-          return result;
-        };
-      }
-      window.addEventListener("yt-navigate-finish", scheduleReattach, true);
-      window.addEventListener("yt-page-data-updated", scheduleReattach, true);
-      window.addEventListener("popstate", handleHistoryRouteChange, true);
+      window.addEventListener("yt-navigate-start", handleNavigationStart, true);
+      window.addEventListener("yt-navigate-finish", handleNavigationComplete, true);
+      window.addEventListener("yt-page-data-updated", handleNavigationComplete, true);
+      window.addEventListener("popstate", handleNavigationComplete, true);
     }
     function init() {
       applyNativeVolumeVisibility();

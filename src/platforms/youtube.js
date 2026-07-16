@@ -2014,27 +2014,26 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             }, NAV_DEBOUNCE_MS);
         };
 
-        const handleHistoryRouteChange = () => {
-            // YouTube updates the URL before its navigation-finish events. Hide the
-            // native control immediately, while the delayed reattach safely waits
-            // for the new player/video ownership to settle.
+        const handleNavigationStart = () => {
+            // Tampermonkey can isolate the userscript's History object from the one
+            // YouTube calls. The navigation-start event crosses that boundary and
+            // fires before the incoming player can expose its native volume area.
+            if (isOverlayEnabled() && isNativeVolumeReplacementEnabled()) {
+                document.documentElement.classList.add('tm-yt-volume-native-replacement-active');
+            }
+        };
+
+        const handleNavigationComplete = () => {
+            // Reconcile unsupported destinations immediately, then let the delayed
+            // reattach wait for YouTube to finish replacing player ownership.
             applyNativeVolumeVisibility();
             scheduleReattach();
         };
 
-        for (const methodName of ['pushState', 'replaceState']) {
-            const original = window.history?.[methodName];
-            if (typeof original !== 'function') continue;
-            window.history[methodName] = function (...args) {
-                const result = Reflect.apply(original, this, args);
-                handleHistoryRouteChange();
-                return result;
-            };
-        }
-
-        window.addEventListener('yt-navigate-finish', scheduleReattach, true);
-        window.addEventListener('yt-page-data-updated', scheduleReattach, true);
-        window.addEventListener('popstate', handleHistoryRouteChange, true);
+        window.addEventListener('yt-navigate-start', handleNavigationStart, true);
+        window.addEventListener('yt-navigate-finish', handleNavigationComplete, true);
+        window.addEventListener('yt-page-data-updated', handleNavigationComplete, true);
+        window.addEventListener('popstate', handleNavigationComplete, true);
     }
 
     function init() {

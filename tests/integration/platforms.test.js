@@ -60,7 +60,7 @@ test('YouTube: replace-native guard hides native volume areas as soon as they ap
   runtime.close();
 });
 
-test('YouTube: replace-native guard activates immediately when history enters a watch page',async()=>{
+test('YouTube: replace-native guard activates at navigation start before the watch URL changes',async()=>{
   const config=platforms[0];
   const runtime=createRuntime('https://www.youtube.com/',{runScripts:'outside-only'});
   const fixture=config.fixture(runtime.document);
@@ -73,11 +73,19 @@ test('YouTube: replace-native guard activates immediately when history enters a 
   assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),false);
   assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
 
-  runtime.window.history.pushState({},'', '/watch?v=next');
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-start'));
 
   assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),true);
   assert.equal(runtime.window.getComputedStyle(nativeArea).display,'none');
   assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-finish'));
+  assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),false);
+
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-start'));
+  runtime.window.history.pushState({},'', '/watch?v=next');
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-finish'));
+  assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),true);
   runtime.close();
 });
 
