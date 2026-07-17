@@ -96,6 +96,7 @@ export function startTwitchVolumeSlider() {
     let nativeSettingsObserver = null;
     let nativeSettingsObserverTarget = null;
     let delayedFirstAttachRestoreTimer = 0;
+    let playerBoundaryResizeFrame = 0;
     const overlayLifecycle = createOverlayLifecycle();
     const { getVideoElement, resetVideoElement, ensurePlayerPositioning } = createVideoLocator(document, window);
     const USER_INTENT_GRACE_MS = 5000;
@@ -184,26 +185,10 @@ export function startTwitchVolumeSlider() {
         return video?.closest?.('.video-player__container') || player;
     }
 
-    function getElementWidth(element) {
-        const rect = element?.getBoundingClientRect?.();
+    function isTwitchPreviewPlayer(player = getPlayerContainer()) {
+        const rect = player?.getBoundingClientRect?.();
         const width = Number(rect?.width);
-        return Number.isFinite(width) && width > 0 ? width : 0;
-    }
-
-    function isTwitchPreviewPlayerWidth(width) {
-        return width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
-    }
-
-    function updateTwitchPreviewPlayerSizing(overlay, player) {
-        if (!overlay) return;
-        const playerWidth = getElementWidth(player);
-        const isPreviewPlayer = isTwitchPreviewPlayerWidth(playerWidth);
-        overlay.classList.toggle('tm-twitch-preview-player', isPreviewPlayer);
-        if (isPreviewPlayer) {
-            overlay.style.setProperty('--tm-twitch-preview-player-width', `${playerWidth.toFixed(2)}px`);
-        } else {
-            overlay.style.removeProperty('--tm-twitch-preview-player-width');
-        }
+        return Number.isFinite(width) && width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
     }
 
     function getTwitchControlsHost(player = getPlayerContainer()) {
@@ -353,7 +338,6 @@ export function startTwitchVolumeSlider() {
 
     function placeOverlay(overlay, player, controlsHost) {
         if (!overlay || !player) return;
-        updateTwitchPreviewPlayerSizing(overlay, player);
 
         if (isSliderOnVideo()) {
             const overlayHost = getVideoOverlayContainer(undefined, player);
@@ -379,8 +363,9 @@ export function startTwitchVolumeSlider() {
         const player = getPlayerContainer(video);
         const controlsHost = getTwitchControlsHost(player);
         const nativeVolumeGroup = getNativeVolumeGroup(controlsHost);
+        const isPreviewPlayer = isTwitchPreviewPlayer(player);
         if (nativeVolumeGroup) {
-            const shouldHideNative = isOverlayEnabled() && isNativeVolumeReplacementEnabled();
+            const shouldHideNative = !isPreviewPlayer && isOverlayEnabled() && isNativeVolumeReplacementEnabled();
             const nextDisplay = shouldHideNative ? 'none' : '';
             if (nativeVolumeGroup.style.display !== nextDisplay) {
                 nativeVolumeGroup.style.display = nextDisplay;
@@ -388,7 +373,7 @@ export function startTwitchVolumeSlider() {
         }
 
         const overlay = document.getElementById(OVERLAY_ID);
-        if (overlay && player && !isOverlayInteractionFocused(overlay)) {
+        if (overlay && player && !isPreviewPlayer && !isOverlayInteractionFocused(overlay)) {
             placeOverlay(overlay, player, controlsHost);
         }
     }
@@ -451,22 +436,6 @@ export function startTwitchVolumeSlider() {
   --tm-active-track-h: 9px;
   --tm-visual-track-h: 4px;
   --tm-thumb-size: 18px;
-}
-
-#${OVERLAY_ID}.tm-twitch-preview-player {
-  --tm-pill-min-width: 184px;
-  --tm-pill-zoom-adaptive-width: calc(var(--tm-twitch-preview-player-width, 520px) * 0.48);
-  --tm-pill-max-width: 260px;
-  --tm-label-row-width: 42px;
-  --tm-slider-row-offset: 54px;
-}
-
-#${OVERLAY_ID}.tm-twitch-preview-player.tm-volume-appearance-classic {
-  --tm-pill-min-width: 220px;
-  --tm-pill-zoom-adaptive-width: calc(var(--tm-twitch-preview-player-width, 520px) * 0.58);
-  --tm-pill-max-width: 304px;
-  --tm-label-row-width: 84px;
-  --tm-slider-row-offset: 96px;
 }
 
 @media (max-width: 320px) {
@@ -1491,7 +1460,12 @@ export function startTwitchVolumeSlider() {
 
     function injectVolumeOptionsButton() {
         ensureOptionsStyles();
-        const host = getTwitchRightControlsHost();
+        const player = getPlayerContainer();
+        if (isTwitchPreviewPlayer(player)) {
+            removeVolumeOptionsButton();
+            return;
+        }
+        const host = getTwitchRightControlsHost(player || undefined);
         const settingsWrapper = getTwitchSettingsWrapper(host);
         const settingsBtn = getTwitchSettingsButton(host);
         if (!host || !settingsWrapper || !settingsBtn) return;
@@ -2144,8 +2118,9 @@ export function startTwitchVolumeSlider() {
                 }
                 // Actively re-apply saved volume when Twitch overrides it during player initialization
                 const savedValue = getSavedVolume();
-                if (savedValue !== null && Math.abs(getVolume(video) - savedValue) > 1) {
-                    setVolume(video, savedValue);
+                const muted = isMuted(video);
+                if (savedValue !== null && Math.abs(getUnderlyingVolume(video) - savedValue) > 1) {
+                    setVolume(video, savedValue, { preserveMute: muted });
                 }
                 startupCorrectionApplied = true;
                 return;
@@ -2255,6 +2230,11 @@ export function startTwitchVolumeSlider() {
         const video = getVideoElement();
         const player = getPlayerContainer(video);
         const controlsHost = getTwitchControlsHost(player);
+        if (isTwitchPreviewPlayer(player)) {
+            removeOverlay();
+            removeVolumeOptionsButton();
+            return true;
+        }
         // Keep the options button available even when the slider is off.
         if (!isOverlayEnabled()) {
             removeOverlay();
@@ -2400,6 +2380,18 @@ export function startTwitchVolumeSlider() {
         attemptAttach(0);
     }
 
+    function setupPlayerBoundaryResizeHandler() {
+        window.addEventListener('resize', () => {
+            if (playerBoundaryResizeFrame) return;
+            playerBoundaryResizeFrame = window.requestAnimationFrame(() => {
+                playerBoundaryResizeFrame = 0;
+                resetVideoElement();
+                attachSliderIfPossible();
+                applyNativeVolumeVisibility();
+            });
+        }, true);
+    }
+
     function setupNavigationHandler() {
         if (window.__tmTwitchVolumeNavPatched) return;
         window.__tmTwitchVolumeNavPatched = true;
@@ -2460,13 +2452,14 @@ export function startTwitchVolumeSlider() {
                 if (Date.now() <= userIntentUntil) return;
                 const vid = getVideoElement();
                 if (!vid) return;
-                    const saved = getSavedVolume();
-                    if (saved !== null && Math.abs(getVolume(vid) - saved) > 1) {
-                        restoreSavedVolume(vid);
-                        const sliderEl = document.getElementById(SLIDER_ID);
-                        const labelEl = document.getElementById(VALUE_LABEL_ID);
-                        if (sliderEl) setSliderFromPlayer(sliderEl, labelEl, vid);
-                    }
+                if (isTwitchPreviewPlayer(getPlayerContainer(vid))) return;
+                const saved = getSavedVolume();
+                if (saved !== null && Math.abs(getVolume(vid) - saved) > 1) {
+                    restoreSavedVolume(vid);
+                    const sliderEl = document.getElementById(SLIDER_ID);
+                    const labelEl = document.getElementById(VALUE_LABEL_ID);
+                    if (sliderEl) setSliderFromPlayer(sliderEl, labelEl, vid);
+                }
             }, NAV_LATE_RESTORE_DELAY_MS);
         };
 
@@ -2506,6 +2499,7 @@ export function startTwitchVolumeSlider() {
     function init() {
         setupInitialAttempts();
         setupAttachObserver();
+        setupPlayerBoundaryResizeHandler();
         setupNavigationHandler();
         setupNativeSettingsCloseHandler();
     }

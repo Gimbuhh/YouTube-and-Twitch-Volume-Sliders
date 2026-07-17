@@ -42,7 +42,11 @@ html,body{margin:0;background:#111;color:#fff;font-family:Arial;min-height:2200p
 (()=>{const player=document.querySelector('.video-player');const video=player.querySelector('video');const state={volume:.5,muted:true,lastArrowPrevented:null};player._tmPlayerApi={getVolume:()=>state.volume,setVolume:value=>{state.volume=value;video.dispatchEvent(new Event('volumechange'));},isMuted:()=>state.muted,setMuted:value=>{state.muted=value;video.muted=value;video.dispatchEvent(new Event('volumechange'));}};player.__reactFiber$smoke={return:{memoizedProps:{mediaPlayerInstance:player._tmPlayerApi},return:null}};document.addEventListener('keydown',event=>{if(event.key==='ArrowUp'||event.key==='ArrowDown')state.lastArrowPrevented=event.defaultPrevented;});window.__smoke=state;})();
 </script></body></html>`;
 
-async function preparedPage(browser,{platform,url,html,storage}){
+const twitchPreviewHtml=twitchHtml
+  .replace('width:900px','width:533px')
+  .replace('<div data-a-target="player-volume-slider"></div>','<div class="native-volume-group"><button data-a-target="player-mute-unmute-button">M</button><div data-a-target="player-volume-slider"></div></div>');
+
+async function preparedPage(browser,{platform,url,html,storage,expectOverlay=true}){
   const context=await browser.newContext({viewport:{width:1280,height:800}});
   const page=await context.newPage();
   const pageErrors=[];
@@ -54,11 +58,16 @@ async function preparedPage(browser,{platform,url,html,storage}){
   const fixture=html.replace('<head>',`<head>${userscript}`);
   await page.route(`${new URL(url).origin}/**`,route=>route.fulfill({status:200,contentType:'text/html',body:fixture}));
   await page.goto(url,{waitUntil:'domcontentloaded'});
-  try{
-    await page.waitForSelector('#tm-volume-slider-overlay',{state:'attached',timeout:5000});
-  }catch(error){
-    const evidence=await page.evaluate(()=>({href:location.href,readyState:document.readyState,body:document.body?.innerHTML.slice(0,500),nativeGuard:document.documentElement.className,optionsButton:!!document.querySelector('#tm-volume-options-button')}));
-    throw new Error(`${platform} overlay did not mount: ${JSON.stringify({pageErrors,evidence})}`,{cause:error});
+  if(expectOverlay){
+    try{
+      await page.waitForSelector('#tm-volume-slider-overlay',{state:'attached',timeout:5000});
+    }catch(error){
+      const evidence=await page.evaluate(()=>({href:location.href,readyState:document.readyState,body:document.body?.innerHTML.slice(0,500),nativeGuard:document.documentElement.className,optionsButton:!!document.querySelector('#tm-volume-options-button')}));
+      throw new Error(`${platform} overlay did not mount: ${JSON.stringify({pageErrors,evidence})}`,{cause:error});
+    }
+  }else{
+    await page.waitForTimeout(600);
+    assert.equal(pageErrors.length,0,`${platform} preview has no page errors`);
   }
   return {context,page};
 }
@@ -131,10 +140,28 @@ async function twitchSmoke(browser){
   }finally{await context.close();}
 }
 
+async function twitchPreviewSmoke(browser){
+  const {context,page}=await preparedPage(browser,{platform:'twitch',url:'https://www.twitch.tv/directory',html:twitchPreviewHtml,storage:{'tm-twitch-volume':'40','tm-twitch-muted':'false','tm-twitch-volume-slider-mode':'replace-native'},expectOverlay:false});
+  try{
+    const preview=await page.evaluate(()=>({
+      overlay:!!document.querySelector('#tm-volume-slider-overlay'),
+      optionsButton:!!document.querySelector('#tm-volume-options-button'),
+      nativeDisplay:document.querySelector('.native-volume-group')?.style.display,
+      volume:window.__smoke.volume
+    }));
+    assert.equal(preview.overlay,false);
+    assert.equal(preview.optionsButton,false);
+    assert.equal(preview.nativeDisplay,'');
+    assert.equal(preview.volume,.5);
+    console.log('browser smoke: Twitch compact preview remains native passed');
+  }finally{await context.close();}
+}
+
 const browser=await chromium.launch({headless:true,executablePath,args:['--disable-background-networking','--disable-component-update','--no-first-run']});
 try{
   await youtubeSmoke(browser);
   await twitchSmoke(browser);
+  await twitchPreviewSmoke(browser);
   console.log(`browser smoke passed with ${executablePath}`);
 }finally{
   await browser.close();

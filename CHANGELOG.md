@@ -8,11 +8,13 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 - **YouTube:** Prevented the native volume icon from flashing during navigation and mounted the custom control as soon as the incoming player was ready, avoiding a blank control gap.
 - **Twitch:** Reapplied the saved volume instead of persisting unexpected player resets while native replacement is active, preventing blocked-ad transitions from sticking at 15%.
+- **Twitch:** Preserved saved mute while correcting Twitch's volume during player startup.
 
 ### Changed
 
 - **Both:** Consolidated matching pointer, click-snap, wheel, overlay-markup, and cleanup behavior into shared interaction modules to keep the two userscripts consistent.
 - **Twitch:** Coordinated options, post-close, and keyboard controls-visibility holds so overlapping interactions no longer release each other's controls state.
+- **Twitch:** Left compact preview players on Twitch's native controls so the expanding custom slider no longer crowds out other preview actions.
 
 ## 2.7 - 2026-07-11
 

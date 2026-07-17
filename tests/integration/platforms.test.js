@@ -472,24 +472,22 @@ test('Twitch: options button mounts when native controls appear before video',as
   runtime.close();
 });
 
-test('Twitch: preview player mounts slider and options in its own controls',async()=>{
+test('Twitch: compact preview remains native and attaches after expanding to a main player',async()=>{
   const config=platforms[1];
   const runtime=await startBuiltArtifact(config);
+  runtime.window.localStorage.setItem(config.volumeKey,'40');
+  runtime.window.localStorage.setItem(config.modeKey,'replace-native');
   runtime.window.localStorage.setItem(config.locationKey,'video');
-  const inactive=runtime.document.createElement('div');
-  inactive.className='video-player';
-  inactive.setAttribute('data-a-target','video-player');
-  inactive.innerHTML='<div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings"></button></div></div>';
-  runtime.document.body.appendChild(inactive);
 
   const preview=runtime.document.createElement('div');
   preview.className='video-player';
   preview.setAttribute('data-a-target','video-player');
-  preview.innerHTML='<div class="video-player__container"><div class="video-ref" data-a-target="video-ref"><video aria-label="Twitch video player"></video><section id="channel-player" aria-label="Player Controls"><div data-a-target="player-controls" class="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings"></button></div></div></section></div></div>';
+  preview.innerHTML='<div class="video-player__container"><div class="video-ref" data-a-target="video-ref"><video aria-label="Twitch video player"></video><section id="channel-player" aria-label="Player Controls"><div data-a-target="player-controls" class="player-controls"><div class="player-controls__left-control-group"><div class="native-volume-group"><button data-a-target="player-mute-unmute-button"></button><div data-a-target="player-volume-slider"></div></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings"></button></div></div></section></div></div>';
   runtime.document.body.appendChild(preview);
   const previewContainer=preview.querySelector('.video-player__container');
-  preview.getBoundingClientRect=()=>({left:100,top:100,right:633,bottom:400,width:533,height:300});
-  previewContainer.getBoundingClientRect=()=>({left:100,top:100,right:633,bottom:400,width:533,height:300});
+  let playerWidth=533;
+  preview.getBoundingClientRect=()=>({left:100,top:100,right:100+playerWidth,bottom:400,width:playerWidth,height:300});
+  previewContainer.getBoundingClientRect=()=>({left:100,top:100,right:100+playerWidth,bottom:400,width:playerWidth,height:300});
   const video=preview.querySelector('video');
   Object.defineProperty(video,'clientWidth',{value:533,configurable:true});
   Object.defineProperty(video,'clientHeight',{value:300,configurable:true});
@@ -499,22 +497,20 @@ test('Twitch: preview player mounts slider and options in its own controls',asyn
 
   await waitForTimers(runtime,60);
 
-  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
-  const options=runtime.document.getElementById('tm-volume-options-button');
-  assert.ok(overlay);
-  assert.ok(options);
-  assert.equal(preview.querySelector('#tm-volume-slider-overlay'),overlay);
-  assert.equal(preview.querySelector('#tm-volume-options-button'),options);
-  assert.equal(overlay.parentElement,previewContainer);
-  assert.equal(overlay.classList.contains('tm-twitch-preview-player'),true);
-  assert.equal(overlay.style.getPropertyValue('--tm-twitch-preview-player-width'),'533.00px');
-  assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/\.tm-twitch-preview-player\s*{[^}]*--tm-pill-min-width:\s*184px/s);
-  assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/\.tm-twitch-preview-player\s*{[^}]*--tm-pill-zoom-adaptive-width:\s*calc\(var\(--tm-twitch-preview-player-width,\s*520px\) \* 0\.48\)/s);
-  options.click();
-  await waitForTimers(runtime);
-  assert.equal(runtime.document.getElementById('tm-volume-options-popup')?.parentElement,previewContainer);
-  assert.equal(inactive.querySelector('#tm-volume-slider-overlay'),null);
-  assert.equal(inactive.querySelector('#tm-volume-options-button'),null);
+  const nativeVolumeGroup=preview.querySelector('.native-volume-group');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+  assert.equal(runtime.document.getElementById('tm-volume-options-button'),null);
+  assert.equal(nativeVolumeGroup.style.display,'');
+  assert.equal(volume,.5);
+
+  playerWidth=900;
+  runtime.window.dispatchEvent(new runtime.window.Event('resize'));
+  await waitForTimers(runtime,60);
+
+  assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+  assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+  assert.equal(nativeVolumeGroup.style.display,'none');
+  assert.equal(volume,.4);
   runtime.close();
 });
 
@@ -554,7 +550,7 @@ test('Twitch: volume mouse interactions do not keep keyboard focus',async()=>{
   runtime.close();
 });
 
-test('Twitch: compact controls layout protects preview-sized control bars',async()=>{
+test('Twitch: compact controls layout protects narrow main-player control bars',async()=>{
   const config=platforms[1];
   const {runtime}=await loadPlatform(config,current=>{
     const controls=current.document.querySelector('[data-a-target="player-controls"]');
@@ -570,7 +566,7 @@ test('Twitch: compact controls layout protects preview-sized control bars',async
   runtime.close();
 });
 
-test('Twitch: discovery preview video switch rebinds the custom slider',async()=>{
+test('Twitch: active player video switch rebinds the custom slider',async()=>{
   const config=platforms[1];
   const {runtime,fixture}=await loadPlatform(config,current=>{
     current.window.localStorage.setItem(config.volumeKey,'40');
