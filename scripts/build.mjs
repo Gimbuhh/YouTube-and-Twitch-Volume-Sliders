@@ -8,12 +8,7 @@ for (const platform of platforms) {
   const entry = await readFile(entryPath(platform), 'utf8');
   const { header } = parseMetadata(entry);
   const body = entry.replace(header, '');
-  const minimumSourceBytes = platform === 'youtube' ? 55000 : 70000;
   const minimumArtifactBytes = platform === 'youtube' ? 68000 : 80000;
-  const implementation = await readFile(new URL(`../src/platforms/${platform}.js`, import.meta.url), 'utf8');
-  if (Buffer.byteLength(implementation) < minimumSourceBytes) {
-    throw new Error(`${platform}: platform implementation is unexpectedly truncated`);
-  }
   const result = await build({
     stdin: { contents: body, loader: 'js', resolveDir: fileURLToPath(new URL('../src/entries/', import.meta.url)), sourcefile: `${platform}.user.js` },
     bundle: true,

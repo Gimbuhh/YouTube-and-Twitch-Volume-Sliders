@@ -7,3 +7,8 @@ export function createStyleElement(document, id) {
   parent.appendChild(style);
   return style;
 }
+
+export const fillStyleTemplate = (template, values) => template.replace(/\{\{([A-Za-z0-9]+)\}\}/g, (_, key) => {
+  if (!(key in values)) throw new Error(`Missing style token ${key}`);
+  return values[key];
+});
