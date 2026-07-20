@@ -1,6 +1,6 @@
 # Extract shared platform interaction modules
 
-Status: PROPOSED for 2.8  
+Status: DONE in 2.7.1
 Priority: P2 code quality  
 Depends on: plan 012; plan 013 should land first
 
@@ -29,7 +29,7 @@ Keep player adapters, startup restoration, route/navigation logic, native placem
 
 ## Verification
 
-- `pnpm check` and browser smoke coverage pass after every extraction.
+- `npm run check` and browser smoke coverage pass after every extraction.
 - Standalone metadata and startup remain valid.
 - No new runtime dependency or userscript permission is introduced.
 - Listener order, cleanup, focus, and mute behavior remain unchanged.

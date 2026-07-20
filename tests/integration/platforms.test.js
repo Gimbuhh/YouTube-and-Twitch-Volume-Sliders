@@ -60,6 +60,76 @@ test('YouTube: replace-native guard hides native volume areas as soon as they ap
   runtime.close();
 });
 
+test('YouTube: replace-native guard activates at navigation start before the watch URL changes',async()=>{
+  const config=platforms[0];
+  const runtime=createRuntime('https://www.youtube.com/',{runScripts:'outside-only'});
+  const fixture=config.fixture(runtime.document);
+  const nativeArea=fixture.player.querySelector('.ytp-volume-area');
+  runtime.window.localStorage.setItem(config.modeKey,'replace-native');
+  const source=await readFile(new URL('../../dist/youtube-volume-slider.user.js',import.meta.url),'utf8');
+  runtime.window.eval(source);
+  await waitForTimers(runtime);
+
+  assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),false);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-start'));
+
+  assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),true);
+  assert.equal(runtime.window.getComputedStyle(nativeArea).display,'none');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-finish'));
+  assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),false);
+
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-start'));
+  runtime.window.history.pushState({},'', '/watch?v=next');
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-finish'));
+  assert.equal(runtime.document.documentElement.classList.contains('tm-yt-volume-native-replacement-active'),true);
+  runtime.close();
+});
+
+test('YouTube: navigation completion mounts the custom control without the reattach delay',async()=>{
+  const config=platforms[0];
+  const runtime=createRuntime('https://www.youtube.com/',{runScripts:'outside-only'});
+  const fixture=config.fixture(runtime.document);
+  runtime.window.localStorage.setItem(config.modeKey,'replace-native');
+  const source=await readFile(new URL('../../dist/youtube-volume-slider.user.js',import.meta.url),'utf8');
+  runtime.window.eval(source);
+  await waitForTimers(runtime);
+
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-start'));
+  runtime.window.history.pushState({},'', '/watch?v=next');
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-finish'));
+
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  assert.ok(overlay);
+  assert.equal(overlay._tmVolumeVideo,fixture.video);
+  runtime.close();
+});
+
+test('YouTube: navigation completion immediately rebinds a replaced video',async()=>{
+  const config=platforms[0];
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.modeKey,'replace-native');
+  });
+  const firstOverlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const secondVideo=runtime.document.createElement('video');
+  secondVideo.className='html5-main-video';
+  fixture.video.replaceWith(secondVideo);
+
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-start'));
+  runtime.window.history.pushState({},'', '/watch?v=next');
+  runtime.window.dispatchEvent(new runtime.window.CustomEvent('yt-navigate-finish'));
+
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  assert.notEqual(overlay,firstOverlay);
+  assert.equal(overlay._tmVolumeVideo,secondVideo);
+  assert.equal(runtime.document.querySelectorAll('#tm-volume-slider-overlay').length,1);
+  runtime.close();
+});
+
 test('YouTube: document-start bootstrap mounts the slider when the player arrives',async()=>{
   const config=platforms[0];
   const runtime=createRuntime(config.url,{runScripts:'outside-only'});
@@ -262,6 +332,45 @@ test('Twitch: arrow keys adjust by five percent while preserving mute and saved 
   runtime.close();
 });
 
+test('Twitch: replace-native mode restores unmarked player volume resets',async()=>{
+  const config=platforms[1];
+  let now=10_000;
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.Date.now=()=>now;
+    current.window.localStorage.setItem(config.volumeKey,'40');
+    current.window.localStorage.setItem(config.modeKey,'replace-native');
+  });
+  now=20_000;
+
+  fixture.player._tmPlayerApi.setVolume(.15);
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+
+  assert.equal(fixture.state.volume,.4);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-range').value,'40');
+  await waitForTimers(runtime,180);
+  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'40');
+  runtime.close();
+});
+
+test('Twitch: native-visible mode still persists external player volume changes',async()=>{
+  const config=platforms[1];
+  let now=10_000;
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.Date.now=()=>now;
+    current.window.localStorage.setItem(config.volumeKey,'40');
+    current.window.localStorage.setItem(config.modeKey,'on');
+  });
+  now=20_000;
+
+  fixture.player._tmPlayerApi.setVolume(.15);
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+
+  assert.equal(runtime.document.getElementById('tm-volume-slider-range').value,'15');
+  await waitForTimers(runtime,180);
+  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'15');
+  runtime.close();
+});
+
 test('Twitch: player-level arrows require the player to be the last pressed area',async()=>{
   const config=platforms[1];
   const {runtime,fixture}=await loadPlatform(config,current=>{
@@ -363,24 +472,22 @@ test('Twitch: options button mounts when native controls appear before video',as
   runtime.close();
 });
 
-test('Twitch: preview player mounts slider and options in its own controls',async()=>{
+test('Twitch: compact preview remains native and attaches after expanding to a main player',async()=>{
   const config=platforms[1];
   const runtime=await startBuiltArtifact(config);
+  runtime.window.localStorage.setItem(config.volumeKey,'40');
+  runtime.window.localStorage.setItem(config.modeKey,'replace-native');
   runtime.window.localStorage.setItem(config.locationKey,'video');
-  const inactive=runtime.document.createElement('div');
-  inactive.className='video-player';
-  inactive.setAttribute('data-a-target','video-player');
-  inactive.innerHTML='<div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings"></button></div></div>';
-  runtime.document.body.appendChild(inactive);
 
   const preview=runtime.document.createElement('div');
   preview.className='video-player';
   preview.setAttribute('data-a-target','video-player');
-  preview.innerHTML='<div class="video-player__container"><div class="video-ref" data-a-target="video-ref"><video aria-label="Twitch video player"></video><section id="channel-player" aria-label="Player Controls"><div data-a-target="player-controls" class="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings"></button></div></div></section></div></div>';
+  preview.innerHTML='<div class="video-player__container"><div class="video-ref" data-a-target="video-ref"><video aria-label="Twitch video player"></video><section id="channel-player" aria-label="Player Controls"><div data-a-target="player-controls" class="player-controls"><div class="player-controls__left-control-group"><div class="native-volume-group"><button data-a-target="player-mute-unmute-button"></button><div data-a-target="player-volume-slider"></div></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings"></button></div></div></section></div></div>';
   runtime.document.body.appendChild(preview);
   const previewContainer=preview.querySelector('.video-player__container');
-  preview.getBoundingClientRect=()=>({left:100,top:100,right:633,bottom:400,width:533,height:300});
-  previewContainer.getBoundingClientRect=()=>({left:100,top:100,right:633,bottom:400,width:533,height:300});
+  let playerWidth=533;
+  preview.getBoundingClientRect=()=>({left:100,top:100,right:100+playerWidth,bottom:400,width:playerWidth,height:300});
+  previewContainer.getBoundingClientRect=()=>({left:100,top:100,right:100+playerWidth,bottom:400,width:playerWidth,height:300});
   const video=preview.querySelector('video');
   Object.defineProperty(video,'clientWidth',{value:533,configurable:true});
   Object.defineProperty(video,'clientHeight',{value:300,configurable:true});
@@ -390,22 +497,20 @@ test('Twitch: preview player mounts slider and options in its own controls',asyn
 
   await waitForTimers(runtime,60);
 
-  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
-  const options=runtime.document.getElementById('tm-volume-options-button');
-  assert.ok(overlay);
-  assert.ok(options);
-  assert.equal(preview.querySelector('#tm-volume-slider-overlay'),overlay);
-  assert.equal(preview.querySelector('#tm-volume-options-button'),options);
-  assert.equal(overlay.parentElement,previewContainer);
-  assert.equal(overlay.classList.contains('tm-twitch-preview-player'),true);
-  assert.equal(overlay.style.getPropertyValue('--tm-twitch-preview-player-width'),'533.00px');
-  assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/\.tm-twitch-preview-player\s*{[^}]*--tm-pill-min-width:\s*184px/s);
-  assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/\.tm-twitch-preview-player\s*{[^}]*--tm-pill-zoom-adaptive-width:\s*calc\(var\(--tm-twitch-preview-player-width,\s*520px\) \* 0\.48\)/s);
-  options.click();
-  await waitForTimers(runtime);
-  assert.equal(runtime.document.getElementById('tm-volume-options-popup')?.parentElement,previewContainer);
-  assert.equal(inactive.querySelector('#tm-volume-slider-overlay'),null);
-  assert.equal(inactive.querySelector('#tm-volume-options-button'),null);
+  const nativeVolumeGroup=preview.querySelector('.native-volume-group');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);
+  assert.equal(runtime.document.getElementById('tm-volume-options-button'),null);
+  assert.equal(nativeVolumeGroup.style.display,'');
+  assert.equal(volume,.5);
+
+  playerWidth=900;
+  runtime.window.dispatchEvent(new runtime.window.Event('resize'));
+  await waitForTimers(runtime,60);
+
+  assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+  assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+  assert.equal(nativeVolumeGroup.style.display,'none');
+  assert.equal(volume,.4);
   runtime.close();
 });
 
@@ -445,7 +550,7 @@ test('Twitch: volume mouse interactions do not keep keyboard focus',async()=>{
   runtime.close();
 });
 
-test('Twitch: compact controls layout protects preview-sized control bars',async()=>{
+test('Twitch: compact controls layout protects narrow main-player control bars',async()=>{
   const config=platforms[1];
   const {runtime}=await loadPlatform(config,current=>{
     const controls=current.document.querySelector('[data-a-target="player-controls"]');
@@ -461,7 +566,7 @@ test('Twitch: compact controls layout protects preview-sized control bars',async
   runtime.close();
 });
 
-test('Twitch: discovery preview video switch rebinds the custom slider',async()=>{
+test('Twitch: active player video switch rebinds the custom slider',async()=>{
   const config=platforms[1];
   const {runtime,fixture}=await loadPlatform(config,current=>{
     current.window.localStorage.setItem(config.volumeKey,'40');

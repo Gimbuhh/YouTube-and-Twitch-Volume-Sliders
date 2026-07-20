@@ -104,7 +104,7 @@ async function preflight(version,destination){
 }
 
 export async function runRelease(version){
-  if(!version||!/^\d+(?:\.\d+)*$/.test(version))throw new Error('Usage: pnpm release -- <numeric-version>');
+  if(!version||!/^\d+(?:\.\d+)*$/.test(version))throw new Error('Usage: npm run release -- <numeric-version>');
   const destination=resolve(root,'archive/releases',version);
   const state=await preflight(version,destination);
   const ownedFiles=[
@@ -155,6 +155,6 @@ export async function runRelease(version){
 
 if(process.argv[1]&&resolve(process.argv[1])===resolve(releaseScriptPath)){
   const releaseArgs=process.argv.slice(2).filter(argument=>argument!=='--');
-  if(releaseArgs.length!==1)throw new Error('Usage: pnpm release -- <numeric-version>');
+  if(releaseArgs.length!==1)throw new Error('Usage: npm run release -- <numeric-version>');
   await runRelease(releaseArgs[0]);
 }

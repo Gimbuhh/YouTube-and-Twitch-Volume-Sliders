@@ -49,9 +49,9 @@ Out of scope: Twitch behavior, visual styling, storage-key migration, release ar
 
 ## Verification
 
-- `pnpm test:integration` — all integration tests pass, including the new loading-state sequence.
-- `pnpm test:unit` — all shared persistence tests pass.
-- `pnpm check` — deterministic build, metadata, syntax, tests, artifact parity, archive check, and security scan all pass.
+- `npm run test:integration` — all integration tests pass, including the new loading-state sequence.
+- `npm run test:unit` — all shared persistence tests pass.
+- `npm run check` — deterministic build, metadata, syntax, tests, artifact parity, archive check, and security scan all pass.
 - Confirm `git diff --name-only` contains only the scoped source/test and generated YouTube dist file.
 
 ## Done criteria

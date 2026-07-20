@@ -27,6 +27,47 @@ export function createOptionsUi(dependencies) {
         });
     }
 
+    function syncOptionsPopupState(popup) {
+        if (!popup) return;
+
+        ['on', 'off', 'replace-native'].forEach((mode) => {
+            popup.querySelector(`#tm-volume-options-mode-${mode}`)
+                ?.setAttribute('aria-checked', getVolumeSliderMode() === mode ? 'true' : 'false');
+        });
+
+        const placementSection = popup.querySelector('#tm-volume-options-placement-section');
+        const placementEnabled = getVolumeSliderMode() === 'replace-native';
+        if (placementSection) {
+            placementSection.dataset.disabled = placementEnabled ? 'false' : 'true';
+        }
+        ['native', 'custom'].forEach((placement) => {
+            const radio = popup.querySelector(`#tm-volume-options-placement-${placement}`);
+            if (!radio) return;
+            radio.setAttribute('aria-checked', getReplaceNativePlacement() === placement ? 'true' : 'false');
+            radio.disabled = !placementEnabled;
+        });
+
+        ['new', 'classic'].forEach((appearance) => {
+            popup.querySelector(`#tm-volume-options-appearance-${appearance}`)
+                ?.setAttribute('aria-checked', getVolumeAppearance() === appearance ? 'true' : 'false');
+        });
+
+        popup.querySelector('#tm-volume-options-snap')
+            ?.setAttribute('aria-checked', isSnapTo5Enabled() ? 'true' : 'false');
+        popup.querySelector('#tm-volume-options-always-expanded')
+            ?.setAttribute('aria-checked', isAlwaysExpandedEnabled() ? 'true' : 'false');
+        popup.querySelector('#tm-volume-options-location-video')
+            ?.setAttribute('aria-checked', isSliderOnVideo() ? 'true' : 'false');
+
+        const onVideoDisplay = isSliderOnVideo() ? '' : 'none';
+        const opacitySection = popup.querySelector('#tm-volume-options-opacity-section');
+        if (opacitySection) opacitySection.style.display = onVideoDisplay;
+        const sizeSection = popup.querySelector('#tm-volume-options-size-section');
+        if (sizeSection) sizeSection.style.display = onVideoDisplay;
+
+        syncOptionsRadioGroups(popup);
+    }
+
     function handleRadioNavigation(event) {
         const radio = event.currentTarget;
         const group = radio.closest('[role="radiogroup"]');
@@ -452,5 +493,5 @@ export function createOptionsUi(dependencies) {
         return popup;
     }
 
-  return { buildOptionsPopup, syncOptionsRadioGroups };
+  return { buildOptionsPopup, syncOptionsPopupState, syncOptionsRadioGroups };
 }

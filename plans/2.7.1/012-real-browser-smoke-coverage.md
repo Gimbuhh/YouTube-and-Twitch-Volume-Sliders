@@ -1,6 +1,6 @@
 # Add real-browser smoke coverage
 
-Status: PROPOSED for 2.8  
+Status: DONE in 2.7.1
 Priority: P1 regression prevention
 
 ## Objective
@@ -18,7 +18,7 @@ Cover four stable, high-value journeys:
 
 ## Implementation approach
 
-- Add an opt-in browser smoke command; keep `pnpm check` offline and deterministic.
+- Add an opt-in browser smoke command; keep `npm run check` offline and deterministic.
 - Prefer a deterministic local player fixture for CI and a documented live-site mode for final release checks.
 - Assert bounding boxes, active element, event prevention, volume state, and visibility state rather than relying only on screenshots.
 - Use stable userscript IDs/classes and the smallest possible native-player contracts.

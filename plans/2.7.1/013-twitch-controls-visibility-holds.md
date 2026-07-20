@@ -1,6 +1,6 @@
 # Unify Twitch controls visibility holds
 
-Status: PROPOSED for 2.8  
+Status: DONE in 2.7.1
 Priority: P2 maintainability  
 Depends on: plan 012 recommended first
 

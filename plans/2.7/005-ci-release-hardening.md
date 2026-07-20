@@ -11,7 +11,7 @@ Run dependency installation, builds, and tests without a write-capable token; gr
 
 ## Evidence
 
-`.github/workflows/release.yml:8-40` grants workflow-wide write permission before checkout, install, and `pnpm check`. Both workflows use mutable major tags for `actions/checkout`, `actions/setup-node`, and `pnpm/action-setup` (`verify.yml:14-18`, `release.yml:15,28-32`).
+`.github/workflows/release.yml:8-40` grants workflow-wide write permission before checkout, install, and the full check. Both workflows use mutable major tags for checkout, Node setup, and package-manager setup actions (`verify.yml:14-18`, `release.yml:15,28-32`).
 
 ## Scope
 
@@ -20,14 +20,14 @@ In scope: `.github/workflows/verify.yml`, `.github/workflows/release.yml`, optio
 ## Implementation steps
 
 1. Split release verification/build from publication. `verify` has only `contents: read`; it checks out the trusted event source, installs, runs checks/preflight, stages exactly two public scripts plus canonical notes and a machine-readable manifest of expected names/hashes, then uploads one artifact.
-2. Make `publish` depend on `verify`, with only job-level `contents: write`. It uses pinned `actions/download-artifact` and `gh`, downloads exactly that artifact from the required job/run, rejects unexpected entries, hashes both scripts against the staged manifest, and publishes without checkout, Node/pnpm setup, or repository/package scripts.
+2. Make `publish` depend on `verify`, with only job-level `contents: write`. It uses pinned `actions/download-artifact` and `gh`, downloads exactly that artifact from the required job/run, rejects unexpected entries, hashes both scripts against the staged manifest, and publishes without checkout, Node/package-manager setup, or repository/package scripts.
 3. Pin every third-party action to a full commit SHA. Keep a trailing comment with the human-readable release version.
 4. Action update automation is optional and outside done criteria; if added, use Dependabot and keep SHA updates reviewable.
 5. Set concurrency to the release tag or manual input with `cancel-in-progress: false`.
 
 ## Verification
 
-- `pnpm check`
+- `npm run check`
 - Static workflow validation.
 - Review effective `permissions` for each job: verifier read-only, publisher write-only where needed.
 - Confirm publisher consumes only verifier-produced assets and verifies both SHA-256 values.

@@ -27,8 +27,8 @@ In scope: pointer-vs-keyboard interaction classification in both adapters, platf
 
 ## Verification
 
-- `pnpm test:integration`
-- `pnpm check`
+- `npm run test:integration`
+- `npm run check`
 
 ## Done criteria
 

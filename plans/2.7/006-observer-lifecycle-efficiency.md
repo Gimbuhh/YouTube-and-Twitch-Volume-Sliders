@@ -28,9 +28,9 @@ In scope: `src/shared/lifecycle.js`, platform observer setup/cleanup, lifecycle 
 
 ## Verification
 
-- `pnpm test:unit`
-- `pnpm test:integration`
-- `pnpm check`
+- `npm run test:unit`
+- `npm run test:integration`
+- `npm run check`
 - Extend the runtime observer wrapper to record observe target/options, callback deliveries, and disconnect state. For N unrelated body mutations on mounted Twitch, there is one body-observer callback path and at most one queued lifecycle check, with no separate detachment observer.
 
 ## Done criteria

@@ -74,18 +74,20 @@ Choose the latest YouTube or Twitch `.user.js` asset, approve the install prompt
 
 ## Development
 
+npm is the repository's only supported package manager.
+
 ```sh
-pnpm install --frozen-lockfile
-pnpm build
-pnpm check
-pnpm release -- 2.5
+npm ci
+npm run build
+npm run check
+npm run release -- 2.5
 ```
 
 Edit canonical code under `src/`; never edit `dist/` or archives manually. `dist/` is generated, `archive/legacy/` preserves historical releases, and `archive/releases/` contains immutable packaged releases. See [architecture](docs/architecture.md), [testing](docs/testing.md), [releasing](docs/releasing.md), and [contributing](CONTRIBUTING.md).
 
 The userscripts and this repository are made and maintained with Codex.
 
-`node_modules/` is machine-local and intentionally excluded. Recreate it with the frozen lockfile instead of copying it between Windows and macOS; pnpm installs only native packages for the current machine.
+`node_modules/` is machine-local and intentionally excluded. Recreate it with `npm ci` and the frozen lockfile instead of copying it between Windows and macOS; npm installs native packages for the current machine.
 
 ## Releases
 
@@ -103,4 +105,4 @@ The userscripts make no network requests or telemetry calls. Settings remain in 
 
 ## Troubleshooting
 
-Reload the video page after installation, confirm the userscript is enabled for the matching domain, and check that its mode is not set to Off. If site markup changes, run `pnpm check` and report the affected site, browser, userscript manager, and page type.
+Reload the video page after installation, confirm the userscript is enabled for the matching domain, and check that its mode is not set to Off. If site markup changes, run `npm run check` and report the affected site, browser, userscript manager, and page type.

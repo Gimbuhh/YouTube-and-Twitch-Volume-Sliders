@@ -85,6 +85,22 @@ test('twitch saved mute also mutes the native video element immediately', async 
   runtime.close();
 });
 
+test('twitch startup volume correction preserves saved mute', async () => {
+  const runtime=createRuntime('https://www.twitch.tv/test',{runScripts:'outside-only'});
+  saveMutedTwitchState(runtime);
+  const source=await readBuiltArtifact('twitch');
+  const {video,state}=addTwitchPlayer(runtime);
+
+  runtime.window.eval(source);
+  await waitForTimers(runtime);
+  video.dispatchEvent(new runtime.window.Event('volumechange'));
+
+  assert.equal(state.muted,true);
+  assert.equal(video.muted,true);
+  assert.equal(state.volume,.35);
+  runtime.close();
+});
+
 test('twitch startup mute guard re-mutes the native video if Twitch resets it', async () => {
   const runtime=createRuntime('https://www.twitch.tv/test',{runScripts:'outside-only'});
   saveMutedTwitchState(runtime);

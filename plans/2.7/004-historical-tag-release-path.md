@@ -34,8 +34,8 @@ Current version; valid historical two-component and three-component versions; ma
 
 ## Verification
 
-- `pnpm test:unit`
-- `pnpm check`
+- `npm run test:unit`
+- `npm run check`
 - Parse workflow YAML with an installed project tool if present; otherwise use GitHub's workflow validation on a non-publishing branch/PR, never a tag.
 
 ## Done criteria

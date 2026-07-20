@@ -1,12 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { createOverlayLifecycle, createRafCoalescer, createVideoLocator } from '../../src/shared/lifecycle.js';
+import { createCleanupRegistry, createOverlayLifecycle, createRafCoalescer, createVideoLocator } from '../../src/shared/lifecycle.js';
 
 test('overlay lifecycle owns and idempotently disposes detached roots',()=>{
   let cleaned=0,removed=0; const root={remove:()=>removed++}; const lifecycle=createOverlayLifecycle();
   lifecycle.set(root,()=>cleaned++); assert.equal(lifecycle.owns(root),true); lifecycle.dispose(); lifecycle.dispose();
   assert.equal(cleaned,1); assert.equal(removed,1); assert.equal(lifecycle.active,null);
+});
+
+test('cleanup registry removes owned listeners and callbacks exactly once',()=>{
+  const target=new EventTarget();
+  const registry=createCleanupRegistry();
+  let events=0,cleanups=0;
+  registry.listen(target,'owned',()=>events++);
+  registry.add(()=>cleanups++);
+  target.dispatchEvent(new Event('owned'));
+  registry.dispose();
+  registry.dispose();
+  target.dispatchEvent(new Event('owned'));
+  assert.equal(events,1);
+  assert.equal(cleanups,1);
+  assert.equal(registry.disposed,true);
 });
 
 test('RAF coalescer schedules once and invalidates queued generations',()=>{

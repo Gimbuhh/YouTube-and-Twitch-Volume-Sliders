@@ -3,8 +3,11 @@ import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
 import { createVolumePersistence, snapTo5 } from '../shared/volume.js';
 import { createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
-import { createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
+import { createCleanupRegistry, createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
 import { createStyleElement } from '../shared/styles.js';
+import { installOptionsStyles } from '../shared/options-styles.js';
+import { installVolumeSliderStyles } from '../shared/slider-styles.js';
+import { bindRangePointerInteraction, bindWheelVolumeStep, createVolumeControlElements, syncVolumeControl } from '../shared/slider-interactions.js';
 
 export function startYouTubeVolumeSlider() {
     'use strict';
@@ -92,7 +95,7 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    const { getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage: localStorage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
         keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
@@ -110,7 +113,6 @@ export function startYouTubeVolumeSlider() {
         window, storage: localStorage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
         isSnapEnabled: () => isSnapTo5Enabled()
     });
-
 
 
 
@@ -158,7 +160,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function applyNativeVolumeVisibility() {
         ensureNativeVolumeVisibilityGuard();
         const shouldHideNative = shouldHideNativeVolume();
-
         if (shouldHideNative) {
             const overlay = document.getElementById(OVERLAY_ID);
             const player = getPlayerContainer();
@@ -258,345 +259,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function createStylesIfNeeded() {
-        const style = createStyleElement(document, 'tm-volume-slider-style');
-        if (!style) return;
-        const css = `
-#${OVERLAY_ID} {
-  --tm-pill-min-width: 228px;
-  --tm-pill-zoom-adaptive-width: calc(34vw - 92px);
-  --tm-pill-max-width: 368px;
-  /* Browser zoom reduces the CSS viewport width, so this shrinks the expanded pill before it clips offscreen. */
-  --tm-pill-expanded-width: clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width));
-  --tm-label-row-width: 50px;
-  --tm-slider-row-offset: 62px;
-  filter: ${VOLUME_PANEL_DROP_SHADOW};
-}
-
-#${OVERLAY_ID}.tm-volume-appearance-classic {
-  --tm-pill-min-width: 274px;
-  --tm-pill-zoom-adaptive-width: calc(34vw - 46px);
-  --tm-pill-max-width: 414px;
-  --tm-label-row-width: 96px;
-  --tm-slider-row-offset: 108px;
-}
-
-@media (max-width: 320px) {
-  #${OVERLAY_ID} {
-    --tm-pill-min-width: 176px;
-    --tm-pill-zoom-adaptive-width: min(216px, calc(64vw - 14px));
-  }
-
-  #${OVERLAY_ID}.tm-volume-appearance-classic {
-    --tm-pill-min-width: 196px;
-    --tm-pill-zoom-adaptive-width: min(262px, calc(64vw + 6px));
-  }
-
-  #${OVERLAY_ID} .tm-volume-slider-row {
-    --tm-active-track-h: 9px;
-    --tm-visual-track-h: 4px;
-    --tm-thumb-size: 18px;
-  }
-}
-
-#${OVERLAY_ID} input[type=range] {
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  height: 42px;
-  border: none;
-  border-radius: 999px;
-  box-sizing: border-box;
-  outline: none;
-  position: relative;
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
-  z-index: 2;
-  overflow: visible;
-}
-
-#${OVERLAY_ID} input[type=range]::-webkit-slider-runnable-track {
-  border: none;
-  background: transparent;
-  height: var(--tm-active-track-h, 9px);
-  border-radius: var(--tm-track-radius);
-}
-
-#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: var(--tm-thumb-size);
-  height: var(--tm-thumb-size);
-  border-radius: 50%;
-  background: linear-gradient(145deg, #ffffff, #f0f0f0);
-  border: none;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
-  margin-top: calc((var(--tm-active-track-h, 9px) - var(--tm-thumb-size, 22px)) / 2);
-}
-
-#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
-}
-
-#${OVERLAY_ID} input[type=range]::-webkit-slider-thumb:active {
-  transform: scale(1.05);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-}
-
-#${OVERLAY_ID} input[type=range]::-moz-range-thumb {
-  width: var(--tm-thumb-size);
-  height: var(--tm-thumb-size);
-  border-radius: 50%;
-  background: linear-gradient(145deg, #ffffff, #f0f0f0);
-  border: none;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
-}
-
-#${OVERLAY_ID} input[type=range]::-moz-range-thumb:hover {
-  transform: scale(1.15);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
-}
-
-#${OVERLAY_ID} input[type=range]::-moz-range-thumb:active {
-  transform: scale(1.05);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-}
-
-#${OVERLAY_ID} input[type=range]::-moz-range-track {
-  background: transparent;
-  height: var(--tm-active-track-h, 9px);
-  border-radius: var(--tm-track-radius);
-  border: none;
-  outline: none;
-}
-
-#${OVERLAY_ID} input[type=range]::-moz-range-progress {
-  background: transparent;
-  border: none;
-}
-
-#${OVERLAY_ID} input[type=range]::-moz-focus-outer {
-  border: none;
-  outline: none;
-}
-
-#${OVERLAY_ID} .tm-volume-panel-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  border: none;
-  background: rgba(8, 13, 15, 0.34);
-  box-sizing: border-box;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  opacity: 1;
-  pointer-events: none;
-  transform: none;
-  transition: none;
-}
-
-#${OVERLAY_ID} .tm-volume-icon-cell {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 40px;
-  height: 40px;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: auto;
-  opacity: 1;
-  transition: opacity 0.1s ease;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-#${OVERLAY_ID} .tm-volume-icon-cell:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: -4px;
-  border-radius: 50%;
-}
-
-#${OVERLAY_ID} .tm-volume-indicator {
-  position: relative;
-  width: 40px;
-  height: 40px;
-  opacity: 1;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-#${OVERLAY_ID} .tm-volume-indicator svg {
-  display: block;
-  width: 40px;
-  height: 40px;
-  overflow: visible;
-  shape-rendering: geometricPrecision;
-}
-
-#${OVERLAY_ID} .tm-volume-arc-track,
-#${OVERLAY_ID} .tm-volume-arc {
-  shape-rendering: geometricPrecision;
-  vector-effect: non-scaling-stroke;
-}
-
-#${OVERLAY_ID} .tm-volume-arc {
-  stroke-linecap: round;
-}
-
-#${OVERLAY_ID} .tm-volume-speaker-icon {
-  color: rgba(255, 255, 255, 0.94);
-  display: none;
-}
-
-#${OVERLAY_ID}.tm-volume-appearance-classic .tm-volume-percent {
-  display: none;
-}
-
-#${OVERLAY_ID}.tm-volume-appearance-classic .tm-volume-indicator[data-volume-icon="muted"] .tm-volume-speaker-muted,
-#${OVERLAY_ID}.tm-volume-appearance-classic .tm-volume-indicator[data-volume-icon="low"] .tm-volume-speaker-low,
-#${OVERLAY_ID}.tm-volume-appearance-classic .tm-volume-indicator[data-volume-icon="high"] .tm-volume-speaker-high {
-  display: block;
-}
-
-#${OVERLAY_ID} .tm-volume-percent {
-  fill: rgba(255, 255, 255, 0.96);
-  font: 700 15px/1 Arial, Helvetica, sans-serif;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
-  font-synthesis: none;
-  letter-spacing: 0;
-  text-shadow: 0 0 3px rgba(0, 0, 0, 0.75);
-  text-rendering: geometricPrecision;
-  user-select: none;
-}
-
-#${OVERLAY_ID} .tm-volume-indicator.muted {
-  filter: saturate(0.45);
-  opacity: 0.78;
-}
-
-#${OVERLAY_ID} .tm-volume-controls {
-  position: relative;
-  z-index: 2;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  transition: opacity 0.08s ease 0.14s, visibility 0s linear 0.22s;
-}
-
-#${OVERLAY_ID}.tm-collapsed .tm-volume-controls {
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  transition: opacity 0.08s ease 0.14s, visibility 0s linear 0.22s;
-}
-
-#${OVERLAY_ID}.tm-expanded .tm-volume-controls {
-  opacity: 1;
-  pointer-events: auto;
-  visibility: visible;
-  transition: opacity 0.1s ease, visibility 0s linear 0s;
-}
-
-#${OVERLAY_ID} .tm-volume-top-row {
-  flex: 0 0 auto;
-  position: relative;
-  width: var(--tm-label-row-width);
-  height: 40px;
-  box-sizing: border-box;
-  pointer-events: none !important;
-}
-
-#${OVERLAY_ID} #${VALUE_LABEL_ID} {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  font: 500 14px/40px "YouTube Noto", Roboto, Arial, Helvetica, sans-serif;
-  color: #fff;
-  text-align: center;
-  text-shadow: 0 0 2px rgb(0, 0, 0);
-  user-select: none;
-  letter-spacing: 0;
-}
-
-#${OVERLAY_ID}.tm-volume-appearance-classic #${VALUE_LABEL_ID} {
-  left: 36px;
-  top: 50%;
-  width: 58px;
-  height: auto;
-  overflow: visible;
-  clip-path: none;
-  transform: translateY(-50%);
-}
-
-#${OVERLAY_ID} .tm-volume-slider-row {
-  --tm-active-track-h: 11px;
-  --tm-visual-track-h: 5px;
-  --tm-thumb-size: 22px;
-  --tm-track-radius: calc(var(--tm-visual-track-h, 5px) / 2);
-  flex: 0 0 calc(var(--tm-pill-expanded-width) - var(--tm-slider-row-offset));
-  width: calc(var(--tm-pill-expanded-width) - var(--tm-slider-row-offset));
-  min-width: 0;
-  height: 40px;
-}
-
-#${OVERLAY_ID} .tm-slider-track {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  height: var(--tm-visual-track-h, 5px);
-  border-radius: 999px;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 0;
-}
-
-#${OVERLAY_ID} .tm-slider-ticks {
-  position: absolute;
-  left: calc(var(--tm-thumb-size, 22px) / 2);
-  right: calc(var(--tm-thumb-size, 22px) / 2);
-  top: 50%;
-  transform: translateY(-50%);
-  height: var(--tm-visual-track-h, 5px);
-  overflow: visible;
-  pointer-events: none;
-  opacity: 1;
-  transition: none;
-  z-index: 1;
-}
-
-#${OVERLAY_ID} .tm-slider-tick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: var(--tm-slider-tick-width, 1px);
-  height: 100%;
-  background: rgba(255,255,255,0.25);
-  transform: none;
-}
-
-        `;
-        style.textContent = css;
+        installVolumeSliderStyles({
+            document, platform: 'youtube', overlayId: OVERLAY_ID, valueLabelId: VALUE_LABEL_ID,
+            panelDropShadow: VOLUME_PANEL_DROP_SHADOW
+        });
     }
 
     const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
@@ -813,377 +479,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
 
     function ensureOptionsStyles() {
-        const style = createStyleElement(document, OPTIONS_STYLE_ID);
-        if (!style) return;
-        style.textContent = `
-            #${OPTIONS_BUTTON_ID} {
-                opacity: 0.94;
-            }
-            #${OPTIONS_BUTTON_ID}:hover,
-            #${OPTIONS_BUTTON_ID}:focus-visible,
-            #${OPTIONS_BUTTON_ID}[aria-expanded="true"] {
-                opacity: 1;
-            }
-            #${OPTIONS_BUTTON_ID}[data-tm-volume-mode="off"] svg {
-                opacity: 0.58;
-            }
-            #${OPTIONS_BUTTON_ID} svg {
-                display: block;
-                height: 24px;
-                width: 24px;
-            }
-            #${OPTIONS_POPUP_ID} {
-                background: rgba(18, 18, 18, 0.97);
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 8px;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.48);
-                color: #fff;
-                display: flex;
-                flex-direction: column;
-                font-family: Arial, sans-serif;
-                font-size: 14px;
-                line-height: 1;
-                max-height: 70vh;
-                max-width: 320px;
-                min-width: 288px;
-                overflow: hidden;
-                position: absolute;
-                user-select: none;
-                width: 288px;
-                z-index: 10001;
-            }
-            #${OPTIONS_POPUP_ID},
-            #${OPTIONS_POPUP_ID} * {
-                box-sizing: border-box;
-            }
-            #${OPTIONS_POPUP_ID} button {
-                -webkit-appearance: none;
-                appearance: none;
-                font-family: inherit;
-                text-transform: none;
-            }
-            #${OPTIONS_POPUP_ID}[hidden] {
-                display: none;
-            }
-            .tm-volume-options-open .ytp-tooltip {
-                display: none !important;
-            }
-            #movie_player.ytp-autohide:not(.tm-volume-options-controls-hold) .ytp-chrome-bottom,
-            #movie_player.ytp-hide-controls:not(.tm-volume-options-controls-hold) .ytp-chrome-bottom {
-                pointer-events: none !important;
-            }
-            #movie_player.${OPTIONS_CLOSE_HIDE_CONTROLS_CLASS}:not(.tm-volume-options-controls-hold) .ytp-chrome-bottom {
-                opacity: 0 !important;
-                pointer-events: none !important;
-            }
-            .tm-volume-options-controls-hold .ytp-chrome-bottom {
-                opacity: 1 !important;
-                pointer-events: auto !important;
-                visibility: visible !important;
-            }
-            .tm-volume-options-header {
-                align-items: center;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                display: flex;
-                flex-shrink: 0;
-                padding: 12px 16px;
-            }
-            .tm-volume-options-title {
-                color: #fff;
-                font-size: 14px;
-                font-weight: 500;
-                line-height: 20px;
-            }
-            .tm-volume-options-body {
-                flex: 1 1 auto;
-                min-height: 0;
-                overflow-x: hidden;
-                overflow-y: auto;
-                overscroll-behavior: contain;
-                padding: 10px 0 8px;
-                scrollbar-color: rgba(255, 255, 255, 0.34) rgba(255, 255, 255, 0.08);
-                scrollbar-width: thin;
-            }
-            .tm-volume-options-body::-webkit-scrollbar {
-                width: 8px;
-            }
-            .tm-volume-options-body::-webkit-scrollbar-track {
-                background: rgba(255, 255, 255, 0.06);
-                border-radius: 4px;
-            }
-            .tm-volume-options-body::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.28);
-                background-clip: padding-box;
-                border: 2px solid transparent;
-                border-radius: 4px;
-            }
-            .tm-volume-options-body::-webkit-scrollbar-thumb:hover {
-                background: rgba(255, 255, 255, 0.42);
-                background-clip: padding-box;
-            }
-            .tm-volume-options-section {
-                padding: 10px 16px;
-            }
-            .tm-volume-options-section:first-child {
-                padding-top: 0;
-            }
-            .tm-volume-options-section:last-child {
-                padding-bottom: 0;
-            }
-            .tm-volume-options-section + .tm-volume-options-section {
-                border-top: 1px solid rgba(255, 255, 255, 0.08);
-                padding-top: 12px;
-            }
-            .tm-volume-options-section-label {
-                color: rgba(255, 255, 255, 0.55);
-                font-size: 11px;
-                font-weight: 500;
-                letter-spacing: 0.04em;
-                line-height: 14px;
-                margin: 0 0 10px;
-                text-transform: uppercase;
-            }
-            .tm-volume-options-checklist {
-                display: flex;
-                flex-direction: column;
-            }
-            .tm-volume-options-checklist .tm-volume-options-row {
-                align-items: center;
-                column-gap: 12px;
-                display: grid;
-                grid-template-columns: 1fr 18px;
-                justify-content: stretch;
-                margin: 0 -8px;
-                min-height: 32px;
-                padding: 5px 8px;
-                width: calc(100% + 16px);
-            }
-            .tm-volume-options-checklist .tm-volume-options-row > span:first-child {
-                justify-self: start;
-                min-width: 0;
-            }
-            .tm-volume-options-checklist .tm-volume-options-checkbox {
-                justify-self: end;
-            }
-            .tm-volume-options-row {
-                align-items: center;
-                background: transparent;
-                border: 0;
-                border-radius: 6px;
-                color: #fff;
-                cursor: pointer;
-                display: flex;
-                font-size: 13px;
-                font-weight: 400;
-                line-height: 18px;
-                min-height: 34px;
-                padding: 7px 8px;
-                text-align: left;
-                transition: background 0.12s ease;
-            }
-            .tm-volume-options-row > span:first-child {
-                display: block;
-                line-height: 18px;
-            }
-            .tm-volume-options-row:hover,
-            .tm-volume-options-row:focus-visible {
-                background: rgba(255, 255, 255, 0.08);
-                outline: none;
-            }
-            .tm-volume-options-row:disabled {
-                cursor: not-allowed;
-                opacity: 0.45;
-            }
-            .tm-volume-options-checkbox {
-                background: transparent;
-                border: 1.5px solid rgba(255, 255, 255, 0.45);
-                border-radius: 3px;
-                display: grid;
-                flex-shrink: 0;
-                height: 18px;
-                place-items: center;
-                transition: all 0.12s ease;
-                width: 18px;
-            }
-            .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox {
-                background: ${VOLUME_ACCENT_DARK};
-                border-color: ${VOLUME_ACCENT_DARK};
-            }
-            .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox::after {
-                border: solid #fff;
-                border-width: 0 0 3px 3px;
-                box-sizing: border-box;
-                content: '';
-                height: 6px;
-                transform: translateY(-1px) rotate(-45deg);
-                width: 10px;
-            }
-            .tm-volume-options-segment-stack {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-            }
-            .tm-volume-options-section-label + * {
-                padding-top: 2px;
-            }
-            .tm-volume-options-segment {
-                display: flex;
-                gap: 6px;
-                width: 100%;
-            }
-            .tm-volume-options-segment .tm-volume-options-radio {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.14);
-            }
-            .tm-volume-options-segment .tm-volume-options-radio:hover,
-            .tm-volume-options-segment .tm-volume-options-radio:focus-visible {
-                background: rgba(255, 255, 255, 0.14);
-                border-color: rgba(255, 255, 255, 0.2);
-            }
-            .tm-volume-options-radio {
-                align-items: center;
-                background: transparent;
-                border: 0;
-                border-radius: 6px;
-                color: rgba(255, 255, 255, 0.82);
-                cursor: pointer;
-                display: flex;
-                flex: 1 1 0;
-                font-size: 12px;
-                font-weight: 600;
-                justify-content: center;
-                line-height: 16px;
-                min-height: 34px;
-                min-width: 0;
-                padding: 8px 10px;
-                text-align: center;
-                transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
-            }
-            .tm-volume-options-radio:hover,
-            .tm-volume-options-radio:focus-visible {
-                background: rgba(255, 255, 255, 0.1);
-                outline: none;
-            }
-            .tm-volume-options-radio[aria-checked="true"] {
-                background: ${VOLUME_ACCENT_DARK};
-                border-color: ${VOLUME_ACCENT_DARK};
-                box-shadow: none;
-                color: #fff;
-                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio {
-                cursor: not-allowed;
-                opacity: 0.4;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio:hover {
-                background: transparent;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio[aria-checked="true"] {
-                background: ${VOLUME_ACCENT_DISABLED};
-            }
-            .tm-volume-options-opacity-row {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-            }
-            .tm-volume-options-section-label + .tm-volume-options-opacity-row {
-                margin-top: 2px;
-            }
-            .tm-volume-options-opacity-row + .tm-volume-options-opacity-row {
-                margin-top: 12px;
-            }
-            .tm-volume-options-opacity-label-group {
-                align-items: baseline;
-                display: flex;
-                gap: 6px;
-                min-width: 0;
-            }
-            .tm-volume-options-opacity-name {
-                color: #fff;
-                font-size: 13px;
-                line-height: 18px;
-            }
-            .tm-volume-options-opacity-value {
-                color: rgba(255, 255, 255, 0.65);
-                font-size: 12px;
-                line-height: 18px;
-            }
-            .tm-volume-options-opacity-controls {
-                align-items: center;
-                display: flex;
-                gap: 12px;
-            }
-            .tm-volume-options-opacity-reset {
-                align-items: center;
-                background: rgba(255, 255, 255, 0.12);
-                border: 0;
-                border-radius: 6px;
-                color: rgba(255, 255, 255, 0.9);
-                cursor: pointer;
-                display: flex;
-                flex-shrink: 0;
-                font-size: 11px;
-                font-weight: 500;
-                height: 28px;
-                justify-content: center;
-                line-height: 16px;
-                min-width: 52px;
-                padding: 0 10px;
-            }
-            .tm-volume-options-opacity-reset:hover,
-            .tm-volume-options-opacity-reset:focus-visible {
-                background: rgba(255, 255, 255, 0.26);
-            }
-            .tm-volume-options-opacity-slider {
-                -webkit-appearance: none;
-                appearance: none;
-                background: linear-gradient(to right,
-                    rgba(255, 255, 255, 0.92) 0%,
-                    rgba(255, 255, 255, 0.92) var(--tm-opacity-fill, 0%),
-                    rgba(255, 255, 255, 0.22) var(--tm-opacity-fill, 0%),
-                    rgba(255, 255, 255, 0.22) 100%);
-                border-radius: 3px;
-                cursor: pointer;
-                display: block;
-                flex: 1 1 auto;
-                height: 4px;
-                margin: 0;
-                min-width: 0;
-                outline: none;
-                width: 100%;
-            }
-            .tm-volume-options-opacity-slider::-webkit-slider-runnable-track {
-                background: transparent;
-                border: none;
-                height: 4px;
-            }
-            .tm-volume-options-opacity-slider::-moz-range-track {
-                background: transparent;
-                border: none;
-                height: 4px;
-            }
-            .tm-volume-options-opacity-slider::-webkit-slider-thumb {
-                -webkit-appearance: none;
-                appearance: none;
-                background: #fff;
-                border: 0;
-                border-radius: 50%;
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
-                cursor: pointer;
-                height: 14px;
-                margin-top: -5px;
-                width: 14px;
-            }
-            .tm-volume-options-opacity-slider::-moz-range-thumb {
-                background: #fff;
-                border: 0;
-                border-radius: 50%;
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
-                cursor: pointer;
-                height: 14px;
-                width: 14px;
-            }
-        `;
+        installOptionsStyles({
+            document, platform: 'youtube', styleId: OPTIONS_STYLE_ID,
+            optionsButtonId: OPTIONS_BUTTON_ID, optionsPopupId: OPTIONS_POPUP_ID,
+            accentDark: VOLUME_ACCENT_DARK, accentDisabled: VOLUME_ACCENT_DISABLED,
+            closeHideControlsClass: OPTIONS_CLOSE_HIDE_CONTROLS_CLASS
+        });
     }
 
     function closeYouTubeSettingsPopupIfOpen() {
@@ -1285,7 +586,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
 
-    const { buildOptionsPopup, syncOptionsRadioGroups } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, syncOptionsRadioGroups } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         getVolumeAppearance, setVolumeAppearance,
@@ -1309,47 +610,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
 
     function refreshOptionsPopupState() {
-        const popup = getOptionsPopup();
-        if (!popup) return;
-
-        ['on', 'off', 'replace-native'].forEach((mode) => {
-            popup.querySelector(`#tm-volume-options-mode-${mode}`)
-                ?.setAttribute('aria-checked', getVolumeSliderMode() === mode ? 'true' : 'false');
-        });
-
-        const placementSection = popup.querySelector('#tm-volume-options-placement-section');
-        const placementEnabled = isNativeVolumeReplacementEnabled();
-        if (placementSection) {
-            placementSection.dataset.disabled = placementEnabled ? 'false' : 'true';
-        }
-        ['native', 'custom'].forEach((p) => {
-            const el = popup.querySelector(`#tm-volume-options-placement-${p}`);
-            if (!el) return;
-            el.setAttribute('aria-checked', getReplaceNativePlacement() === p ? 'true' : 'false');
-            el.disabled = !placementEnabled;
-        });
-
-        ['new', 'classic'].forEach((appearance) => {
-            popup.querySelector(`#tm-volume-options-appearance-${appearance}`)
-                ?.setAttribute('aria-checked', getVolumeAppearance() === appearance ? 'true' : 'false');
-        });
-
-        popup.querySelector('#tm-volume-options-snap')
-            ?.setAttribute('aria-checked', isSnapTo5Enabled() ? 'true' : 'false');
-        popup.querySelector('#tm-volume-options-always-expanded')
-            ?.setAttribute('aria-checked', isAlwaysExpandedEnabled() ? 'true' : 'false');
-        popup.querySelector('#tm-volume-options-location-video')
-            ?.setAttribute('aria-checked', isSliderOnVideo() ? 'true' : 'false');
-
-        const opacitySection = popup.querySelector('#tm-volume-options-opacity-section');
-        if (opacitySection) {
-            opacitySection.style.display = isSliderOnVideo() ? '' : 'none';
-        }
-        const sizeSection = popup.querySelector('#tm-volume-options-size-section');
-        if (sizeSection) {
-            sizeSection.style.display = isSliderOnVideo() ? '' : 'none';
-        }
-        syncOptionsRadioGroups(popup);
+        syncOptionsPopupState(getOptionsPopup());
     }
 
     function ensureOptionsPopup() {
@@ -1641,13 +902,14 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             alignSelf: 'center',
             transition: 'width 0.22s cubic-bezier(0.16, 1, 0.3, 1)'
         });
+        const cleanupRegistry = createCleanupRegistry();
 
         let hasPointerIntent = false;
         const markPointerIntent = () => {
             hasPointerIntent = true;
             window.removeEventListener('pointermove', markPointerIntent, true);
         };
-        window.addEventListener('pointermove', markPointerIntent, true);
+        cleanupRegistry.listen(window, 'pointermove', markPointerIntent, true);
         overlay.addEventListener('mouseenter', () => {
             if (!hasPointerIntent) return;
             overlay.dataset.tmHovering = 'true';
@@ -1673,15 +935,17 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             clearExpandedHold(overlay);
             setOverlayExpanded(overlay, false);
         };
-        document.addEventListener('click', collapseHeldSliderOnVideoClick, true);
+        cleanupRegistry.listen(document, 'click', collapseHeldSliderOnVideoClick, true);
 
-        const iconCell = document.createElement('button');
-        iconCell.type = 'button';
-        iconCell.className = 'tm-volume-icon-cell';
-        const indicator = document.createElement('div');
-        indicator.className = 'tm-volume-indicator';
-        indicator.appendChild(makeVolumeIndicatorSvg());
-        iconCell.appendChild(indicator);
+        const { iconCell, panelBg, topRow, label, sliderWrap, tickOverlay, slider } = createVolumeControlElements({
+            document,
+            overlay,
+            sliderId: SLIDER_ID,
+            valueLabelId: VALUE_LABEL_ID,
+            makeVolumeIndicatorSvg,
+            populateSliderTicks
+        });
+        cleanupRegistry.add(() => tickOverlay._tmSliderTicksCleanup?.());
         iconCell.addEventListener('mousedown', (event) => {
             event.preventDefault();
         });
@@ -1693,50 +957,9 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             setSliderFromPlayer(slider, label, video);
             markVolumeChangedWhileExpanded(overlay);
         });
-        const panelBg = document.createElement('div');
-        panelBg.className = 'tm-volume-panel-bg';
-
-        const topRow = document.createElement('div');
-        topRow.className = 'tm-volume-controls tm-volume-top-row';
-
-        const label = document.createElement('div');
-        label.id = VALUE_LABEL_ID;
-        label.textContent = '100%';
-
-        topRow.appendChild(label);
-
-        const sliderWrap = document.createElement('div');
-        sliderWrap.className = 'tm-volume-controls tm-volume-slider-row';
-        sliderWrap.style.position = 'relative';
-        sliderWrap.style.height = '40px';
-        sliderWrap.style.display = 'flex';
-        sliderWrap.style.alignItems = 'center';
-
-        const tickOverlay = document.createElement('div');
-        tickOverlay.className = 'tm-slider-ticks';
-        populateSliderTicks(tickOverlay);
-
-        const sliderTrack = document.createElement('div');
-        sliderTrack.className = 'tm-slider-track';
-
-        const slider = document.createElement('input');
-        slider.id = SLIDER_ID;
-        slider.type = 'range';
-        slider.min = '0';
-        slider.max = '100';
-        slider.step = '1';
-        slider.style.width = '100%';
-        slider.style.display = 'block';
-        slider.style.margin = '0';
-        slider.style.cursor = 'pointer';
-        slider.setAttribute('aria-label', 'Volume');
-        slider.setAttribute('aria-describedby', VALUE_LABEL_ID);
 
         const syncInitialSliderState = (value, muted = false) => {
-            slider.value = String(value);
-            label.textContent = muted ? 'Muted' : `${value}%`;
-            updateSliderBar(slider);
-            updateVolumeIndicator(overlay, value, muted);
+            syncVolumeControl({ slider, label, overlay, value, muted, updateSliderBar, updateVolumeIndicator });
         };
 
         // Initialize from localStorage to avoid the 100% to actual jump on video load
@@ -1746,13 +969,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         } else {
             syncInitialSliderState(getVolume(video), isMuted(video));
         }
-
-        let pointerStartX = 0;
-        let pointerStartY = 0;
-        let pointerStartValue = 0;
-        let pointerMoved = false;
-        let clickSnapHandled = false;
-        let pointerActive = false;
 
         const applySliderValue = (value) => {
             requestedVolumeIntent = { value, until: Date.now() + USER_VOLUME_INTENT_GRACE_MS, overlay };
@@ -1765,77 +981,28 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             markVolumeChangedWhileExpanded(overlay);
         };
 
-        const applyWheelVolumeStep = (event) => {
-            if (event.deltaY === 0) return;
-            event.preventDefault();
-            event.stopPropagation();
-            const currentValue = Number(slider.value) || 0;
-            const direction = event.deltaY < 0 ? 1 : -1;
-            const nextValue = Math.min(100, Math.max(0, currentValue + (direction * WHEEL_VOLUME_STEP)));
-            if (nextValue === currentValue) return;
-            slider.value = String(nextValue);
-            applySliderValue(nextValue);
-        };
-        iconCell.addEventListener('wheel', applyWheelVolumeStep, { passive: false });
-
-        const snapDirectClickIfNeeded = () => {
-            const currentValue = Number(slider.value) || 0;
-            if (clickSnapHandled || pointerMoved || currentValue === pointerStartValue) return;
-            const snappedValue = snapTo5(currentValue);
-            slider.value = String(snappedValue);
-            applySliderValue(snappedValue);
-            clickSnapHandled = true;
-        };
-
-        const readPressAwareSliderValue = () => {
-            if (isSnapTo5Enabled()) {
-                return readSnappedSliderValue(slider);
-            }
-
-            let value = Number(slider.value) || 0;
-            if (pointerActive && !pointerMoved && !clickSnapHandled && value !== pointerStartValue) {
-                value = snapTo5(value);
-                slider.value = String(value);
-                clickSnapHandled = true;
-            }
-            return value;
-        };
-
-        const finishSliderInteraction = (event) => {
-            const wasDragging = overlay.dataset.tmDragging === 'true';
-            if (event?.type === 'pointerup' && wasDragging) {
-                snapDirectClickIfNeeded();
-            }
-            overlay.dataset.tmDragging = 'false';
-            pointerActive = false;
-            updateOverlayOpacity(overlay);
-            collapseOverlayIfIdle(overlay, !overlay.matches(':hover'));
-        };
-        slider.addEventListener('pointerdown', (event) => {
-            pointerStartX = event.clientX;
-            pointerStartY = event.clientY;
-            pointerStartValue = Number(slider.value) || 0;
-            pointerMoved = false;
-            clickSnapHandled = false;
-            pointerActive = true;
-            overlay.dataset.tmDragging = 'true';
-            setOverlayExpanded(overlay, true);
-            updateOverlayOpacity(overlay);
+        cleanupRegistry.add(bindWheelVolumeStep({
+            target: iconCell,
+            slider,
+            step: WHEEL_VOLUME_STEP,
+            applyValue: applySliderValue
+        }));
+        const rangePointer = bindRangePointerInteraction({
+            window,
+            slider,
+            overlay,
+            isSnapEnabled: isSnapTo5Enabled,
+            readSnappedValue: readSnappedSliderValue,
+            snapValue: snapTo5,
+            applyValue: applySliderValue,
+            setExpanded: () => setOverlayExpanded(overlay, true),
+            updateOpacity: () => updateOverlayOpacity(overlay),
+            collapseIfIdle: (force) => collapseOverlayIfIdle(overlay, force)
         });
-        slider.addEventListener('pointermove', (event) => {
-            if (Math.abs(event.clientX - pointerStartX) > 3 || Math.abs(event.clientY - pointerStartY) > 3) {
-                pointerMoved = true;
-            }
-        });
-        slider.addEventListener('pointerup', finishSliderInteraction);
-        slider.addEventListener('click', snapDirectClickIfNeeded);
-        slider.addEventListener('pointercancel', finishSliderInteraction);
-        window.addEventListener('pointerup', finishSliderInteraction, true);
-        window.addEventListener('pointercancel', finishSliderInteraction, true);
-        window.addEventListener('blur', finishSliderInteraction);
+        cleanupRegistry.add(() => rangePointer.dispose());
 
         slider.addEventListener('input', () => {
-            applySliderValue(readPressAwareSliderValue());
+            applySliderValue(rangePointer.readPressAwareValue());
         });
 
         slider.addEventListener('change', () => {
@@ -1870,13 +1037,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         };
         video.addEventListener('volumechange', onVideoVolumeChange);
 
-        sliderWrap.appendChild(sliderTrack);
-        sliderWrap.appendChild(slider);
-        sliderWrap.appendChild(tickOverlay);
-        overlay.appendChild(panelBg);
-        overlay.appendChild(iconCell);
-        overlay.appendChild(topRow);
-        overlay.appendChild(sliderWrap);
         updateOverlayAppearance(overlay);
         if (isAlwaysExpandedEnabled()) {
             setOverlayExpanded(overlay, true, true);
@@ -1898,15 +1058,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         const cleanup = () => {
             if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
             video.removeEventListener('volumechange', onVideoVolumeChange);
-            window.removeEventListener('pointerup', finishSliderInteraction, true);
-            window.removeEventListener('pointercancel', finishSliderInteraction, true);
-            window.removeEventListener('blur', finishSliderInteraction);
             window.removeEventListener('keydown', clearCompletedDragIntentForKeyboard, true);
             window.removeEventListener('resize', onLayoutChange);
-            window.removeEventListener('pointermove', markPointerIntent, true);
-            document.removeEventListener('click', collapseHeldSliderOnVideoClick, true);
             controlsObserver.disconnect();
-            tickOverlay._tmSliderTicksCleanup?.();
+            cleanupRegistry.dispose();
             clearExpandedHold(overlay);
         };
         overlayLifecycle.set(overlay, cleanup);
@@ -1957,6 +1112,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         let existingOverlay = document.getElementById(OVERLAY_ID);
         if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
             disposeActiveOverlay();
+            existingOverlay.remove();
             existingOverlay = null;
         }
         if (existingOverlay) {
@@ -2089,11 +1245,19 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (window.__tmYtVolumeNavBound) return;
         window.__tmYtVolumeNavBound = true;
 
-        const runReattach = () => {
+        const cancelPendingReattach = () => {
+            if (navDebounceTimer) {
+                clearTimeout(navDebounceTimer);
+                navDebounceTimer = 0;
+            }
             if (navReattachTimer) {
                 clearTimeout(navReattachTimer);
                 navReattachTimer = 0;
             }
+        };
+
+        const runReattach = () => {
+            cancelPendingReattach();
 
             resetVideoElement();
             cachedYtPlayer = null;
@@ -2111,18 +1275,42 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         };
 
         const scheduleReattach = () => {
-            if (navDebounceTimer) {
-                clearTimeout(navDebounceTimer);
-                navDebounceTimer = 0;
-            }
+            cancelPendingReattach();
             navDebounceTimer = window.setTimeout(() => {
                 navDebounceTimer = 0;
                 runReattach();
             }, NAV_DEBOUNCE_MS);
         };
 
-        window.addEventListener('yt-navigate-finish', scheduleReattach, true);
-        window.addEventListener('yt-page-data-updated', scheduleReattach, true);
+        const handleNavigationStart = () => {
+            // Tampermonkey can isolate the userscript's History object from the one
+            // YouTube calls. The navigation-start event crosses that boundary and
+            // fires before the incoming player can expose its native volume area.
+            if (isOverlayEnabled() && isNativeVolumeReplacementEnabled()) {
+                document.documentElement.classList.add('tm-yt-volume-native-replacement-active');
+            }
+        };
+
+        const handleNavigationComplete = () => {
+            // YouTube usually has its incoming video and controls ready by this
+            // event. Mount synchronously so the custom icon replaces the hidden
+            // native control in the same frame, retaining the delayed path only as
+            // a fallback for unusually late player creation.
+            resetVideoElement();
+            cachedYtPlayer = null;
+            applyNativeVolumeVisibility();
+            const attached = attachSliderIfPossible();
+            if (attached || !isYouTubeSupportedPage()) {
+                cancelPendingReattach();
+                return;
+            }
+            scheduleReattach();
+        };
+
+        window.addEventListener('yt-navigate-start', handleNavigationStart, true);
+        window.addEventListener('yt-navigate-finish', handleNavigationComplete, true);
+        window.addEventListener('yt-page-data-updated', handleNavigationComplete, true);
+        window.addEventListener('popstate', handleNavigationComplete, true);
     }
 
     function init() {

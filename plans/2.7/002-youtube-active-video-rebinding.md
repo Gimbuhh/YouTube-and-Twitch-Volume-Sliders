@@ -30,9 +30,9 @@ Out of scope: changing what “primary video” means beyond the existing larges
 
 ## Verification
 
-- `pnpm test:unit`
-- `pnpm test:integration`
-- `pnpm check`
+- `npm run test:unit`
+- `npm run test:integration`
+- `npm run check`
 - Inspect the diff to confirm lifecycle cleanup remains paired with every new ownership path.
 
 ## Done criteria

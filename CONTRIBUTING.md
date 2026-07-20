@@ -11,9 +11,11 @@ Thank you for helping improve the YouTube and Twitch Volume Sliders.
 
 ## Development
 
+Use npm for dependency installation and repository scripts; other package managers are not supported.
+
 ```sh
-pnpm install --frozen-lockfile
-pnpm check
+npm ci
+npm run check
 ```
 
 Include focused tests for changed behavior. When source changes, include the deterministically regenerated `dist/*.user.js` files. Release archives are created only by the maintainer release workflow.
