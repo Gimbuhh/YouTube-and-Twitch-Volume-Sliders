@@ -2,6 +2,12 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.7.2 - 2026-08-03
+
+### Fixed
+
+- **Both:** Kept the circular volume arc aligned with its percentage at browser zoom levels other than 100%.
+
 ## 2.7.1 - 2026-07-16
 
 ### Fixed

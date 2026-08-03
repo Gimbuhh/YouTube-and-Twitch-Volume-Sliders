@@ -75,3 +75,14 @@ test('platform style variants retain their distinct host contracts', () => {
   youtube.dom.window.close();
   twitch.dom.window.close();
 });
+
+test('volume arcs scale with browser zoom', () => {
+  for (const platform of ['youtube', 'twitch']) {
+    const { dom, document } = installStyles(platform);
+    const slider = document.getElementById('tm-volume-slider-style');
+
+    assert.match(slider.textContent, /\.tm-volume-arc-track,[\s\S]*shape-rendering:\s*geometricPrecision/);
+    assert.doesNotMatch(slider.textContent, /vector-effect:\s*non-scaling-stroke/);
+    dom.window.close();
+  }
+});

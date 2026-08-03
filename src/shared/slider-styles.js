@@ -188,7 +188,6 @@ const SLIDER_STYLE_TEMPLATE = String.raw`
 #{{overlayId}} .tm-volume-arc-track,
 #{{overlayId}} .tm-volume-arc {
   shape-rendering: geometricPrecision;
-  vector-effect: non-scaling-stroke;
 }
 
 #{{overlayId}} .tm-volume-arc {
