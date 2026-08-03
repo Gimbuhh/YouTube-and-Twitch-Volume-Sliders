@@ -1,0 +1,3 @@
+## Fixed
+
+- **Both:** The circular volume indicator now shows the correct amount at every browser zoom level. Its colored arc no longer starts or ends early when YouTube or Twitch is viewed above or below 100% zoom.

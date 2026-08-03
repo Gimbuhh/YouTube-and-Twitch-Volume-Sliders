@@ -760,11 +760,11 @@ for(const config of platforms){
     assert.equal(percent.getAttribute('alignment-baseline'),'central');
     assert.equal(arc.getAttribute('r'),'14.5');
     assert.equal(arc.getAttribute('stroke-width'),'3');
-    assert.equal(runtime.window.getComputedStyle(arc).vectorEffect,'non-scaling-stroke');
+    assert.notEqual(runtime.window.getComputedStyle(arc).vectorEffect,'non-scaling-stroke');
     assert.equal(arcTrack.hasAttribute('stroke-dasharray'),false);
     assert.equal(arcTrack.getAttribute('r'),'14.5');
     assert.equal(arcTrack.getAttribute('stroke-width'),'3');
-    assert.equal(runtime.window.getComputedStyle(arcTrack).vectorEffect,'non-scaling-stroke');
+    assert.notEqual(runtime.window.getComputedStyle(arcTrack).vectorEffect,'non-scaling-stroke');
     assert.equal(percent.getAttribute('font-family'),'Arial, Helvetica, sans-serif');
     assert.equal(percent.getAttribute('font-size'),'15');
     assert.equal(percent.getAttribute('font-weight'),'700');
