@@ -1,7 +1,7 @@
 import { createOverlayUi } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
-import { createVolumePersistence, snapTo5 } from '../shared/volume.js';
+import { clampVolume, createVolumePersistence, snapToStep, stepVolume } from '../shared/volume.js';
 import { createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
 import { createCleanupRegistry, createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
 import { installOptionsStyles } from '../shared/options-styles.js';
@@ -23,7 +23,8 @@ export function startTwitchVolumeSlider() {
     const VOLUME_MODE_KEY = 'tm-twitch-volume-slider-mode';
     const SLIDER_LOCATION_KEY = 'tm-twitch-volume-slider-location';
     const REPLACE_NATIVE_PLACEMENT_KEY = 'tm-twitch-volume-slider-replace-placement';
-    const SNAP_TO_5_KEY = 'tm-twitch-volume-slider-snap-to-5';
+    const VOLUME_STEP_KEY = 'tm-twitch-volume-slider-step';
+    const LEGACY_SNAP_TO_5_KEY = 'tm-twitch-volume-slider-snap-to-5';
     const ALWAYS_EXPANDED_KEY = 'tm-twitch-volume-slider-always-expanded';
     const OVERLAY_OPACITY_IDLE_KEY = 'tm-twitch-volume-slider-opacity-idle';
     const OVERLAY_OPACITY_ACTIVE_KEY = 'tm-twitch-volume-slider-opacity-active';
@@ -36,7 +37,7 @@ export function startTwitchVolumeSlider() {
     const DEFAULT_SLIDER_THICKNESS = 75;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
-    const WHEEL_VOLUME_STEP = 5;
+    const KEYBOARD_VOLUME_STEP = 5;
     const VOLUME_LABEL_ROW_WIDTH_PX = 50;
     const TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS = 5000;
     const KEYBOARD_CONTROLS_HOLD_MS = 3000;
@@ -66,8 +67,8 @@ export function startTwitchVolumeSlider() {
         replaceNativePlacement: 'saved',
         // Slider location: 'saved', 'controls', or 'video'. Default: 'saved'
         sliderLocation: 'saved',
-        // Snap slider movement to 5% steps: 'saved', true, or false. Default: 'saved'
-        snapToFive: 'saved',
+        // Volume adjustment step: 'saved', 1, 2, 5, or 10. Default: 'saved'
+        volumeStep: 'saved',
         // Keep the volume pill expanded: 'saved', true, or false. Default: 'saved'
         alwaysExpanded: 'saved',
         // Opacity for the on-video slider when idle/focused: 'saved' or 0-100. Default: 'saved'
@@ -113,9 +114,9 @@ export function startTwitchVolumeSlider() {
 
 
 
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage: localStorage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
         onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
@@ -127,9 +128,9 @@ export function startTwitchVolumeSlider() {
             return document.getElementById(OVERLAY_ID);
         }
     });
-    const { getSavedVolume, readSnappedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
+    const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
         window, storage: localStorage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
-        isSnapEnabled: () => isSnapTo5Enabled()
+        getVolumeStep
     });
     const makeControlsVisibilityManager = () => createTwitchControlsVisibilityManager({
             window,
@@ -388,7 +389,7 @@ export function startTwitchVolumeSlider() {
 
     const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
         document, window, isAlwaysExpandedEnabled, isSliderOnVideo,
-        updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue,
+        updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue, getVolumeStep,
         accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
         arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
     });
@@ -824,7 +825,7 @@ export function startTwitchVolumeSlider() {
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         getVolumeAppearance, setVolumeAppearance,
-        isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
+        getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
         isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
         setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
         getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
@@ -1199,7 +1200,8 @@ export function startTwitchVolumeSlider() {
             sliderId: SLIDER_ID,
             valueLabelId: VALUE_LABEL_ID,
             makeVolumeIndicatorSvg,
-            populateSliderTicks
+            populateSliderTicks,
+            getVolumeStep
         });
         cleanupRegistry.add(() => tickOverlay._tmSliderTicksCleanup?.());
         iconCell.addEventListener('mousedown', (event) => {
@@ -1275,7 +1277,7 @@ export function startTwitchVolumeSlider() {
             event.preventDefault();
             event.stopPropagation();
             const currentValue = Number(slider.value) || 0;
-            const nextValue = Math.min(100, Math.max(0, currentValue + (direction * WHEEL_VOLUME_STEP)));
+            const nextValue = clampVolume(currentValue + (direction * KEYBOARD_VOLUME_STEP));
             if (nextValue === currentValue) return;
             markUserVolumeIntent();
             slider.value = String(nextValue);
@@ -1306,7 +1308,7 @@ export function startTwitchVolumeSlider() {
         cleanupRegistry.add(bindWheelVolumeStep({
             target: iconCell,
             slider,
-            step: WHEEL_VOLUME_STEP,
+            getVolumeStep,
             beforeApply: () => markUserVolumeIntent(),
             applyValue: applySliderValue
         }));
@@ -1314,9 +1316,9 @@ export function startTwitchVolumeSlider() {
             window,
             slider,
             overlay,
-            isSnapEnabled: isSnapTo5Enabled,
-            readSnappedValue: readSnappedSliderValue,
-            snapValue: snapTo5,
+            getVolumeStep,
+            readSteppedValue: readSteppedSliderValue,
+            snapValue: (value) => snapToStep(value, getVolumeStep()),
             applyValue: applySliderValue,
             setExpanded: () => setOverlayExpanded(overlay, true),
             updateOpacity: () => updateOverlayOpacity(overlay),
@@ -1338,7 +1340,7 @@ export function startTwitchVolumeSlider() {
 
         slider.addEventListener('change', () => {
             markUserVolumeIntent();
-            applySliderValue(readSnappedSliderValue(slider));
+            applySliderValue(readSteppedSliderValue(slider));
             cancelScheduledSaveVolume();
             saveVolume(Number(slider.value) || 0);
             releaseTwitchVolumeFocusSoon(overlay);

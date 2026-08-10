@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.7.2
+// @version      2.8
 // @description  Compact in-bar volume indicator that expands into a wide YouTube volume slider.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://www.youtube.com/favicon.ico
@@ -14,6 +14,70 @@
 "use strict";
 
 (() => {
+  // src/shared/volume.js
+  var clampVolume = (value) => Math.min(100, Math.max(0, Number(value) || 0));
+  var VOLUME_STEPS = [1, 2, 5, 10];
+  function normalizeVolumeStep(value) {
+    const step = Number(value);
+    return VOLUME_STEPS.includes(step) ? step : null;
+  }
+  function snapToStep(value, step) {
+    const normalizedStep = normalizeVolumeStep(step) || 1;
+    return clampVolume(Math.round(clampVolume(value) / normalizedStep) * normalizedStep);
+  }
+  function stepVolume(value, direction, step) {
+    const current = clampVolume(value);
+    const normalizedStep = normalizeVolumeStep(step) || 1;
+    if (direction > 0) {
+      return clampVolume((Math.floor(current / normalizedStep) + 1) * normalizedStep);
+    }
+    if (direction < 0) {
+      return clampVolume((Math.ceil(current / normalizedStep) - 1) * normalizedStep);
+    }
+    return current;
+  }
+  function getVolumeTickInterval(step) {
+    const normalizedStep = normalizeVolumeStep(step) || 1;
+    return normalizedStep === 1 ? 10 : normalizedStep;
+  }
+  function createVolumePersistence({ window: window2, storage, storageKey, debounceMs, getVolumeStep }) {
+    let saveTimer = 0;
+    function getSavedVolume() {
+      try {
+        const saved = storage.getItem(storageKey);
+        if (saved === null) return null;
+        const value = Math.min(100, Math.max(0, Number.parseInt(saved, 10)));
+        return Number.isNaN(value) ? null : value;
+      } catch {
+        return null;
+      }
+    }
+    function readSteppedSliderValue(slider) {
+      const value = snapToStep(slider.value, getVolumeStep());
+      slider.value = String(value);
+      return value;
+    }
+    function saveVolume(value) {
+      try {
+        storage.setItem(storageKey, String(Math.round(value)));
+      } catch {
+      }
+    }
+    function cancelScheduledSaveVolume() {
+      if (!saveTimer) return;
+      window2.clearTimeout(saveTimer);
+      saveTimer = 0;
+    }
+    function scheduleSaveVolume(value) {
+      cancelScheduledSaveVolume();
+      saveTimer = window2.setTimeout(() => {
+        saveVolume(value);
+        saveTimer = 0;
+      }, debounceMs);
+    }
+    return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
+  }
+
   // src/shared/overlay-ui.js
   function createOverlayUi(dependencies) {
     const {
@@ -24,6 +88,7 @@
       updateOverlayOpacity,
       updateOverlaySize,
       finishExpandedHoldIfDue,
+      getVolumeStep,
       accentLight: VOLUME_ACCENT_LIGHT,
       accentDark: VOLUME_ACCENT_DARK,
       accentMid: VOLUME_ACCENT_MID,
@@ -310,9 +375,12 @@
       tickOverlay.textContent = "";
       const ticks = [];
       const fragment = document2.createDocumentFragment();
-      for (let pct = 5; pct < 100; pct += 5) {
+      const interval = getVolumeTickInterval(getVolumeStep());
+      tickOverlay.dataset.tmTickInterval = String(interval);
+      for (let pct = interval; pct < 100; pct += interval) {
         const tick = document2.createElement("span");
         tick.className = "tm-slider-tick";
+        tick.classList.toggle("tm-slider-tick-major", pct % 10 === 0);
         tick.dataset.tmTickPct = String(pct);
         tick.setAttribute("aria-hidden", "true");
         tick.style.left = `${pct}%`;
@@ -336,6 +404,7 @@
       const resizeObserver = typeof window2.ResizeObserver === "function" ? new window2.ResizeObserver(scheduleSync) : null;
       resizeObserver?.observe(tickOverlay);
       window2.addEventListener("resize", scheduleSync, { passive: true });
+      tickOverlay._tmSliderTicksPopulate = () => populateSliderTicks(tickOverlay);
       tickOverlay._tmSliderTicksSync = sync;
       tickOverlay._tmSliderTicksCleanup = () => {
         if (frame && typeof window2.cancelAnimationFrame === "function") {
@@ -344,6 +413,7 @@
         frame = 0;
         resizeObserver?.disconnect();
         window2.removeEventListener("resize", scheduleSync);
+        delete tickOverlay._tmSliderTicksPopulate;
         delete tickOverlay._tmSliderTicksSync;
       };
       scheduleSync();
@@ -424,8 +494,8 @@
       setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
-      isSnapTo5Enabled,
-      setSnapTo5Enabled,
+      getVolumeStep,
+      setVolumeStep,
       isAlwaysExpandedEnabled,
       setAlwaysExpandedEnabled,
       isSliderOnVideo,
@@ -476,7 +546,9 @@
       ["new", "classic"].forEach((appearance) => {
         popup.querySelector(`#tm-volume-options-appearance-${appearance}`)?.setAttribute("aria-checked", getVolumeAppearance() === appearance ? "true" : "false");
       });
-      popup.querySelector("#tm-volume-options-snap")?.setAttribute("aria-checked", isSnapTo5Enabled() ? "true" : "false");
+      VOLUME_STEPS.forEach((step) => {
+        popup.querySelector(`#tm-volume-options-step-${step}`)?.setAttribute("aria-checked", getVolumeStep() === step ? "true" : "false");
+      });
       popup.querySelector("#tm-volume-options-always-expanded")?.setAttribute("aria-checked", isAlwaysExpandedEnabled() ? "true" : "false");
       popup.querySelector("#tm-volume-options-location-video")?.setAttribute("aria-checked", isSliderOnVideo() ? "true" : "false");
       const onVideoDisplay = isSliderOnVideo() ? "" : "none";
@@ -511,6 +583,12 @@
       next.click();
       next.focus();
     }
+    function createOptionsButtonLabel(label) {
+      const text = document2.createElement("span");
+      text.className = "tm-volume-options-button-label";
+      text.textContent = label;
+      return text;
+    }
     function createOptionsCheckboxRow(id, label, isChecked, onToggle) {
       const row = document2.createElement("button");
       row.type = "button";
@@ -518,8 +596,7 @@
       row.className = "tm-volume-options-row";
       row.setAttribute("role", "checkbox");
       row.setAttribute("aria-checked", isChecked ? "true" : "false");
-      const text = document2.createElement("span");
-      text.textContent = label;
+      const text = createOptionsButtonLabel(label);
       const box = document2.createElement("span");
       box.className = "tm-volume-options-checkbox";
       box.setAttribute("aria-hidden", "true");
@@ -543,7 +620,7 @@
       btn.setAttribute("role", "radio");
       btn.setAttribute("aria-checked", isChecked ? "true" : "false");
       btn.tabIndex = isChecked ? 0 : -1;
-      btn.textContent = label;
+      btn.appendChild(createOptionsButtonLabel(label));
       btn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -630,12 +707,6 @@
       const list = document2.createElement("div");
       list.className = "tm-volume-options-checklist";
       list.appendChild(createOptionsCheckboxRow(
-        "tm-volume-options-snap",
-        "Snap to 5%",
-        isSnapTo5Enabled(),
-        (next) => setSnapTo5Enabled(next)
-      ));
-      list.appendChild(createOptionsCheckboxRow(
         "tm-volume-options-always-expanded",
         "Always expanded",
         isAlwaysExpandedEnabled(),
@@ -648,6 +719,24 @@
         (next) => setSliderLocation(next ? "video" : "controls")
       ));
       section.appendChild(list);
+      return section;
+    }
+    function createVolumeStepSection() {
+      const section = document2.createElement("div");
+      section.className = "tm-volume-options-section";
+      section.id = "tm-volume-options-step-section";
+      section.appendChild(createOptionsSectionLabel("Adjustment step"));
+      const segment = createOptionsSegment(VOLUME_STEPS.map(
+        (step) => createOptionsRadio(
+          `tm-volume-options-step-${step}`,
+          `${step}%`,
+          getVolumeStep() === step,
+          () => setVolumeStep(step)
+        )
+      ));
+      segment.setAttribute("role", "radiogroup");
+      segment.setAttribute("aria-label", "Volume adjustment step");
+      section.appendChild(segment);
       return section;
     }
     function createAppearanceSection() {
@@ -701,7 +790,7 @@
       const resetBtn = document2.createElement("button");
       resetBtn.type = "button";
       resetBtn.className = "tm-volume-options-opacity-reset";
-      resetBtn.textContent = "Reset";
+      resetBtn.appendChild(createOptionsButtonLabel("Reset"));
       resetBtn.setAttribute("aria-label", resetAriaLabel);
       const slider = document2.createElement("input");
       slider.type = "range";
@@ -858,6 +947,7 @@
       body.appendChild(createModeSection());
       body.appendChild(createPlacementSection());
       body.appendChild(createAppearanceSection());
+      body.appendChild(createVolumeStepSection());
       body.appendChild(createBehaviorSection());
       body.appendChild(createThicknessSection());
       body.appendChild(createOpacitySection());
@@ -1022,11 +1112,32 @@
       write(keys.replacePlacement, normalizeReplaceNativePlacement(placement) || "native");
       onPlacementChanged();
     }
-    function isSnapTo5Enabled() {
-      const override = normalizeBooleanSetting(userSettings.snapToFive);
-      return override ?? read(keys.snap) === "true";
+    function getSavedVolumeStep() {
+      const savedStep = normalizeVolumeStep(read(keys.step));
+      if (savedStep) return savedStep;
+      return normalizeBooleanSetting(read(keys.legacySnap)) === true ? 5 : 1;
     }
-    const setSnapTo5Enabled = (enabled) => write(keys.snap, enabled ? "true" : "false");
+    function getVolumeStep() {
+      const override = normalizeVolumeStep(userSettings.volumeStep);
+      if (override) return override;
+      const legacyOverride = normalizeBooleanSetting(userSettings.snapToFive);
+      if (legacyOverride !== null) return legacyOverride ? 5 : 1;
+      return getSavedVolumeStep();
+    }
+    function updateVolumeStepUi(overlay) {
+      if (!overlay) return;
+      const step = getVolumeStep();
+      const slider = overlay.querySelector?.("#tm-volume-slider-range");
+      if (slider) {
+        slider.dataset.tmVolumeStep = String(step);
+      }
+      overlay.querySelector?.(".tm-slider-ticks")?._tmSliderTicksPopulate?.();
+    }
+    function setVolumeStep(step) {
+      write(keys.step, String(normalizeVolumeStep(step) || 1));
+      if (keys.legacySnap) remove(keys.legacySnap);
+      updateVolumeStepUi(getOverlay());
+    }
     function isAlwaysExpandedEnabled() {
       const override = normalizeBooleanSetting(userSettings.alwaysExpanded);
       return override ?? read(keys.expanded) === "true";
@@ -1169,8 +1280,10 @@
       getVolumeAppearance,
       setVolumeAppearance,
       updateOverlayAppearance,
-      isSnapTo5Enabled,
-      setSnapTo5Enabled,
+      getSavedVolumeStep,
+      getVolumeStep,
+      setVolumeStep,
+      updateVolumeStepUi,
       isAlwaysExpandedEnabled,
       setAlwaysExpandedEnabled,
       getSavedOverlayOpacityPercent,
@@ -1195,50 +1308,6 @@
       isNativeVolumeReplacementEnabled,
       shouldUseNativeReplacementSlot
     };
-  }
-
-  // src/shared/volume.js
-  var clampVolume = (value) => Math.min(100, Math.max(0, Number(value) || 0));
-  var snapTo5 = (value) => Math.round(clampVolume(value) / 5) * 5;
-  function createVolumePersistence({ window: window2, storage, storageKey, debounceMs, isSnapEnabled }) {
-    let saveTimer = 0;
-    function getSavedVolume() {
-      try {
-        const saved = storage.getItem(storageKey);
-        if (saved === null) return null;
-        const value = Math.min(100, Math.max(0, Number.parseInt(saved, 10)));
-        return Number.isNaN(value) ? null : value;
-      } catch {
-        return null;
-      }
-    }
-    function readSnappedSliderValue(slider) {
-      let value = Number(slider.value) || 0;
-      if (isSnapEnabled()) {
-        value = snapTo5(value);
-        slider.value = String(value);
-      }
-      return value;
-    }
-    function saveVolume(value) {
-      try {
-        storage.setItem(storageKey, String(Math.round(value)));
-      } catch {
-      }
-    }
-    function cancelScheduledSaveVolume() {
-      if (!saveTimer) return;
-      window2.clearTimeout(saveTimer);
-      saveTimer = 0;
-    }
-    function scheduleSaveVolume(value) {
-      cancelScheduledSaveVolume();
-      saveTimer = window2.setTimeout(() => {
-        saveVolume(value);
-        saveTimer = 0;
-      }, debounceMs);
-    }
-    return { getSavedVolume, readSnappedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
   }
 
   // src/shared/options.js
@@ -1412,7 +1481,15 @@
                 -webkit-appearance: none;
                 appearance: none;
                 font-family: inherit;
+                letter-spacing: normal;
+                margin: 0;
                 text-transform: none;
+            }
+            #{{optionsPopupId}} .tm-volume-options-button-label {
+                display: block;
+                font-size: 14px;
+                font-weight: 400;
+                min-width: 0;
             }
             #{{optionsPopupId}}[hidden] {
                 display: none;
@@ -1484,7 +1561,7 @@
                 display: flex;
                 flex-direction: column;
             }
-            .tm-volume-options-checklist .tm-volume-options-row {
+            #{{optionsPopupId}} .tm-volume-options-checklist .tm-volume-options-row {
                 align-items: center;
                 column-gap: 12px;
                 display: grid;
@@ -1495,7 +1572,7 @@
                 padding: 5px 8px;
                 width: calc(100% + 16px);
             }
-            .tm-volume-options-checklist .tm-volume-options-row > span:first-child {
+            .tm-volume-options-checklist .tm-volume-options-row > .tm-volume-options-button-label {
                 justify-self: start;
                 min-width: 0;
             }
@@ -1518,7 +1595,7 @@
                 text-align: left;
                 transition: background 0.12s ease;
             }
-            .tm-volume-options-row > span:first-child {
+            .tm-volume-options-row > .tm-volume-options-button-label {
                 display: block;
                 line-height: 18px;
             }
@@ -1565,7 +1642,7 @@
             }
             .tm-volume-options-segment {
                 display: flex;
-                gap: 6px;
+                gap: 8px;
                 width: 100%;
             }
             .tm-volume-options-segment .tm-volume-options-radio {
@@ -1584,17 +1661,23 @@
                 border-radius: 6px;
                 color: rgba(255, 255, 255, 0.82);
                 cursor: pointer;
-                display: flex;
+                display: grid;
                 flex: 1 1 0;
                 font-size: 12px;
                 font-weight: 600;
-                justify-content: center;
                 line-height: 16px;
                 min-height: 34px;
                 min-width: 0;
-                padding: 8px 10px;
+                padding: 0 10px;
+                place-items: center;
                 text-align: center;
                 transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+            }
+            .tm-volume-options-radio > .tm-volume-options-button-label {
+                line-height: 16px;
+                max-width: 100%;
+                text-align: center;
+                width: 100%;
             }
             .tm-volume-options-radio:hover,
             .tm-volume-options-radio:focus-visible {
@@ -1657,15 +1740,20 @@
                 border-radius: 6px;
                 color: rgba(255, 255, 255, 0.9);
                 cursor: pointer;
-                display: flex;
+                display: grid;
                 flex-shrink: 0;
                 font-size: 11px;
                 font-weight: 500;
                 height: 28px;
-                justify-content: center;
                 line-height: 16px;
                 min-width: 52px;
                 padding: 0 10px;
+                place-items: center;
+                text-align: center;
+            }
+            .tm-volume-options-opacity-reset > .tm-volume-options-button-label {
+                line-height: 16px;
+                text-align: center;
             }
             .tm-volume-options-opacity-reset:hover,
             .tm-volume-options-opacity-reset:focus-visible {
@@ -2089,12 +2177,18 @@
 
 #{{overlayId}} .tm-slider-tick {
   position: absolute;
+  top: 25%;
+  bottom: 25%;
+  width: var(--tm-slider-tick-width, 1px);
+  height: auto;
+  background: rgba(255,255,255,0.18);
+  transform: none;
+}
+
+#{{overlayId}} .tm-slider-tick-major {
   top: 0;
   bottom: 0;
-  width: var(--tm-slider-tick-width, 1px);
-  height: 100%;
-  background: rgba(255,255,255,0.25);
-  transform: none;
+  background: rgba(255,255,255,0.46);
 }
 
         `;
@@ -2178,7 +2272,8 @@
     sliderId,
     valueLabelId,
     makeVolumeIndicatorSvg,
-    populateSliderTicks
+    populateSliderTicks,
+    getVolumeStep
   }) {
     const iconCell = document2.createElement("button");
     iconCell.type = "button";
@@ -2214,6 +2309,7 @@
     slider.min = "0";
     slider.max = "100";
     slider.step = "1";
+    slider.dataset.tmVolumeStep = String(getVolumeStep());
     Object.assign(slider.style, {
       width: "100%",
       display: "block",
@@ -2232,14 +2328,15 @@
     updateSliderBar(slider);
     updateVolumeIndicator(overlay, value, muted);
   }
-  function bindWheelVolumeStep({ target, slider, step = 5, beforeApply, applyValue }) {
+  function bindWheelVolumeStep({ target, slider, getVolumeStep, beforeApply, applyValue }) {
     const handler = (event) => {
       if (event.deltaY === 0) return;
       event.preventDefault();
       event.stopPropagation();
       const currentValue = Number(slider.value) || 0;
       const direction = event.deltaY < 0 ? 1 : -1;
-      const nextValue = Math.min(100, Math.max(0, currentValue + direction * step));
+      const step = getVolumeStep();
+      const nextValue = stepVolume(currentValue, direction, step);
       if (nextValue === currentValue) return;
       beforeApply?.(event, nextValue);
       slider.value = String(nextValue);
@@ -2248,12 +2345,36 @@
     target.addEventListener("wheel", handler, { passive: false });
     return () => target.removeEventListener("wheel", handler, { passive: false });
   }
+  function getMajorTickPressValue(slider, clientX, volumeStep) {
+    if (volumeStep !== 1 && volumeStep !== 2) return null;
+    if (!Number.isFinite(clientX)) return null;
+    const tickOverlay = slider?.parentElement?.querySelector?.(".tm-slider-ticks");
+    const overlayRect = tickOverlay?.getBoundingClientRect?.();
+    if (!overlayRect || !Number.isFinite(overlayRect.width) || overlayRect.width <= 0) return null;
+    const majorTicks = Array.from(tickOverlay.querySelectorAll?.(".tm-slider-tick-major") || []);
+    let nearestValue = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const tick of majorTicks) {
+      const value = Number(tick.dataset?.tmTickPct);
+      const rect = tick.getBoundingClientRect?.();
+      if (!Number.isFinite(value) || !rect) continue;
+      const center = Number(rect.left) + Number(rect.width) / 2;
+      const distance = Math.abs(clientX - center);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestValue = value;
+      }
+    }
+    const majorTickSpacing = overlayRect.width / 10;
+    const hitRadius = Math.max(4, Math.min(8, majorTickSpacing * 0.3));
+    return nearestDistance <= hitRadius ? nearestValue : null;
+  }
   function bindRangePointerInteraction({
     window: window2,
     slider,
     overlay,
-    isSnapEnabled,
-    readSnappedValue,
+    getVolumeStep,
+    readSteppedValue,
     snapValue,
     applyValue,
     setExpanded,
@@ -2266,9 +2387,25 @@
     let pointerStartY = 0;
     let pointerStartValue = 0;
     let pointerMoved = false;
+    let pointerDisplaced = false;
     let clickSnapHandled = false;
+    let majorTickPressHandled = false;
     let pointerActive = false;
-    const snapDirectClickIfNeeded = () => {
+    const snapMajorTickPressIfNeeded = (event) => {
+      if (!pointerActive || pointerDisplaced || majorTickPressHandled) return false;
+      const pressedValue = getMajorTickPressValue(slider, event?.clientX ?? pointerStartX, getVolumeStep?.());
+      if (pressedValue === null) return false;
+      majorTickPressHandled = true;
+      clickSnapHandled = true;
+      const currentValue = Number(slider.value) || 0;
+      if (pressedValue !== currentValue) {
+        slider.value = String(pressedValue);
+        applyValue(pressedValue);
+      }
+      return true;
+    };
+    const snapDirectClickIfNeeded = (event) => {
+      if (snapMajorTickPressIfNeeded(event)) return;
       const currentValue = Number(slider.value) || 0;
       if (clickSnapHandled || pointerMoved || currentValue === pointerStartValue) return;
       const snappedValue = snapValue(currentValue);
@@ -2277,11 +2414,17 @@
       clickSnapHandled = true;
     };
     const readPressAwareValue = () => {
-      if (isSnapEnabled()) return readSnappedValue(slider);
-      let value = Number(slider.value) || 0;
+      const value = readSteppedValue(slider);
+      if (pointerActive && !pointerDisplaced && !majorTickPressHandled) {
+        const pressedValue = getMajorTickPressValue(slider, pointerStartX, getVolumeStep?.());
+        if (pressedValue !== null) {
+          slider.value = String(pressedValue);
+          majorTickPressHandled = true;
+          clickSnapHandled = true;
+          return pressedValue;
+        }
+      }
       if (pointerActive && !pointerMoved && !clickSnapHandled && value !== pointerStartValue) {
-        value = snapValue(value);
-        slider.value = String(value);
         clickSnapHandled = true;
       }
       return value;
@@ -2304,13 +2447,18 @@
       pointerStartY = event.clientY;
       pointerStartValue = Number(slider.value) || 0;
       pointerMoved = false;
+      pointerDisplaced = false;
       clickSnapHandled = false;
+      majorTickPressHandled = false;
       pointerActive = true;
       overlay.dataset.tmDragging = "true";
       setExpanded();
       updateOpacity();
     };
     const move = (event) => {
+      if (Math.abs(event.clientX - pointerStartX) > 1 || Math.abs(event.clientY - pointerStartY) > 1) {
+        pointerDisplaced = true;
+      }
       if (Math.abs(event.clientX - pointerStartX) > 3 || Math.abs(event.clientY - pointerStartY) > 3) {
         pointerMoved = true;
       }
@@ -2353,7 +2501,8 @@
     const VOLUME_MODE_KEY = "tm-yt-volume-slider-mode";
     const SLIDER_LOCATION_KEY = "tm-yt-volume-slider-location";
     const REPLACE_NATIVE_PLACEMENT_KEY = "tm-yt-volume-slider-replace-placement";
-    const SNAP_TO_5_KEY = "tm-yt-volume-slider-snap-to-5";
+    const VOLUME_STEP_KEY = "tm-yt-volume-slider-step";
+    const LEGACY_SNAP_TO_5_KEY = "tm-yt-volume-slider-snap-to-5";
     const ALWAYS_EXPANDED_KEY = "tm-yt-volume-slider-always-expanded";
     const OVERLAY_OPACITY_IDLE_KEY = "tm-yt-volume-slider-opacity-idle";
     const OVERLAY_OPACITY_ACTIVE_KEY = "tm-yt-volume-slider-opacity-active";
@@ -2366,7 +2515,7 @@
     const DEFAULT_SLIDER_THICKNESS = 75;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
-    const WHEEL_VOLUME_STEP = 5;
+    const KEYBOARD_VOLUME_STEP = 5;
     const NAV_REATTACH_DELAY_MS = 700;
     const NAV_DEBOUNCE_MS = 180;
     const INITIAL_ATTACH_RETRY_MS = 50;
@@ -2388,8 +2537,8 @@
       sliderLocation: "saved",
       // Replace-native placement: 'saved', 'native', or 'custom'. Default: 'saved'
       replaceNativePlacement: "saved",
-      // Snap slider movement to 5% steps: 'saved', true, or false. Default: 'saved'
-      snapToFive: "saved",
+      // Volume adjustment step: 'saved', 1, 2, 5, or 10. Default: 'saved'
+      volumeStep: "saved",
       // Keep the volume pill expanded: 'saved', true, or false. Default: 'saved'
       alwaysExpanded: "saved",
       // On-video slider opacity when unfocused: 'saved' or 0-100 as a percentage. Default: 45
@@ -2414,12 +2563,12 @@
     let requestedVolumeIntent = null;
     const overlayLifecycle = createOverlayLifecycle();
     const { getVideoElement, resetVideoElement, ensurePlayerPositioning } = createVideoLocator(document, window);
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
       document,
       storage: localStorage,
       userSettings: USER_SETTINGS,
       overlayId: OVERLAY_ID,
-      keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+      keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
       defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
       onPlacementChanged: () => {
         attachSliderIfPossible();
@@ -2441,12 +2590,12 @@
         return document.getElementById(OVERLAY_ID);
       }
     });
-    const { getSavedVolume, readSnappedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
+    const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
       window,
       storage: localStorage,
       storageKey: STORAGE_KEY,
       debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
-      isSnapEnabled: () => isSnapTo5Enabled()
+      getVolumeStep
     });
     function shouldHideNativeVolume() {
       return isYouTubeSupportedPage() && isOverlayEnabled() && isNativeVolumeReplacementEnabled();
@@ -2562,6 +2711,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       updateOverlayOpacity,
       updateOverlaySize,
       finishExpandedHoldIfDue,
+      getVolumeStep,
       accentLight: VOLUME_ACCENT_LIGHT,
       accentDark: VOLUME_ACCENT_DARK,
       accentMid: VOLUME_ACCENT_MID,
@@ -2810,8 +2960,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
-      isSnapTo5Enabled,
-      setSnapTo5Enabled,
+      getVolumeStep,
+      setVolumeStep,
       isAlwaysExpandedEnabled,
       setAlwaysExpandedEnabled,
       isSliderOnVideo,
@@ -3132,7 +3282,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         sliderId: SLIDER_ID,
         valueLabelId: VALUE_LABEL_ID,
         makeVolumeIndicatorSvg,
-        populateSliderTicks
+        populateSliderTicks,
+        getVolumeStep
       });
       cleanupRegistry.add(() => tickOverlay._tmSliderTicksCleanup?.());
       iconCell.addEventListener("mousedown", (event) => {
@@ -3168,16 +3319,16 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       cleanupRegistry.add(bindWheelVolumeStep({
         target: iconCell,
         slider,
-        step: WHEEL_VOLUME_STEP,
+        getVolumeStep,
         applyValue: applySliderValue
       }));
       const rangePointer = bindRangePointerInteraction({
         window,
         slider,
         overlay,
-        isSnapEnabled: isSnapTo5Enabled,
-        readSnappedValue: readSnappedSliderValue,
-        snapValue: snapTo5,
+        getVolumeStep,
+        readSteppedValue: readSteppedSliderValue,
+        snapValue: (value) => snapToStep(value, getVolumeStep()),
         applyValue: applySliderValue,
         setExpanded: () => setOverlayExpanded(overlay, true),
         updateOpacity: () => updateOverlayOpacity(overlay),
@@ -3188,15 +3339,23 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         applySliderValue(rangePointer.readPressAwareValue());
       });
       slider.addEventListener("change", () => {
-        applySliderValue(readSnappedSliderValue(slider));
+        applySliderValue(readSteppedSliderValue(slider));
         cancelScheduledSaveVolume();
         saveVolume(Number(slider.value) || 0);
       });
-      const clearCompletedDragIntentForKeyboard = (event) => {
-        if (event.target !== slider || event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      const applyKeyboardVolumeStep = (event) => {
+        const direction = event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
+        if (!direction) return;
+        event.preventDefault();
+        event.stopPropagation();
         if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
+        const currentValue = Number(slider.value) || 0;
+        const nextValue = clampVolume(currentValue + direction * KEYBOARD_VOLUME_STEP);
+        if (nextValue === currentValue) return;
+        slider.value = String(nextValue);
+        applySliderValue(nextValue);
       };
-      window.addEventListener("keydown", clearCompletedDragIntentForKeyboard, true);
+      slider.addEventListener("keydown", applyKeyboardVolumeStep);
       const onVideoVolumeChange = () => {
         if (!document.getElementById(OVERLAY_ID)) return;
         const muted = isMuted(video);
@@ -3236,7 +3395,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       const cleanup = () => {
         if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
         video.removeEventListener("volumechange", onVideoVolumeChange);
-        window.removeEventListener("keydown", clearCompletedDragIntentForKeyboard, true);
         window.removeEventListener("resize", onLayoutChange);
         controlsObserver.disconnect();
         cleanupRegistry.dispose();

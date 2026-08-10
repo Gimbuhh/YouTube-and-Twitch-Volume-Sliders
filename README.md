@@ -18,7 +18,7 @@ Both scripts replace or complement the sites' native controls with a small indic
       <img src="docs/images/demo-youtube-volume-slider-classic.svg" alt="Classic expanded YouTube volume slider with a speaker icon, 25 percent volume label, and red slider track" width="420">
     </td>
     <td align="center" valign="middle" width="42%">
-      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240"><br>
+      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, icon style, adjustment-step choices, and behavior toggles" width="240"><br>
       <img src="docs/images/demo-youtube-options-controls.svg" alt="YouTube player controls showing the Volume Slider Options button next to the settings gear" width="240">
     </td>
   </tr>
@@ -37,7 +37,7 @@ Both scripts replace or complement the sites' native controls with a small indic
       <img src="docs/images/demo-twitch-volume-slider-classic.svg" alt="Classic expanded Twitch volume slider with a speaker icon, 25 percent volume label, and purple slider track" width="420">
     </td>
     <td align="center" valign="middle" width="42%">
-      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, behavior toggles, and slider appearance controls" width="240"><br>
+      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, icon style, adjustment-step choices, and behavior toggles" width="240"><br>
       <img src="docs/images/demo-twitch-options-controls.svg" alt="Twitch player controls showing the Volume Slider Options button next to the settings button" width="240">
     </td>
   </tr>
@@ -67,10 +67,26 @@ Choose the latest YouTube or Twitch `.user.js` asset, approve the install prompt
 
 - Compact control that expands to a full range slider
 - Optional native-control replacement and persistent volume settings
+- Configurable 1%, 2%, 5%, or 10% adjustment steps for dragging and scrolling
+- Adaptive slider marks with easy-to-press 10% targets at fine adjustment steps
+- Consistent 5% Arrow Up and Arrow Down volume changes
 - Adjustable on-video slider size for larger remote-control displays
 - Mute-safe restoration across reloads and single-page navigation
 - Keyboard and screen-reader accessible mute and options controls
 - Site-specific YouTube and Twitch adapters backed by shared UI and lifecycle code
+
+## Volume adjustment
+
+The **Adjustment step** option controls slider dragging and scrolling on the circular volume control. The selected value is saved separately for YouTube and Twitch.
+
+| Adjustment step | Slider marks |
+| --- | --- |
+| 1% | Taller marks every 10%; dragging remains precise to 1% |
+| 2% | Marks every 2%, with taller marks every 10% |
+| 5% | Marks every 5%, with taller marks every 10% |
+| 10% | Taller marks every 10% |
+
+With the 1% or 2% setting, pressing on or close to a taller mark selects that 10% value directly. Moving the grabber still uses the selected fine step. Arrow Up and Arrow Down remain fixed at 5% whenever the custom volume control handles them, independent of the adjustment-step setting.
 
 ## Development
 

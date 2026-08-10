@@ -9,13 +9,15 @@ test('restore and user intent use separate platform contracts', () => {
   assert.deepEqual(calls,[['restore',35],['user',40],['save',40]]);
 });
 
-test('volume persistence owns debounce cancellation and saved parsing', () => {
+test('volume persistence owns custom-step snapping, debounce cancellation, and saved parsing', () => {
   const values=new Map([['volume','35']]); let pending=null; let cleared=0;
   const window={setTimeout:fn=>{pending=fn;return 1;},clearTimeout:()=>{cleared++;pending=null;}};
   const storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};
-  const persistence=createVolumePersistence({window,storage,storageKey:'volume',debounceMs:150,isSnapEnabled:()=>true});
+  let step=5;
+  const persistence=createVolumePersistence({window,storage,storageKey:'volume',debounceMs:150,getVolumeStep:()=>step});
   assert.equal(persistence.getSavedVolume(),35);
-  const slider={value:'47'}; assert.equal(persistence.readSnappedSliderValue(slider),45); assert.equal(slider.value,'45');
+  const slider={value:'47'}; assert.equal(persistence.readSteppedSliderValue(slider),45); assert.equal(slider.value,'45');
+  step=2; slider.value='47'; assert.equal(persistence.readSteppedSliderValue(slider),48); assert.equal(slider.value,'48');
   persistence.scheduleSaveVolume(60); persistence.scheduleSaveVolume(65); assert.equal(cleared,1); pending();
   assert.equal(values.get('volume'),'65');
 });

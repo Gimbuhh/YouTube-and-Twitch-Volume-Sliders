@@ -45,7 +45,15 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 -webkit-appearance: none;
                 appearance: none;
                 font-family: inherit;
+                letter-spacing: normal;
+                margin: 0;
                 text-transform: none;
+            }
+            #{{optionsPopupId}} .tm-volume-options-button-label {
+                display: block;
+                font-size: 14px;
+                font-weight: 400;
+                min-width: 0;
             }
             #{{optionsPopupId}}[hidden] {
                 display: none;
@@ -117,7 +125,7 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 display: flex;
                 flex-direction: column;
             }
-            .tm-volume-options-checklist .tm-volume-options-row {
+            #{{optionsPopupId}} .tm-volume-options-checklist .tm-volume-options-row {
                 align-items: center;
                 column-gap: 12px;
                 display: grid;
@@ -128,7 +136,7 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 padding: 5px 8px;
                 width: calc(100% + 16px);
             }
-            .tm-volume-options-checklist .tm-volume-options-row > span:first-child {
+            .tm-volume-options-checklist .tm-volume-options-row > .tm-volume-options-button-label {
                 justify-self: start;
                 min-width: 0;
             }
@@ -151,7 +159,7 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 text-align: left;
                 transition: background 0.12s ease;
             }
-            .tm-volume-options-row > span:first-child {
+            .tm-volume-options-row > .tm-volume-options-button-label {
                 display: block;
                 line-height: 18px;
             }
@@ -198,7 +206,7 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
             }
             .tm-volume-options-segment {
                 display: flex;
-                gap: 6px;
+                gap: 8px;
                 width: 100%;
             }
             .tm-volume-options-segment .tm-volume-options-radio {
@@ -217,17 +225,23 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 border-radius: 6px;
                 color: rgba(255, 255, 255, 0.82);
                 cursor: pointer;
-                display: flex;
+                display: grid;
                 flex: 1 1 0;
                 font-size: 12px;
                 font-weight: 600;
-                justify-content: center;
                 line-height: 16px;
                 min-height: 34px;
                 min-width: 0;
-                padding: 8px 10px;
+                padding: 0 10px;
+                place-items: center;
                 text-align: center;
                 transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+            }
+            .tm-volume-options-radio > .tm-volume-options-button-label {
+                line-height: 16px;
+                max-width: 100%;
+                text-align: center;
+                width: 100%;
             }
             .tm-volume-options-radio:hover,
             .tm-volume-options-radio:focus-visible {
@@ -290,15 +304,20 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 border-radius: 6px;
                 color: rgba(255, 255, 255, 0.9);
                 cursor: pointer;
-                display: flex;
+                display: grid;
                 flex-shrink: 0;
                 font-size: 11px;
                 font-weight: 500;
                 height: 28px;
-                justify-content: center;
                 line-height: 16px;
                 min-width: 52px;
                 padding: 0 10px;
+                place-items: center;
+                text-align: center;
+            }
+            .tm-volume-options-opacity-reset > .tm-volume-options-button-label {
+                line-height: 16px;
+                text-align: center;
             }
             .tm-volume-options-opacity-reset:hover,
             .tm-volume-options-opacity-reset:focus-visible {

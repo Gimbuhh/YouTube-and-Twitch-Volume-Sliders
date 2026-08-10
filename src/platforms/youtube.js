@@ -1,7 +1,7 @@
 import { createOverlayUi } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
-import { createVolumePersistence, snapTo5 } from '../shared/volume.js';
+import { clampVolume, createVolumePersistence, snapToStep } from '../shared/volume.js';
 import { createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
 import { createCleanupRegistry, createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
 import { createStyleElement } from '../shared/styles.js';
@@ -24,7 +24,8 @@ export function startYouTubeVolumeSlider() {
     const VOLUME_MODE_KEY = 'tm-yt-volume-slider-mode';
     const SLIDER_LOCATION_KEY = 'tm-yt-volume-slider-location';
     const REPLACE_NATIVE_PLACEMENT_KEY = 'tm-yt-volume-slider-replace-placement';
-    const SNAP_TO_5_KEY = 'tm-yt-volume-slider-snap-to-5';
+    const VOLUME_STEP_KEY = 'tm-yt-volume-slider-step';
+    const LEGACY_SNAP_TO_5_KEY = 'tm-yt-volume-slider-snap-to-5';
     const ALWAYS_EXPANDED_KEY = 'tm-yt-volume-slider-always-expanded';
     const OVERLAY_OPACITY_IDLE_KEY = 'tm-yt-volume-slider-opacity-idle';
     const OVERLAY_OPACITY_ACTIVE_KEY = 'tm-yt-volume-slider-opacity-active';
@@ -37,7 +38,7 @@ export function startYouTubeVolumeSlider() {
     const DEFAULT_SLIDER_THICKNESS = 75;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
-    const WHEEL_VOLUME_STEP = 5;
+    const KEYBOARD_VOLUME_STEP = 5;
     const NAV_REATTACH_DELAY_MS = 700;
     const NAV_DEBOUNCE_MS = 180;
     const INITIAL_ATTACH_RETRY_MS = 50;
@@ -59,8 +60,8 @@ export function startYouTubeVolumeSlider() {
         sliderLocation: 'saved',
         // Replace-native placement: 'saved', 'native', or 'custom'. Default: 'saved'
         replaceNativePlacement: 'saved',
-        // Snap slider movement to 5% steps: 'saved', true, or false. Default: 'saved'
-        snapToFive: 'saved',
+        // Volume adjustment step: 'saved', 1, 2, 5, or 10. Default: 'saved'
+        volumeStep: 'saved',
         // Keep the volume pill expanded: 'saved', true, or false. Default: 'saved'
         alwaysExpanded: 'saved',
         // On-video slider opacity when unfocused: 'saved' or 0-100 as a percentage. Default: 45
@@ -95,9 +96,9 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage: localStorage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, snap: SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
         onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
@@ -109,9 +110,9 @@ export function startYouTubeVolumeSlider() {
             return document.getElementById(OVERLAY_ID);
         }
     });
-    const { getSavedVolume, readSnappedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
+    const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
         window, storage: localStorage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
-        isSnapEnabled: () => isSnapTo5Enabled()
+        getVolumeStep
     });
 
 
@@ -267,7 +268,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
     const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
         document, window, isAlwaysExpandedEnabled, isSliderOnVideo,
-        updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue,
+        updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue, getVolumeStep,
         accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
         arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
     });
@@ -590,7 +591,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         getVolumeAppearance, setVolumeAppearance,
-        isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
+        getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
         isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
         setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
         getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
@@ -943,7 +944,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             sliderId: SLIDER_ID,
             valueLabelId: VALUE_LABEL_ID,
             makeVolumeIndicatorSvg,
-            populateSliderTicks
+            populateSliderTicks,
+            getVolumeStep
         });
         cleanupRegistry.add(() => tickOverlay._tmSliderTicksCleanup?.());
         iconCell.addEventListener('mousedown', (event) => {
@@ -984,16 +986,16 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         cleanupRegistry.add(bindWheelVolumeStep({
             target: iconCell,
             slider,
-            step: WHEEL_VOLUME_STEP,
+            getVolumeStep,
             applyValue: applySliderValue
         }));
         const rangePointer = bindRangePointerInteraction({
             window,
             slider,
             overlay,
-            isSnapEnabled: isSnapTo5Enabled,
-            readSnappedValue: readSnappedSliderValue,
-            snapValue: snapTo5,
+            getVolumeStep,
+            readSteppedValue: readSteppedSliderValue,
+            snapValue: (value) => snapToStep(value, getVolumeStep()),
             applyValue: applySliderValue,
             setExpanded: () => setOverlayExpanded(overlay, true),
             updateOpacity: () => updateOverlayOpacity(overlay),
@@ -1006,16 +1008,24 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         });
 
         slider.addEventListener('change', () => {
-            applySliderValue(readSnappedSliderValue(slider));
-        cancelScheduledSaveVolume();
+            applySliderValue(readSteppedSliderValue(slider));
+            cancelScheduledSaveVolume();
             saveVolume(Number(slider.value) || 0);
         });
 
-        const clearCompletedDragIntentForKeyboard = (event) => {
-            if (event.target !== slider || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+        const applyKeyboardVolumeStep = (event) => {
+            const direction = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
+            if (!direction) return;
+            event.preventDefault();
+            event.stopPropagation();
             if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
+            const currentValue = Number(slider.value) || 0;
+            const nextValue = clampVolume(currentValue + (direction * KEYBOARD_VOLUME_STEP));
+            if (nextValue === currentValue) return;
+            slider.value = String(nextValue);
+            applySliderValue(nextValue);
         };
-        window.addEventListener('keydown', clearCompletedDragIntentForKeyboard, true);
+        slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
         const onVideoVolumeChange = () => {
             if (!document.getElementById(OVERLAY_ID)) return;
@@ -1058,7 +1068,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         const cleanup = () => {
             if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
             video.removeEventListener('volumechange', onVideoVolumeChange);
-            window.removeEventListener('keydown', clearCompletedDragIntentForKeyboard, true);
             window.removeEventListener('resize', onLayoutChange);
             controlsObserver.disconnect();
             cleanupRegistry.dispose();

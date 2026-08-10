@@ -1,7 +1,9 @@
+import { getVolumeTickInterval } from './volume.js';
+
 export function createOverlayUi(dependencies) {
   const {
     document, window, isAlwaysExpandedEnabled, isSliderOnVideo,
-    updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue,
+    updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue, getVolumeStep,
     accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
     arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
   } = dependencies;
@@ -322,9 +324,12 @@ export function createOverlayUi(dependencies) {
         tickOverlay.textContent = '';
         const ticks = [];
         const fragment = document.createDocumentFragment();
-        for (let pct = 5; pct < 100; pct += 5) {
+        const interval = getVolumeTickInterval(getVolumeStep());
+        tickOverlay.dataset.tmTickInterval = String(interval);
+        for (let pct = interval; pct < 100; pct += interval) {
             const tick = document.createElement('span');
             tick.className = 'tm-slider-tick';
+            tick.classList.toggle('tm-slider-tick-major', pct % 10 === 0);
             tick.dataset.tmTickPct = String(pct);
             tick.setAttribute('aria-hidden', 'true');
             tick.style.left = `${pct}%`;
@@ -351,6 +356,7 @@ export function createOverlayUi(dependencies) {
             : null;
         resizeObserver?.observe(tickOverlay);
         window.addEventListener('resize', scheduleSync, { passive: true });
+        tickOverlay._tmSliderTicksPopulate = () => populateSliderTicks(tickOverlay);
         tickOverlay._tmSliderTicksSync = sync;
         tickOverlay._tmSliderTicksCleanup = () => {
             if (frame && typeof window.cancelAnimationFrame === 'function') {
@@ -359,6 +365,7 @@ export function createOverlayUi(dependencies) {
             frame = 0;
             resizeObserver?.disconnect();
             window.removeEventListener('resize', scheduleSync);
+            delete tickOverlay._tmSliderTicksPopulate;
             delete tickOverlay._tmSliderTicksSync;
         };
         scheduleSync();

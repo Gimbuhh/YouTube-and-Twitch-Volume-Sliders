@@ -5,8 +5,8 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', muteKey:'tm-yt-muted', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', appearanceKey:'tm-yt-volume-slider-appearance' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', muteKey:'tm-twitch-muted', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', appearanceKey:'tm-twitch-volume-slider-appearance' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', muteKey:'tm-yt-muted', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', stepKey:'tm-yt-volume-slider-step', appearanceKey:'tm-yt-volume-slider-appearance' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, volumeKey:'tm-twitch-volume', muteKey:'tm-twitch-muted', modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', stepKey:'tm-twitch-volume-slider-step', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
 
 const waitForTimers = (runtime, delay = 0) => new Promise(resolve=>runtime.window.setTimeout(resolve,delay));
@@ -265,11 +265,11 @@ test('YouTube: unsupported routes leave preview videos and native controls untou
   runtime.close();
 });
 
-test('YouTube: keyboard input preserves exact steps when snapping is disabled',async()=>{
+test('YouTube: one-percent adjustment preserves exact slider input',async()=>{
   const config=platforms[0];
   const {runtime,fixture}=await loadPlatform(config,current=>{
     current.window.localStorage.setItem(config.volumeKey,'52');
-    current.window.localStorage.setItem('tm-yt-volume-slider-snap-to-5','false');
+    current.window.localStorage.setItem(config.stepKey,'1');
   });
   const slider=runtime.document.getElementById('tm-volume-slider-range');
   slider.value='53';
@@ -279,31 +279,61 @@ test('YouTube: keyboard input preserves exact steps when snapping is disabled',a
   runtime.close();
 });
 
+for (const config of platforms) test(`${config.name}: selected two-percent step applies to slider and wheel input`,async()=>{
+  const {runtime,fixture}=await loadPlatform(config,current=>{
+    current.window.localStorage.setItem(config.volumeKey,'53');
+    current.window.localStorage.setItem(config.stepKey,'2');
+  });
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  const icon=runtime.document.querySelector('.tm-volume-icon-cell');
+  const wheelUp=new runtime.window.Event('wheel',{bubbles:true,cancelable:true});
+  Object.defineProperty(wheelUp,'deltaY',{value:-100});
+  icon.dispatchEvent(wheelUp);
+  assert.equal(slider.value,'54');
+  assert.equal(fixture.state.volume,config.file==='youtube'?54:.54);
+
+  slider.value='53';
+  slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  assert.equal(slider.value,'54');
+  assert.equal(fixture.state.volume,config.file==='youtube'?54:.54);
+
+  const wheelDown=new runtime.window.Event('wheel',{bubbles:true,cancelable:true});
+  Object.defineProperty(wheelDown,'deltaY',{value:100});
+  icon.dispatchEvent(wheelDown);
+  assert.equal(wheelDown.defaultPrevented,true);
+  assert.equal(slider.value,'52');
+  assert.equal(fixture.state.volume,config.file==='youtube'?52:.52);
+  runtime.close();
+});
+
 test('YouTube: arrow volume updates remain responsive immediately after slider input',async()=>{
   const config=platforms[0];
   const {runtime,fixture}=await loadPlatform(config,current=>{
     current.window.localStorage.setItem(config.volumeKey,'50');
+    current.window.localStorage.setItem(config.stepKey,'10');
   });
   const slider=runtime.document.getElementById('tm-volume-slider-range');
   slider.value='60';
   slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
   assert.equal(fixture.state.volume,60);
 
-  slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
-  fixture.player.setVolume(65);
-  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+  const arrowUp=new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true});
+  slider.dispatchEvent(arrowUp);
 
+  assert.equal(arrowUp.defaultPrevented,true);
+  assert.equal(fixture.state.volume,65);
   assert.equal(slider.value,'65');
   assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'65%');
   assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').getAttribute('aria-label'),'Volume 65%');
   runtime.close();
 });
 
-test('Twitch: arrow keys adjust by five percent while preserving mute and saved volume',async()=>{
+test('Twitch: arrow keys use fixed five-percent steps while preserving mute and saved volume',async()=>{
   const config=platforms[1];
   const {runtime,fixture}=await loadPlatform(config,current=>{
     current.window.localStorage.setItem(config.volumeKey,'50');
     current.window.localStorage.setItem(config.muteKey,'true');
+    current.window.localStorage.setItem(config.stepKey,'10');
   });
   const slider=runtime.document.getElementById('tm-volume-slider-range');
   const label=runtime.document.getElementById('tm-volume-slider-value');
@@ -375,6 +405,7 @@ test('Twitch: player-level arrows require the player to be the last pressed area
   const config=platforms[1];
   const {runtime,fixture}=await loadPlatform(config,current=>{
     current.window.localStorage.setItem(config.volumeKey,'50');
+    current.window.localStorage.setItem(config.stepKey,'5');
   });
   const slider=runtime.document.getElementById('tm-volume-slider-range');
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
@@ -883,7 +914,9 @@ for(const config of platforms){
   });
 
   test(`${config.name}: slider row keeps full-width geometry while the pill animates`,async()=>{
-    const {runtime}=await loadPlatform(config);
+    const {runtime}=await loadPlatform(config,current=>{
+      current.window.localStorage.setItem(config.stepKey,'5');
+    });
     const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const sliderRow=runtime.document.querySelector('.tm-volume-slider-row');
     const ticks=runtime.document.querySelector('.tm-slider-ticks');
@@ -902,9 +935,12 @@ for(const config of platforms){
     assert.equal(tickMarks[0].tagName.toLowerCase(),'span');
     assert.equal(tickMarks[0].dataset.tmTickPct,'5');
     assert.equal(tickMarks[18].dataset.tmTickPct,'95');
+    assert.equal(tickMarks[1].classList.contains('tm-slider-tick-major'),true);
+    assert.equal(tickMarks[0].classList.contains('tm-slider-tick-major'),false);
     assert.match(style.textContent,/\.tm-slider-tick\s*{[^}]*position:\s*absolute/s);
     assert.match(style.textContent,/\.tm-slider-tick\s*{[^}]*width:\s*var\(--tm-slider-tick-width,\s*1px\)/s);
-    assert.match(style.textContent,/\.tm-slider-tick\s*{[^}]*background:\s*rgba\(255,255,255,0\.25\)/s);
+    assert.match(style.textContent,/\.tm-slider-tick\s*{[^}]*top:\s*25%;[^}]*bottom:\s*25%;[^}]*background:\s*rgba\(255,255,255,0\.18\)/s);
+    assert.match(style.textContent,/\.tm-slider-tick-major\s*{[^}]*top:\s*0;[^}]*bottom:\s*0;[^}]*background:\s*rgba\(255,255,255,0\.46\)/s);
     assert.doesNotMatch(style.textContent,/\.tm-slider-tick\s*{[^}]*vector-effect:\s*non-scaling-stroke/s);
     Object.defineProperty(runtime.window,'devicePixelRatio',{value:4/3,configurable:true});
     ticks.getBoundingClientRect=()=>({left:0,top:0,right:242.34375,bottom:8.25,width:242.34375,height:8.25});
@@ -954,6 +990,7 @@ for(const config of platforms){
   test(`${config.name}: scrolling the arc changes volume in five point steps`,async()=>{
     const {runtime,fixture}=await loadPlatform(config,current=>{
       current.window.localStorage.setItem(config.volumeKey,'50');
+      current.window.localStorage.setItem(config.stepKey,'5');
     });
     const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
     const icon=overlay.querySelector('button.tm-volume-icon-cell');
@@ -980,6 +1017,7 @@ for(const config of platforms){
   test(`${config.name}: scrolling up from muted arc unmutes at five percent`,async()=>{
     const {runtime,fixture}=await loadPlatform(config,(current,currentFixture)=>{
       current.window.localStorage.setItem(config.volumeKey,'0');
+      current.window.localStorage.setItem(config.stepKey,'5');
       if(config.file==='youtube')currentFixture.player.mute();else currentFixture.player._tmPlayerApi.setMuted(true);
     });
     const icon=runtime.document.querySelector('button.tm-volume-icon-cell');

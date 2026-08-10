@@ -1,9 +1,11 @@
+import { VOLUME_STEPS } from './volume.js';
+
 export function createOptionsUi(dependencies) {
   const {
     document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
     getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
     getVolumeAppearance, setVolumeAppearance,
-    isSnapTo5Enabled, setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
+    getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
     setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
     getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
@@ -52,8 +54,10 @@ export function createOptionsUi(dependencies) {
                 ?.setAttribute('aria-checked', getVolumeAppearance() === appearance ? 'true' : 'false');
         });
 
-        popup.querySelector('#tm-volume-options-snap')
-            ?.setAttribute('aria-checked', isSnapTo5Enabled() ? 'true' : 'false');
+        VOLUME_STEPS.forEach((step) => {
+            popup.querySelector(`#tm-volume-options-step-${step}`)
+                ?.setAttribute('aria-checked', getVolumeStep() === step ? 'true' : 'false');
+        });
         popup.querySelector('#tm-volume-options-always-expanded')
             ?.setAttribute('aria-checked', isAlwaysExpandedEnabled() ? 'true' : 'false');
         popup.querySelector('#tm-volume-options-location-video')
@@ -96,6 +100,13 @@ export function createOptionsUi(dependencies) {
         next.focus();
     }
 
+    function createOptionsButtonLabel(label) {
+        const text = document.createElement('span');
+        text.className = 'tm-volume-options-button-label';
+        text.textContent = label;
+        return text;
+    }
+
     function createOptionsCheckboxRow(id, label, isChecked, onToggle) {
         const row = document.createElement('button');
         row.type = 'button';
@@ -104,8 +115,7 @@ export function createOptionsUi(dependencies) {
         row.setAttribute('role', 'checkbox');
         row.setAttribute('aria-checked', isChecked ? 'true' : 'false');
 
-        const text = document.createElement('span');
-        text.textContent = label;
+        const text = createOptionsButtonLabel(label);
 
         const box = document.createElement('span');
         box.className = 'tm-volume-options-checkbox';
@@ -133,7 +143,7 @@ export function createOptionsUi(dependencies) {
         btn.setAttribute('role', 'radio');
         btn.setAttribute('aria-checked', isChecked ? 'true' : 'false');
         btn.tabIndex = isChecked ? 0 : -1;
-        btn.textContent = label;
+        btn.appendChild(createOptionsButtonLabel(label));
         btn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -231,12 +241,6 @@ export function createOptionsUi(dependencies) {
         const list = document.createElement('div');
         list.className = 'tm-volume-options-checklist';
         list.appendChild(createOptionsCheckboxRow(
-            'tm-volume-options-snap',
-            'Snap to 5%',
-            isSnapTo5Enabled(),
-            (next) => setSnapTo5Enabled(next)
-        ));
-        list.appendChild(createOptionsCheckboxRow(
             'tm-volume-options-always-expanded',
             'Always expanded',
             isAlwaysExpandedEnabled(),
@@ -249,6 +253,26 @@ export function createOptionsUi(dependencies) {
             (next) => setSliderLocation(next ? 'video' : 'controls')
         ));
         section.appendChild(list);
+        return section;
+    }
+
+    function createVolumeStepSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+        section.id = 'tm-volume-options-step-section';
+        section.appendChild(createOptionsSectionLabel('Adjustment step'));
+
+        const segment = createOptionsSegment(VOLUME_STEPS.map((step) =>
+            createOptionsRadio(
+                `tm-volume-options-step-${step}`,
+                `${step}%`,
+                getVolumeStep() === step,
+                () => setVolumeStep(step)
+            )
+        ));
+        segment.setAttribute('role', 'radiogroup');
+        segment.setAttribute('aria-label', 'Volume adjustment step');
+        section.appendChild(segment);
         return section;
     }
 
@@ -309,7 +333,7 @@ export function createOptionsUi(dependencies) {
         const resetBtn = document.createElement('button');
         resetBtn.type = 'button';
         resetBtn.className = 'tm-volume-options-opacity-reset';
-        resetBtn.textContent = 'Reset';
+        resetBtn.appendChild(createOptionsButtonLabel('Reset'));
         resetBtn.setAttribute('aria-label', resetAriaLabel);
 
         const slider = document.createElement('input');
@@ -482,6 +506,7 @@ export function createOptionsUi(dependencies) {
         body.appendChild(createModeSection());
         body.appendChild(createPlacementSection());
         body.appendChild(createAppearanceSection());
+        body.appendChild(createVolumeStepSection());
         body.appendChild(createBehaviorSection());
         body.appendChild(createThicknessSection());
         body.appendChild(createOpacitySection());
