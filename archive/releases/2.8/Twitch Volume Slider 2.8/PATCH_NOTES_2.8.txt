@@ -1,0 +1,10 @@
+## Added
+
+- **Both:** Volume Slider Options now offers persistent 1%, 2%, 5%, and 10% adjustment steps. The selected step controls dragging and scrolling on the circular volume control, while the slider marks adapt so the available increments remain easy to read.
+- **Both:** At the fine 1% and 2% settings, pressing on or near a taller 10% mark now selects that marked value immediately. Dragging remains precise to the selected fine step.
+
+## Changed
+
+- **Both:** Arrow Up and Arrow Down now change volume by a consistent 5% on both sites, independent of the selected drag-and-scroll step, so keyboard adjustments remain predictable.
+- **Both:** Existing settings migrate automatically. Users who enabled Snap to 5% keep a 5% adjustment step; users who left it disabled continue with 1% precision.
+- **Both:** Text throughout the options menu stays centered and aligned more consistently across browser zoom levels, including the new adjustment-step buttons and Slider behavior rows.
