@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createSettings, normalizeBooleanSetting, normalizeOpacityPercent, normalizeOverlaySizePercent, normalizeSliderThicknessPercent, normalizeVolumeAppearance, normalizeVolumeSliderMode } from '../../src/shared/settings.js';
-import { clampVolume, snapTo5 } from '../../src/shared/volume.js';
+import { clampVolume, getVolumeTickInterval, normalizeVolumeStep, snapToStep, stepVolume } from '../../src/shared/volume.js';
 
 test('saved volume parsing and clamping', () => {
   const storage = new JSDOM('', { url:'https://example.com' }).window.localStorage;
-  const settings = createSettings(storage, { volume:'v', mode:'m', location:'l', replacePlacement:'p', snap:'s', expanded:'e' });
+  const settings = createSettings(storage, { volume:'v', mode:'m', location:'l', replacePlacement:'p', step:'step', legacySnap:'s', expanded:'e' });
   assert.equal(settings.savedVolume, null);
   storage.setItem('v', '125px'); assert.equal(settings.savedVolume, 100);
   storage.setItem('v', '-8'); assert.equal(settings.savedVolume, 0);
@@ -17,6 +17,9 @@ test('settings defaults and boolean normalization', () => {
   assert.equal(normalizeBooleanSetting('true'), true);
   assert.equal(normalizeBooleanSetting(false), false);
   assert.equal(normalizeBooleanSetting('other'), null);
+  assert.equal(normalizeVolumeStep('2'), 2);
+  assert.equal(normalizeVolumeStep(10), 10);
+  assert.equal(normalizeVolumeStep(3), null);
   assert.equal(normalizeVolumeSliderMode('replace-native'), 'replace-native');
   assert.equal(normalizeVolumeSliderMode('invalid'), null);
   assert.equal(normalizeVolumeAppearance('new'), 'new');
@@ -32,7 +35,27 @@ test('settings defaults and boolean normalization', () => {
   assert.equal(normalizeSliderThicknessPercent('invalid', 50), 50);
 });
 
-test('volume clamping and snap-to-five', () => {
+test('volume clamping, custom steps, and adaptive tick intervals', () => {
   assert.equal(clampVolume(110), 100); assert.equal(clampVolume(-1), 0);
-  assert.equal(snapTo5(47), 45); assert.equal(snapTo5(98), 100); assert.equal(snapTo5(0), 0);
+  assert.equal(snapToStep(47, 1), 47);
+  assert.equal(snapToStep(47, 2), 48);
+  assert.equal(snapToStep(47, 5), 45);
+  assert.equal(snapToStep(96, 10), 100);
+  assert.equal(stepVolume(53, 1, 2), 54);
+  assert.equal(stepVolume(53, -1, 2), 52);
+  assert.equal(stepVolume(50, 1, 10), 60);
+  assert.equal(stepVolume(50, -1, 10), 40);
+  assert.equal(getVolumeTickInterval(1), 10);
+  assert.equal(getVolumeTickInterval(2), 2);
+  assert.equal(getVolumeTickInterval(5), 5);
+  assert.equal(getVolumeTickInterval(10), 10);
+});
+
+test('saved adjustment step falls back to the legacy snap preference', () => {
+  const storage = new JSDOM('', { url:'https://example.com' }).window.localStorage;
+  const settings = createSettings(storage, { step:'step', legacySnap:'snap' });
+  assert.equal(settings.volumeStep, 1);
+  storage.setItem('snap', 'true'); assert.equal(settings.volumeStep, 5);
+  storage.setItem('step', '10'); assert.equal(settings.volumeStep, 10);
+  settings.volumeStep = 2; assert.equal(storage.getItem('step'), '2');
 });

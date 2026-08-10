@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="552" height="104" viewBox="0 0 552 104" role="img" aria-labelledby="title desc">
   <title id="title">Expanded YouTube volume slider, new appearance</title>
-  <desc id="desc">Expanded YouTube replacement volume slider using the new appearance with the volume number inside the circular arc control.</desc>
+  <desc id="desc">Expanded YouTube replacement volume slider using the new appearance with the volume number inside the circular arc control, short 5 percent marks, and taller 10 percent marks.</desc>
   <defs>
     <filter id="drop" x="-8%" y="-40%" width="116%" height="180%">
       <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#000" flood-opacity="0.06"/>
@@ -33,8 +33,9 @@
 
       <g transform="translate(96 52)">
         <rect x="0" y="-6.6" width="347.2" height="13.2" rx="6.6" fill="url(#track)"/>
-        <g opacity="0.55">
-          <path d="M29.24 -6.6v13.2M45.28 -6.6v13.2M61.32 -6.6v13.2M77.36 -6.6v13.2M93.4 -6.6v13.2M109.44 -6.6v13.2M125.48 -6.6v13.2M141.52 -6.6v13.2M157.56 -6.6v13.2M173.6 -6.6v13.2M189.64 -6.6v13.2M205.68 -6.6v13.2M221.72 -6.6v13.2M237.76 -6.6v13.2M253.8 -6.6v13.2M269.84 -6.6v13.2M285.88 -6.6v13.2M301.92 -6.6v13.2M317.96 -6.6v13.2" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+        <g fill="none" stroke-width="1">
+          <path d="M29.24 -3.3v6.6M61.32 -3.3v6.6M93.4 -3.3v6.6M125.48 -3.3v6.6M157.56 -3.3v6.6M189.64 -3.3v6.6M221.72 -3.3v6.6M253.8 -3.3v6.6M285.88 -3.3v6.6M317.96 -3.3v6.6" stroke="rgba(255,255,255,0.18)"/>
+          <path d="M45.28 -6.6v13.2M77.36 -6.6v13.2M109.44 -6.6v13.2M141.52 -6.6v13.2M173.6 -6.6v13.2M205.68 -6.6v13.2M237.76 -6.6v13.2M269.84 -6.6v13.2M301.92 -6.6v13.2" stroke="rgba(255,255,255,0.46)"/>
         </g>
         <circle cx="93.4" cy="0" r="13.2" fill="url(#thumb)"/>
         <circle cx="93.4" cy="0" r="12.7" fill="none" stroke="rgba(0,0,0,0.12)"/>

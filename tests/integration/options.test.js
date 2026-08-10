@@ -5,8 +5,8 @@ import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
 const platforms = [
-  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', sizeKey:'tm-yt-volume-slider-size', thicknessKey:'tm-yt-volume-slider-thickness', appearanceKey:'tm-yt-volume-slider-appearance' },
-  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', sizeKey:'tm-twitch-volume-slider-size', thicknessKey:'tm-twitch-volume-slider-thickness', appearanceKey:'tm-twitch-volume-slider-appearance' }
+  { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', stepKey:'tm-yt-volume-slider-step', legacySnapKey:'tm-yt-volume-slider-snap-to-5', sizeKey:'tm-yt-volume-slider-size', thicknessKey:'tm-yt-volume-slider-thickness', appearanceKey:'tm-yt-volume-slider-appearance' },
+  { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', stepKey:'tm-twitch-volume-slider-step', legacySnapKey:'tm-twitch-volume-slider-snap-to-5', sizeKey:'tm-twitch-volume-slider-size', thicknessKey:'tm-twitch-volume-slider-thickness', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
 
 async function openOptions(config, mode = 'on', location = 'controls', setup = () => {}) {
@@ -55,6 +55,9 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
   assert.equal(hiddenSize.style.display,'none');
   const thicknessSection=popup.querySelector('#tm-volume-options-thickness-section');
   assert.equal(thicknessSection.style.display,'');
+  assert.equal(popup.querySelectorAll('button').length,popup.querySelectorAll('button > .tm-volume-options-button-label').length);
+  assert.equal(popup.querySelector('#tm-volume-options-mode-replace-native .tm-volume-options-button-label')?.textContent,'Replace native');
+  assert.equal(popup.querySelector('#tm-volume-options-thickness-section .tm-volume-options-opacity-reset .tm-volume-options-button-label')?.textContent,'Reset');
   assert.equal(popup.querySelector('#tm-volume-options-appearance-new')?.getAttribute('aria-checked'),'true');
   assert.equal(popup.querySelector('#tm-volume-options-appearance-classic')?.getAttribute('aria-checked'),'false');
   const lastVisible=popup.querySelector('#tm-volume-options-thickness-section button');
@@ -93,6 +96,49 @@ for (const config of platforms) test(`${config.name}: icon style option switches
   assert.equal(overlay.dataset.tmAppearance,'new');
   assert.equal(modern.getAttribute('aria-checked'),'true');
   assert.equal(classic.getAttribute('aria-checked'),'false');
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: adjustment step updates interaction granularity and adaptive ticks`,async()=>{
+  const {runtime,popup}=await openOptions(config);
+  const slider=runtime.document.getElementById('tm-volume-slider-range');
+  const ticks=()=>Array.from(runtime.document.querySelectorAll('.tm-slider-tick'));
+  const selectStep=(step)=>popup.querySelector(`#tm-volume-options-step-${step}`).click();
+
+  assert.equal(popup.querySelector('#tm-volume-options-step-1').getAttribute('aria-checked'),'true');
+  assert.equal(slider.step,'1');
+  assert.equal(slider.dataset.tmVolumeStep,'1');
+  assert.deepEqual(ticks().map(tick=>Number(tick.dataset.tmTickPct)),[10,20,30,40,50,60,70,80,90]);
+
+  selectStep(2);
+  assert.equal(runtime.window.localStorage.getItem(config.stepKey),'2');
+  assert.equal(slider.step,'1');
+  assert.equal(slider.dataset.tmVolumeStep,'2');
+  assert.deepEqual(ticks().map(tick=>Number(tick.dataset.tmTickPct)),Array.from({length:49},(_,index)=>(index+1)*2));
+  assert.deepEqual(ticks().filter(tick=>tick.classList.contains('tm-slider-tick-major')).map(tick=>Number(tick.dataset.tmTickPct)),[10,20,30,40,50,60,70,80,90]);
+
+  selectStep(5);
+  assert.equal(slider.step,'1');
+  assert.equal(slider.dataset.tmVolumeStep,'5');
+  assert.equal(ticks().length,19);
+  assert.deepEqual(ticks().filter(tick=>tick.classList.contains('tm-slider-tick-major')).map(tick=>Number(tick.dataset.tmTickPct)),[10,20,30,40,50,60,70,80,90]);
+
+  selectStep(10);
+  assert.equal(slider.step,'1');
+  assert.equal(slider.dataset.tmVolumeStep,'10');
+  assert.equal(ticks().length,9);
+  assert.equal(ticks().every(tick=>tick.classList.contains('tm-slider-tick-major')),true);
+  runtime.close();
+});
+
+for (const config of platforms) test(`${config.name}: legacy snap-to-five preference migrates when a step is selected`,async()=>{
+  const {runtime,popup}=await openOptions(config,'on','controls',storage=>{
+    storage.setItem(config.legacySnapKey,'true');
+  });
+  assert.equal(popup.querySelector('#tm-volume-options-step-5').getAttribute('aria-checked'),'true');
+  popup.querySelector('#tm-volume-options-step-2').click();
+  assert.equal(runtime.window.localStorage.getItem(config.stepKey),'2');
+  assert.equal(runtime.window.localStorage.getItem(config.legacySnapKey),null);
   runtime.close();
 });
 

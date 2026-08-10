@@ -1,10 +1,13 @@
+import { stepVolume } from './volume.js';
+
 export function createVolumeControlElements({
   document,
   overlay,
   sliderId,
   valueLabelId,
   makeVolumeIndicatorSvg,
-  populateSliderTicks
+  populateSliderTicks,
+  getVolumeStep
 }) {
   const iconCell = document.createElement('button');
   iconCell.type = 'button';
@@ -47,7 +50,10 @@ export function createVolumeControlElements({
   slider.type = 'range';
   slider.min = '0';
   slider.max = '100';
+  // Keep the native range on 1% increments so fixed 5% keyboard changes can
+  // represent off-grid values. Pointer and wheel input are stepped in JS.
   slider.step = '1';
+  slider.dataset.tmVolumeStep = String(getVolumeStep());
   Object.assign(slider.style, {
     width: '100%',
     display: 'block',
@@ -69,14 +75,15 @@ export function syncVolumeControl({ slider, label, overlay, value, muted, update
   updateVolumeIndicator(overlay, value, muted);
 }
 
-export function bindWheelVolumeStep({ target, slider, step = 5, beforeApply, applyValue }) {
+export function bindWheelVolumeStep({ target, slider, getVolumeStep, beforeApply, applyValue }) {
   const handler = (event) => {
     if (event.deltaY === 0) return;
     event.preventDefault();
     event.stopPropagation();
     const currentValue = Number(slider.value) || 0;
     const direction = event.deltaY < 0 ? 1 : -1;
-    const nextValue = Math.min(100, Math.max(0, currentValue + (direction * step)));
+    const step = getVolumeStep();
+    const nextValue = stepVolume(currentValue, direction, step);
     if (nextValue === currentValue) return;
     beforeApply?.(event, nextValue);
     slider.value = String(nextValue);
@@ -86,12 +93,40 @@ export function bindWheelVolumeStep({ target, slider, step = 5, beforeApply, app
   return () => target.removeEventListener('wheel', handler, { passive: false });
 }
 
+export function getMajorTickPressValue(slider, clientX, volumeStep) {
+  if (volumeStep !== 1 && volumeStep !== 2) return null;
+  if (!Number.isFinite(clientX)) return null;
+
+  const tickOverlay = slider?.parentElement?.querySelector?.('.tm-slider-ticks');
+  const overlayRect = tickOverlay?.getBoundingClientRect?.();
+  if (!overlayRect || !Number.isFinite(overlayRect.width) || overlayRect.width <= 0) return null;
+
+  const majorTicks = Array.from(tickOverlay.querySelectorAll?.('.tm-slider-tick-major') || []);
+  let nearestValue = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const tick of majorTicks) {
+    const value = Number(tick.dataset?.tmTickPct);
+    const rect = tick.getBoundingClientRect?.();
+    if (!Number.isFinite(value) || !rect) continue;
+    const center = Number(rect.left) + (Number(rect.width) / 2);
+    const distance = Math.abs(clientX - center);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestValue = value;
+    }
+  }
+
+  const majorTickSpacing = overlayRect.width / 10;
+  const hitRadius = Math.max(4, Math.min(8, majorTickSpacing * 0.3));
+  return nearestDistance <= hitRadius ? nearestValue : null;
+}
+
 export function bindRangePointerInteraction({
   window,
   slider,
   overlay,
-  isSnapEnabled,
-  readSnappedValue,
+  getVolumeStep,
+  readSteppedValue,
   snapValue,
   applyValue,
   setExpanded,
@@ -104,10 +139,27 @@ export function bindRangePointerInteraction({
   let pointerStartY = 0;
   let pointerStartValue = 0;
   let pointerMoved = false;
+  let pointerDisplaced = false;
   let clickSnapHandled = false;
+  let majorTickPressHandled = false;
   let pointerActive = false;
 
-  const snapDirectClickIfNeeded = () => {
+  const snapMajorTickPressIfNeeded = (event) => {
+    if (!pointerActive || pointerDisplaced || majorTickPressHandled) return false;
+    const pressedValue = getMajorTickPressValue(slider, event?.clientX ?? pointerStartX, getVolumeStep?.());
+    if (pressedValue === null) return false;
+    majorTickPressHandled = true;
+    clickSnapHandled = true;
+    const currentValue = Number(slider.value) || 0;
+    if (pressedValue !== currentValue) {
+      slider.value = String(pressedValue);
+      applyValue(pressedValue);
+    }
+    return true;
+  };
+
+  const snapDirectClickIfNeeded = (event) => {
+    if (snapMajorTickPressIfNeeded(event)) return;
     const currentValue = Number(slider.value) || 0;
     if (clickSnapHandled || pointerMoved || currentValue === pointerStartValue) return;
     const snappedValue = snapValue(currentValue);
@@ -117,11 +169,17 @@ export function bindRangePointerInteraction({
   };
 
   const readPressAwareValue = () => {
-    if (isSnapEnabled()) return readSnappedValue(slider);
-    let value = Number(slider.value) || 0;
+    const value = readSteppedValue(slider);
+    if (pointerActive && !pointerDisplaced && !majorTickPressHandled) {
+      const pressedValue = getMajorTickPressValue(slider, pointerStartX, getVolumeStep?.());
+      if (pressedValue !== null) {
+        slider.value = String(pressedValue);
+        majorTickPressHandled = true;
+        clickSnapHandled = true;
+        return pressedValue;
+      }
+    }
     if (pointerActive && !pointerMoved && !clickSnapHandled && value !== pointerStartValue) {
-      value = snapValue(value);
-      slider.value = String(value);
       clickSnapHandled = true;
     }
     return value;
@@ -146,13 +204,18 @@ export function bindRangePointerInteraction({
     pointerStartY = event.clientY;
     pointerStartValue = Number(slider.value) || 0;
     pointerMoved = false;
+    pointerDisplaced = false;
     clickSnapHandled = false;
+    majorTickPressHandled = false;
     pointerActive = true;
     overlay.dataset.tmDragging = 'true';
     setExpanded();
     updateOpacity();
   };
   const move = (event) => {
+    if (Math.abs(event.clientX - pointerStartX) > 1 || Math.abs(event.clientY - pointerStartY) > 1) {
+      pointerDisplaced = true;
+    }
     if (Math.abs(event.clientX - pointerStartX) > 3 || Math.abs(event.clientY - pointerStartY) > 3) {
       pointerMoved = true;
     }

@@ -1,5 +1,34 @@
 export const clampVolume = (value) => Math.min(100, Math.max(0, Number(value) || 0));
-export const snapTo5 = (value) => Math.round(clampVolume(value) / 5) * 5;
+export const VOLUME_STEPS = [1, 2, 5, 10];
+
+export function normalizeVolumeStep(value) {
+  const step = Number(value);
+  return VOLUME_STEPS.includes(step) ? step : null;
+}
+
+export function snapToStep(value, step) {
+  const normalizedStep = normalizeVolumeStep(step) || 1;
+  return clampVolume(Math.round(clampVolume(value) / normalizedStep) * normalizedStep);
+}
+
+export function stepVolume(value, direction, step) {
+  const current = clampVolume(value);
+  const normalizedStep = normalizeVolumeStep(step) || 1;
+  if (direction > 0) {
+    return clampVolume((Math.floor(current / normalizedStep) + 1) * normalizedStep);
+  }
+  if (direction < 0) {
+    return clampVolume((Math.ceil(current / normalizedStep) - 1) * normalizedStep);
+  }
+  return current;
+}
+
+export function getVolumeTickInterval(step) {
+  const normalizedStep = normalizeVolumeStep(step) || 1;
+  // A tick for every 1% stop becomes a solid-looking stripe on compact sliders.
+  // All coarser modes can show every valid snapped position without losing clarity.
+  return normalizedStep === 1 ? 10 : normalizedStep;
+}
 
 export function getSpeakerIconMode(value, muted) {
   const percent = clampVolume(value);
@@ -22,7 +51,7 @@ export function setVolumeFromUser(platform, video, settings, value) {
   return next;
 }
 
-export function createVolumePersistence({ window, storage, storageKey, debounceMs, isSnapEnabled }) {
+export function createVolumePersistence({ window, storage, storageKey, debounceMs, getVolumeStep }) {
   let saveTimer = 0;
 
   function getSavedVolume() {
@@ -36,12 +65,9 @@ export function createVolumePersistence({ window, storage, storageKey, debounceM
     }
   }
 
-  function readSnappedSliderValue(slider) {
-    let value = Number(slider.value) || 0;
-    if (isSnapEnabled()) {
-      value = snapTo5(value);
-      slider.value = String(value);
-    }
+  function readSteppedSliderValue(slider) {
+    const value = snapToStep(slider.value, getVolumeStep());
+    slider.value = String(value);
     return value;
   }
 
@@ -63,5 +89,5 @@ export function createVolumePersistence({ window, storage, storageKey, debounceM
     }, debounceMs);
   }
 
-  return { getSavedVolume, readSnappedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
+  return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
 }

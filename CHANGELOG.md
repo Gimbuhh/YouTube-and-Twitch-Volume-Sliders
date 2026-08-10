@@ -2,6 +2,19 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.8 - 2026-08-10
+
+### Added
+
+- **Both:** Added persistent 1%, 2%, 5%, and 10% adjustment-step choices for slider dragging and scrolling, with tick marks that adapt to the selected precision.
+
+### Changed
+
+- **Both:** Made the taller 10% marks direct press targets for the 1% and 2% settings while preserving fine-step dragging.
+- **Both:** Standardized Arrow Up and Arrow Down at fixed 5% changes regardless of the selected drag-and-scroll step.
+- **Both:** Migrated the previous Snap to 5% preference automatically: enabled settings become 5%, while free-drag settings become 1%.
+- **Both:** Kept options-menu button text centered and behavior labels aligned across browser zoom levels.
+
 ## 2.7.2 - 2026-08-03
 
 ### Fixed

@@ -319,12 +319,18 @@ const SLIDER_STYLE_TEMPLATE = String.raw`
 
 #{{overlayId}} .tm-slider-tick {
   position: absolute;
+  top: 25%;
+  bottom: 25%;
+  width: var(--tm-slider-tick-width, 1px);
+  height: auto;
+  background: rgba(255,255,255,0.18);
+  transform: none;
+}
+
+#{{overlayId}} .tm-slider-tick-major {
   top: 0;
   bottom: 0;
-  width: var(--tm-slider-tick-width, 1px);
-  height: 100%;
-  background: rgba(255,255,255,0.25);
-  transform: none;
+  background: rgba(255,255,255,0.46);
 }
 
         `;

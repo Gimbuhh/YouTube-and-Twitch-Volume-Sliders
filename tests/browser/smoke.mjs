@@ -72,8 +72,60 @@ async function preparedPage(browser,{platform,url,html,storage,expectOverlay=tru
   return {context,page};
 }
 
+async function assertOptionsButtonAlignmentAtZoomLevels(page, platform){
+  const zoomLevels=[0.5,0.67,0.8,0.9,1,1.1,1.25,1.5,1.75,2];
+  const viewport=page.viewportSize();
+  const session=await page.context().newCDPSession(page);
+  try{
+    for(const zoom of zoomLevels){
+      await session.send('Emulation.setDeviceMetricsOverride',{
+        width:Math.round(viewport.width/zoom),
+        height:Math.round(viewport.height/zoom),
+        deviceScaleFactor:zoom,
+        mobile:false,
+        screenWidth:viewport.width,
+        screenHeight:viewport.height
+      });
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const measurements=await page.locator('#tm-volume-options-popup button:visible').evaluateAll(buttons=>buttons.map(button=>{
+        const label=button.querySelector(':scope > .tm-volume-options-button-label');
+        const buttonRect=button.getBoundingClientRect();
+        const labelRect=label?.getBoundingClientRect();
+        const buttonStyle=getComputedStyle(button);
+        const labelStyle=label?getComputedStyle(label):null;
+        const horizontallyCentered=button.matches('.tm-volume-options-radio,.tm-volume-options-opacity-reset');
+        return {
+          id:button.id||button.className,
+          hasLabel:!!labelRect,
+          verticalOffset:labelRect?Math.abs((labelRect.top+(labelRect.height/2))-(buttonRect.top+(buttonRect.height/2)))*devicePixelRatio:Infinity,
+          horizontalOffset:horizontallyCentered&&labelRect?Math.abs((buttonRect.left+(buttonRect.width/2))-(labelRect.left+(labelRect.width/2)))*devicePixelRatio:0,
+          clipped:labelRect?labelRect.top<buttonRect.top-0.01||labelRect.bottom>buttonRect.bottom+0.01:true,
+          fontSize:labelStyle?.fontSize,
+          fontWeight:labelStyle?.fontWeight,
+          selectedShadow:button.matches('.tm-volume-options-radio[aria-checked="true"]')?buttonStyle.textShadow:null
+        };
+      }));
+      assert.equal(measurements.length>0,true,`${platform} exposes visible options buttons at ${zoom*100}% browser zoom`);
+      assert.equal(measurements.every(item=>item.hasLabel),true,`${platform} options buttons keep dedicated labels at ${zoom*100}% browser zoom`);
+      assert.equal(measurements.every(item=>item.verticalOffset<=0.51),true,`${platform} options button labels stay vertically centered at ${zoom*100}% browser zoom: ${JSON.stringify(measurements)}`);
+      assert.equal(measurements.every(item=>item.horizontalOffset<=0.51),true,`${platform} centered button labels stay horizontally centered at ${zoom*100}% browser zoom: ${JSON.stringify(measurements)}`);
+      assert.equal(measurements.every(item=>!item.clipped),true,`${platform} options button labels remain unclipped at ${zoom*100}% browser zoom`);
+      assert.equal(measurements.every(item=>item.fontSize==='14px'&&item.fontWeight==='400'),true,`${platform} options buttons preserve the reference typography at ${zoom*100}% browser zoom`);
+      assert.equal(measurements.filter(item=>item.selectedShadow!==null).every(item=>item.selectedShadow!=='none'),true,`${platform} selected buttons preserve the reference shadow at ${zoom*100}% browser zoom`);
+      const behaviorOffsets=await page.locator('#tm-volume-options-popup .tm-volume-options-checklist .tm-volume-options-button-label').evaluateAll(labels=>{
+        const sectionLabel=labels[0]?.closest('.tm-volume-options-section')?.querySelector('.tm-volume-options-section-label');
+        const sectionLeft=sectionLabel?.getBoundingClientRect().left??0;
+        return labels.map(label=>Math.abs(label.getBoundingClientRect().left-sectionLeft)*devicePixelRatio);
+      });
+      assert.equal(behaviorOffsets.every(offset=>offset<=0.51),true,`${platform} behavior labels align with their section heading at ${zoom*100}% browser zoom: ${JSON.stringify(behaviorOffsets)}`);
+    }
+  }finally{
+    await session.send('Emulation.clearDeviceMetricsOverride');
+  }
+}
+
 async function youtubeSmoke(browser){
-  const {context,page}=await preparedPage(browser,{platform:'youtube',url:'https://www.youtube.com/watch?v=smoke',html:youtubeHtml,storage:{'tm-yt-volume':'50','tm-yt-muted':'false','tm-yt-volume-slider-mode':'replace-native','tm-yt-volume-slider-snap-to-5':'false'}});
+  const {context,page}=await preparedPage(browser,{platform:'youtube',url:'https://www.youtube.com/watch?v=smoke',html:youtubeHtml,storage:{'tm-yt-volume':'50','tm-yt-muted':'false','tm-yt-volume-slider-mode':'replace-native','tm-yt-volume-slider-step':'10'}});
   try{
     await page.mouse.move(1100,700);
     await page.locator('.tm-volume-icon-cell').hover();
@@ -88,7 +140,7 @@ async function youtubeSmoke(browser){
     const dragged=Number(await slider.inputValue());
     await slider.press('ArrowUp');
     const state=await page.evaluate(()=>({slider:document.querySelector('#tm-volume-slider-range').value,label:document.querySelector('#tm-volume-slider-value').textContent,arc:document.querySelector('.tm-volume-arc')?.getAttribute('stroke-dasharray'),volume:window.__smoke.volume}));
-    const expected=dragged+1;
+    const expected=Math.min(100,dragged+5);
     assert.equal(Number(state.slider),expected);
     assert.equal(state.label,`${expected}%`);
     assert.match(state.arc,new RegExp(`^${expected}(?:\\.0+)? 100$`));
@@ -102,18 +154,95 @@ async function youtubeSmoke(browser){
     assert.equal(await icon.evaluate(element=>element===document.activeElement),true,'Tab reaches the custom mute icon');
     assert.equal(await icon.evaluate(element=>element.matches(':focus-visible')),true);
     assert.equal(await page.locator('.ytp-volume-area').evaluate(element=>getComputedStyle(element).display),'none');
-    console.log('browser smoke: YouTube interaction, focus modality, and native replacement passed');
+
+    await page.locator('#tm-volume-options-button').click();
+    const stepGroup=page.locator('[role="radiogroup"][aria-label="Volume adjustment step"]');
+    await stepGroup.waitFor({state:'visible'});
+    await assertOptionsButtonAlignmentAtZoomLevels(page,'YouTube');
+    const stepLayout=await stepGroup.evaluate(group=>{
+      const groupRect=group.getBoundingClientRect();
+      const buttons=Array.from(group.querySelectorAll('[role="radio"]')).map(button=>button.getBoundingClientRect());
+      return {groupWidth:groupRect.width,buttonWidths:buttons.map(rect=>rect.width),inside:buttons.every(rect=>rect.left>=groupRect.left&&rect.right<=groupRect.right)};
+    });
+    assert.ok(stepLayout.groupWidth>180,'adjustment-step group has usable width');
+    assert.equal(stepLayout.buttonWidths.every(width=>width>=40),true,'adjustment-step choices keep usable hit targets');
+    assert.equal(stepLayout.inside,true,'adjustment-step choices stay inside the options panel');
+    await page.locator('#tm-volume-options-step-10').click();
+    const stepState=await page.evaluate(()=>({
+      saved:localStorage.getItem('tm-yt-volume-slider-step'),
+      sliderStep:document.querySelector('#tm-volume-slider-range').step,
+      behaviorStep:document.querySelector('#tm-volume-slider-range').dataset.tmVolumeStep,
+      tickInterval:document.querySelector('.tm-slider-ticks').dataset.tmTickInterval,
+      tickCount:document.querySelectorAll('.tm-slider-tick').length
+    }));
+    assert.deepEqual(stepState,{saved:'10',sliderStep:'1',behaviorStep:'10',tickInterval:'10',tickCount:9});
+
+    await page.locator('#tm-volume-options-step-2').click();
+    const twoStepState=await page.evaluate(() => ({
+      saved:localStorage.getItem('tm-yt-volume-slider-step'),
+      sliderStep:document.querySelector('#tm-volume-slider-range').step,
+      behaviorStep:document.querySelector('#tm-volume-slider-range').dataset.tmVolumeStep,
+      tickInterval:document.querySelector('.tm-slider-ticks').dataset.tmTickInterval,
+      tickCount:document.querySelectorAll('.tm-slider-tick').length,
+      majorTickCount:document.querySelectorAll('.tm-slider-tick-major').length
+    }));
+    assert.deepEqual(twoStepState,{saved:'2',sliderStep:'1',behaviorStep:'2',tickInterval:'2',tickCount:49,majorTickCount:9});
+    const fineStepGeometry=await page.evaluate(()=>{
+      const range=document.querySelector('#tm-volume-slider-range').getBoundingClientRect();
+      const centerOf=pct=>{
+        const rect=document.querySelector(`.tm-slider-tick[data-tm-tick-pct="${pct}"]`).getBoundingClientRect();
+        return rect.left+(rect.width/2);
+      };
+      return {tick18:centerOf(18),tick46:centerOf(46),tick48:centerOf(48),tick50:centerOf(50),y:range.top+(range.height/2)};
+    });
+    await page.evaluate(()=>{
+      const slider=document.querySelector('#tm-volume-slider-range');
+      window.__smokeMajorPressWrites=[];
+      document.querySelector('video').addEventListener('volumechange',()=>window.__smokeMajorPressWrites.push(window.__smoke.volume));
+      slider.value='50';
+      slider.dispatchEvent(new Event('input',{bubbles:true}));
+      window.__smokeMajorPressWrites=[];
+    });
+    await page.mouse.click(fineStepGeometry.tick18,fineStepGeometry.y);
+    assert.equal(Number(await slider.inputValue()),20,'major-tick magnet bypasses the nearby fine value');
+    assert.deepEqual(await page.evaluate(()=>window.__smokeMajorPressWrites.every(value=>value===20)),true,'major-tick press never writes the nearby fine value');
+
+    await slider.evaluate(control=>{control.value='48';control.dispatchEvent(new Event('input',{bubbles:true}));});
+    await page.mouse.click(fineStepGeometry.tick50,fineStepGeometry.y);
+    assert.equal(Number(await slider.inputValue()),50,'two-percent direct press snaps to the nearby major tick');
+
+    await slider.evaluate(control=>{control.value='46';control.dispatchEvent(new Event('input',{bubbles:true}));});
+    await page.mouse.move(fineStepGeometry.tick46,fineStepGeometry.y);
+    await page.mouse.down();
+    await page.mouse.move(fineStepGeometry.tick48,fineStepGeometry.y,{steps:3});
+    await page.mouse.up();
+    assert.equal(Number(await slider.inputValue()),48,'two-percent drag remains on the fine tick beside a major tick');
+
+    await page.locator('#tm-volume-options-button').click();
+    await page.locator('#tm-volume-options-step-1').waitFor({state:'visible'});
+    await page.locator('#tm-volume-options-step-1').click();
+    await slider.evaluate(control=>{control.value='9';control.dispatchEvent(new Event('input',{bubbles:true}));});
+    const tenPercentTick=await page.locator('.tm-slider-tick[data-tm-tick-pct="10"]').boundingBox();
+    await page.mouse.click(tenPercentTick.x+(tenPercentTick.width/2),fineStepGeometry.y);
+    assert.equal(Number(await slider.inputValue()),10,'one-percent direct press snaps to the nearby major tick');
+    await page.keyboard.press('Escape');
+    console.log('browser smoke: YouTube interaction, adjustment-step layout, focus modality, and native replacement passed');
   }finally{await context.close();}
 }
 
 async function twitchSmoke(browser){
-  const {context,page}=await preparedPage(browser,{platform:'twitch',url:'https://www.twitch.tv/smoke',html:twitchHtml,storage:{'tm-twitch-volume':'50','tm-twitch-muted':'true','tm-twitch-volume-slider-mode':'on'}});
+  const {context,page}=await preparedPage(browser,{platform:'twitch',url:'https://www.twitch.tv/smoke',html:twitchHtml,storage:{'tm-twitch-volume':'50','tm-twitch-muted':'true','tm-twitch-volume-slider-mode':'on','tm-twitch-volume-slider-step':'5'}});
   try{
     const dimensions=await page.evaluate(()=>({overlay:document.querySelector('#tm-volume-slider-overlay').getBoundingClientRect().height,panel:document.querySelector('.tm-volume-panel-bg').getBoundingClientRect().height,icon:document.querySelector('.tm-volume-icon-cell').getBoundingClientRect().height,controls:document.querySelector('[data-a-target="player-controls"]').getBoundingClientRect().height}));
     assert.equal(dimensions.overlay,32);
     assert.equal(dimensions.panel,40);
     assert.equal(dimensions.icon,40);
     assert.equal(dimensions.controls,40);
+
+    await page.locator('#tm-volume-options-button').click();
+    await page.locator('#tm-volume-options-popup').waitFor({state:'visible'});
+    await assertOptionsButtonAlignmentAtZoomLevels(page,'Twitch');
+    await page.keyboard.press('Escape');
 
     await page.evaluate(()=>{const controls=document.querySelector('[data-a-target="player-controls"]');controls.setAttribute('data-a-visible','false');controls.setAttribute('aria-hidden','true');window.scrollTo(0,0);});
     await page.locator('video').click({position:{x:100,y:100}});

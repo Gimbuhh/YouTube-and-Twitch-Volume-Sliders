@@ -86,3 +86,22 @@ test('volume arcs scale with browser zoom', () => {
     dom.window.close();
   }
 });
+
+test('options button labels use zoom-stable centering rules', () => {
+  for (const platform of ['youtube', 'twitch']) {
+    const { dom, document } = installStyles(platform);
+    const options = document.getElementById('tm-volume-options-style').textContent;
+
+    assert.match(options, /#tm-volume-options-popup button\s*{[\s\S]*font-family:\s*inherit;[\s\S]*margin:\s*0;/);
+    assert.doesNotMatch(options, /#tm-volume-options-popup button\s*{[\s\S]*font:\s*inherit;/);
+    assert.match(options, /\.tm-volume-options-button-label\s*{[^}]*font-size:\s*14px;[^}]*font-weight:\s*400;/);
+    assert.doesNotMatch(options, /\.tm-volume-options-button-label\s*{[^}]*transform:/);
+    assert.match(options, /#tm-volume-options-popup \.tm-volume-options-checklist \.tm-volume-options-row\s*{[^}]*margin:\s*0 -8px;/);
+    assert.match(options, /\.tm-volume-options-segment\s*{[\s\S]*gap:\s*8px;/);
+    assert.match(options, /\.tm-volume-options-radio\s*{[\s\S]*display:\s*grid;[\s\S]*padding:\s*0 10px;[\s\S]*place-items:\s*center;/);
+    assert.match(options, /\.tm-volume-options-radio > \.tm-volume-options-button-label\s*{[\s\S]*text-align:\s*center;[\s\S]*width:\s*100%;/);
+    assert.match(options, /\.tm-volume-options-opacity-reset\s*{[\s\S]*display:\s*grid;[\s\S]*place-items:\s*center;[\s\S]*text-align:\s*center;/);
+    assert.match(options, /\.tm-volume-options-radio\[aria-checked="true"\]\s*{[\s\S]*text-shadow:\s*0 1px 2px rgba\(0, 0, 0, 0\.45\);/);
+    dom.window.close();
+  }
+});

@@ -1,3 +1,5 @@
+import { normalizeVolumeStep } from './volume.js';
+
 export const MODES = ['off', 'on', 'replace-native'];
 export const LOCATIONS = ['controls', 'video'];
 export const APPEARANCES = ['new', 'classic'];
@@ -59,8 +61,11 @@ export function createSettings(storage, keys) {
     set location(value) { write(keys.location, normalizeChoice(value, LOCATIONS) ?? 'controls'); },
     get replacePlacement() { return normalizeChoice(read(keys.replacePlacement), ['native', 'custom']) ?? 'native'; },
     set replacePlacement(value) { write(keys.replacePlacement, normalizeChoice(value, ['native', 'custom']) ?? 'native'); },
-    get snapToFive() { return normalizeBooleanSetting(read(keys.snap)) ?? false; },
-    set snapToFive(value) { write(keys.snap, value ? 'true' : 'false'); },
+    get volumeStep() {
+      return normalizeVolumeStep(read(keys.step)) ||
+        (normalizeBooleanSetting(read(keys.legacySnap ?? keys.snap)) === true ? 5 : 1);
+    },
+    set volumeStep(value) { write(keys.step, String(normalizeVolumeStep(value) || 1)); },
     get alwaysExpanded() { return normalizeBooleanSetting(read(keys.expanded)) ?? false; },
     set alwaysExpanded(value) { write(keys.expanded, value ? 'true' : 'false'); },
     get savedVolume() {
@@ -190,12 +195,35 @@ export function createVolumeSettings({
     onPlacementChanged();
   }
 
-  function isSnapTo5Enabled() {
-    const override = normalizeBooleanSetting(userSettings.snapToFive);
-    return override ?? (read(keys.snap) === 'true');
+  function getSavedVolumeStep() {
+    const savedStep = normalizeVolumeStep(read(keys.step));
+    if (savedStep) return savedStep;
+    return normalizeBooleanSetting(read(keys.legacySnap)) === true ? 5 : 1;
   }
 
-  const setSnapTo5Enabled = (enabled) => write(keys.snap, enabled ? 'true' : 'false');
+  function getVolumeStep() {
+    const override = normalizeVolumeStep(userSettings.volumeStep);
+    if (override) return override;
+    const legacyOverride = normalizeBooleanSetting(userSettings.snapToFive);
+    if (legacyOverride !== null) return legacyOverride ? 5 : 1;
+    return getSavedVolumeStep();
+  }
+
+  function updateVolumeStepUi(overlay) {
+    if (!overlay) return;
+    const step = getVolumeStep();
+    const slider = overlay.querySelector?.('#tm-volume-slider-range');
+    if (slider) {
+      slider.dataset.tmVolumeStep = String(step);
+    }
+    overlay.querySelector?.('.tm-slider-ticks')?._tmSliderTicksPopulate?.();
+  }
+
+  function setVolumeStep(step) {
+    write(keys.step, String(normalizeVolumeStep(step) || 1));
+    if (keys.legacySnap) remove(keys.legacySnap);
+    updateVolumeStepUi(getOverlay());
+  }
 
   function isAlwaysExpandedEnabled() {
     const override = normalizeBooleanSetting(userSettings.alwaysExpanded);
@@ -362,8 +390,8 @@ export function createVolumeSettings({
   return {
     getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation,
     isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance,
-    updateOverlayAppearance, isSnapTo5Enabled,
-    setSnapTo5Enabled, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
+    updateOverlayAppearance, getSavedVolumeStep, getVolumeStep, setVolumeStep, updateVolumeStepUi,
+    isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
     getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
     getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent,
