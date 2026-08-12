@@ -158,6 +158,35 @@ test('YouTube: native settings click is not swallowed while volume options are o
   runtime.close();
 });
 
+test('YouTube: volume options stay open after closing native settings',async()=>{
+  const config=platforms[0];
+  const runtime=createRuntime(config.url,{runScripts:'outside-only'});
+  const {player}=config.fixture(runtime.document);
+  runtime.window.localStorage.setItem(config.modeKey,'on');
+  runtime.window.localStorage.setItem(config.locationKey,'controls');
+
+  const nativeMenu=runtime.document.createElement('div');
+  nativeMenu.className='ytp-settings-menu';
+  nativeMenu.style.display='block';
+  Object.defineProperty(nativeMenu,'offsetParent',{value:player});
+  player.appendChild(nativeMenu);
+
+  const settingsButton=runtime.document.querySelector('.ytp-settings-button');
+  settingsButton.addEventListener('click',()=>{
+    nativeMenu.style.display='none';
+  });
+
+  runtime.window.eval(await readFile(new URL('../../dist/youtube-volume-slider.user.js',import.meta.url),'utf8'));
+  runtime.document.getElementById('tm-volume-options-button').click();
+
+  const popup=runtime.document.getElementById('tm-volume-options-popup');
+  assert.equal(nativeMenu.style.display,'none');
+  assert.equal(popup.hidden,false);
+  await waitForTimers(runtime);
+  assert.equal(popup.hidden,false);
+  runtime.close();
+});
+
 test('Twitch: native settings click is not swallowed while volume options are open',async()=>{
   const {runtime,popup}=await openOptions(platforms[1]);
   const settingsButton=runtime.document.querySelector('[data-a-target="player-settings-button"]');

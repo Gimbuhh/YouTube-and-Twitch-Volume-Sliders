@@ -2,6 +2,12 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.8.1 - 2026-08-12
+
+### Fixed
+
+- **YouTube:** Kept Volume Slider Options open when it is selected while YouTube's native settings menu is open.
+
 ## 2.8 - 2026-08-10
 
 ### Added

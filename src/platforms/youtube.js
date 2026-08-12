@@ -813,16 +813,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         optionsPopupOpener = null;
     }
 
-    function setupNativeSettingsCloseHandler() {
-        if (window.__tmYtVolumeNativeSettingsCloseBound) return;
-        window.__tmYtVolumeNativeSettingsCloseBound = true;
-        document.addEventListener('click', (event) => {
-            if (event.target?.closest?.('.ytp-settings-button')) {
-                window.setTimeout(() => closeVolumeOptionsPopup(), 0);
-            }
-        }, false);
-    }
-
     function disconnectPlayerControlsObserver() {
         playerControlsObserver?.disconnect();
         playerControlsObserver = null;
@@ -1327,7 +1317,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         setupInitialAttempts();
         setupAttachObserver();
         setupYtNavigationHandler();
-        setupNativeSettingsCloseHandler();
     }
 
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
