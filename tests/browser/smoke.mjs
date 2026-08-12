@@ -31,9 +31,9 @@ if(!executablePath){
 
 const youtubeHtml=`<!doctype html><html><head><style>
 html,body{margin:0;background:#111;color:#fff;font-family:Arial;height:100%}.spacer{height:1800px}
-#movie_player{position:relative;width:900px;height:506px;background:#222}.ytp-left-controls,.ytp-right-controls{position:absolute;bottom:0;height:40px;display:flex;align-items:center}.ytp-left-controls{left:0}.ytp-right-controls{right:0}.ytp-volume-area,.ytp-settings-button{width:40px;height:40px}
-</style></head><body><div id="movie_player" class="html5-video-player" tabindex="0"><video class="html5-main-video"></video><div class="ytp-left-controls"><div class="ytp-volume-area"></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">S</button></div></div><div class="spacer"></div><script>
-(()=>{const player=document.getElementById('movie_player');let volume=50,muted=false;Object.assign(player,{getVolume:()=>volume,setVolume:value=>{volume=value;player.querySelector('video').dispatchEvent(new Event('volumechange'));},isMuted:()=>muted,mute:()=>{muted=true;player.querySelector('video').dispatchEvent(new Event('volumechange'));},unMute:()=>{muted=false;player.querySelector('video').dispatchEvent(new Event('volumechange'));}});window.__smoke={get volume(){return volume},get muted(){return muted}};})();
+#movie_player{position:relative;width:900px;height:506px;background:#222}.ytp-left-controls,.ytp-right-controls{position:absolute;bottom:0;height:40px;display:flex;align-items:center}.ytp-left-controls{left:0}.ytp-right-controls{right:0}.ytp-volume-area,.ytp-settings-button{width:40px;height:40px}.ytp-settings-menu{position:absolute;right:0;bottom:48px;width:180px;height:120px;background:#333}
+</style></head><body><div id="movie_player" class="html5-video-player" tabindex="0"><video class="html5-main-video"></video><div class="ytp-left-controls"><div class="ytp-volume-area"></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">S</button></div><div class="ytp-settings-menu" style="display:none"></div></div><div class="spacer"></div><script>
+(()=>{const player=document.getElementById('movie_player');const settingsButton=player.querySelector('.ytp-settings-button');const settingsMenu=player.querySelector('.ytp-settings-menu');let volume=50,muted=false;settingsButton.addEventListener('click',()=>{settingsMenu.style.display=settingsMenu.style.display==='none'?'block':'none';});Object.assign(player,{getVolume:()=>volume,setVolume:value=>{volume=value;player.querySelector('video').dispatchEvent(new Event('volumechange'));},isMuted:()=>muted,mute:()=>{muted=true;player.querySelector('video').dispatchEvent(new Event('volumechange'));},unMute:()=>{muted=false;player.querySelector('video').dispatchEvent(new Event('volumechange'));}});window.__smoke={get volume(){return volume},get muted(){return muted}};})();
 </script></body></html>`;
 
 const twitchHtml=`<!doctype html><html><head><style>
@@ -155,9 +155,14 @@ async function youtubeSmoke(browser){
     assert.equal(await icon.evaluate(element=>element.matches(':focus-visible')),true);
     assert.equal(await page.locator('.ytp-volume-area').evaluate(element=>getComputedStyle(element).display),'none');
 
+    await page.locator('.ytp-settings-button').click();
+    await page.locator('.ytp-settings-menu').waitFor({state:'visible'});
     await page.locator('#tm-volume-options-button').click();
+    await page.locator('.ytp-settings-menu').waitFor({state:'hidden'});
     const stepGroup=page.locator('[role="radiogroup"][aria-label="Volume adjustment step"]');
     await stepGroup.waitFor({state:'visible'});
+    await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,0)));
+    assert.equal(await page.locator('#tm-volume-options-popup').isVisible(),true,'YouTube volume options remain open after closing native settings');
     await assertOptionsButtonAlignmentAtZoomLevels(page,'YouTube');
     const stepLayout=await stepGroup.evaluate(group=>{
       const groupRect=group.getBoundingClientRect();
