@@ -32,38 +32,44 @@ export function createOptionsUi(dependencies) {
     function syncOptionsPopupState(popup) {
         if (!popup) return;
 
+        const selectedMode = getVolumeSliderMode();
+        const selectedPlacement = getReplaceNativePlacement();
+        const selectedAppearance = getVolumeAppearance();
+        const selectedStep = getVolumeStep();
+        const onVideo = isSliderOnVideo();
+
         ['on', 'off', 'replace-native'].forEach((mode) => {
             popup.querySelector(`#tm-volume-options-mode-${mode}`)
-                ?.setAttribute('aria-checked', getVolumeSliderMode() === mode ? 'true' : 'false');
+                ?.setAttribute('aria-checked', selectedMode === mode ? 'true' : 'false');
         });
 
         const placementSection = popup.querySelector('#tm-volume-options-placement-section');
-        const placementEnabled = getVolumeSliderMode() === 'replace-native';
+        const placementEnabled = selectedMode === 'replace-native';
         if (placementSection) {
             placementSection.dataset.disabled = placementEnabled ? 'false' : 'true';
         }
         ['native', 'custom'].forEach((placement) => {
             const radio = popup.querySelector(`#tm-volume-options-placement-${placement}`);
             if (!radio) return;
-            radio.setAttribute('aria-checked', getReplaceNativePlacement() === placement ? 'true' : 'false');
+            radio.setAttribute('aria-checked', selectedPlacement === placement ? 'true' : 'false');
             radio.disabled = !placementEnabled;
         });
 
         ['new', 'classic'].forEach((appearance) => {
             popup.querySelector(`#tm-volume-options-appearance-${appearance}`)
-                ?.setAttribute('aria-checked', getVolumeAppearance() === appearance ? 'true' : 'false');
+                ?.setAttribute('aria-checked', selectedAppearance === appearance ? 'true' : 'false');
         });
 
         VOLUME_STEPS.forEach((step) => {
             popup.querySelector(`#tm-volume-options-step-${step}`)
-                ?.setAttribute('aria-checked', getVolumeStep() === step ? 'true' : 'false');
+                ?.setAttribute('aria-checked', selectedStep === step ? 'true' : 'false');
         });
         popup.querySelector('#tm-volume-options-always-expanded')
             ?.setAttribute('aria-checked', isAlwaysExpandedEnabled() ? 'true' : 'false');
         popup.querySelector('#tm-volume-options-location-video')
-            ?.setAttribute('aria-checked', isSliderOnVideo() ? 'true' : 'false');
+            ?.setAttribute('aria-checked', onVideo ? 'true' : 'false');
 
-        const onVideoDisplay = isSliderOnVideo() ? '' : 'none';
+        const onVideoDisplay = onVideo ? '' : 'none';
         const opacitySection = popup.querySelector('#tm-volume-options-opacity-section');
         if (opacitySection) opacitySection.style.display = onVideoDisplay;
         const sizeSection = popup.querySelector('#tm-volume-options-size-section');
@@ -149,7 +155,6 @@ export function createOptionsUi(dependencies) {
             event.stopPropagation();
             onSelect();
             refreshOptionsPopupState();
-            syncOptionsRadioGroups(document.getElementById(OPTIONS_POPUP_ID));
         });
         btn.addEventListener('keydown', handleRadioNavigation);
         return btn;
@@ -358,17 +363,12 @@ export function createOptionsUi(dependencies) {
         let previewActive = false;
         const hasPreview = !!(onPreviewStart || onPreviewEnd);
         const view = document.defaultView;
-        const runPreviewStart = () => onPreviewStart?.();
         const isFocusInOptionsPopup = (target) => !!target && !!document.getElementById(OPTIONS_POPUP_ID)?.contains(target);
         const startPreview = (event) => {
             if (!hasPreview) return;
             if (event?.type === 'mousedown' && event.button !== 0) return;
-            if (previewActive) {
-                runPreviewStart();
-                return;
-            }
             previewActive = true;
-            runPreviewStart();
+            onPreviewStart?.();
         };
         const endPreview = () => {
             if (!hasPreview) return;
@@ -518,5 +518,5 @@ export function createOptionsUi(dependencies) {
         return popup;
     }
 
-  return { buildOptionsPopup, syncOptionsPopupState, syncOptionsRadioGroups };
+  return { buildOptionsPopup, syncOptionsPopupState };
 }

@@ -96,7 +96,7 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage: localStorage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
         keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
@@ -133,9 +133,6 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    /**
-     * Check if the volume slider is enabled (not in Off mode).
-     */
 
 
 
@@ -171,9 +168,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }
     }
 
-    /**
-     * Ensure we always get the active HTMLVideoElement.
-     */
     /**
      * Find a suitable container to host the overlay.
      */
@@ -266,9 +260,9 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         });
     }
 
-    const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
+    const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
         document, window, isAlwaysExpandedEnabled, isSliderOnVideo,
-        updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue, getVolumeStep,
+        updateOverlayOpacity, finishExpandedHoldIfDue, getVolumeStep,
         accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
         arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
     });
@@ -421,9 +415,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }
     }
 
-    /**
-     * Read saved volume from localStorage. Returns 0-100 or null.
-     */
 
     /**
      * Restore volume from localStorage and apply to player. Call before syncing slider.
@@ -446,14 +437,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         } catch (e) { /* ignore storage errors */ }
     }
 
-    /**
-     * Snap value to nearest 5% (5, 10, 15, ... 100).
-     */
 
 
-    /**
-     * Save volume to localStorage for persistence across page reloads.
-     */
 
 
     function saveMute(muted) {
@@ -462,9 +447,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         } catch (e) { /* ignore storage errors */ }
     }
 
-    /**
-     * Sync mute button icon (style toggles only, no DOM mutation).
-     */
 
     function setSliderFromPlayer(slider, label, video) {
         const muted = isMuted(video);
@@ -587,7 +569,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
 
-    const { buildOptionsPopup, syncOptionsPopupState, syncOptionsRadioGroups } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         getVolumeAppearance, setVolumeAppearance,
@@ -928,7 +910,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         };
         cleanupRegistry.listen(document, 'click', collapseHeldSliderOnVideoClick, true);
 
-        const { iconCell, panelBg, topRow, label, sliderWrap, tickOverlay, slider } = createVolumeControlElements({
+        const { iconCell, label, tickOverlay, slider } = createVolumeControlElements({
             document,
             overlay,
             sliderId: SLIDER_ID,

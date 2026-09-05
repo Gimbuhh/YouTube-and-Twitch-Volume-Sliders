@@ -90,10 +90,6 @@ export function createTwitchControlsVisibilityManager({
     }
   }
 
-  function refresh(owner, duration, onExpire) {
-    hold(owner, duration, onExpire);
-  }
-
   function release(owner) {
     if (!owners.has(owner)) return;
     clearOwnerTimer(owner);
@@ -112,12 +108,12 @@ export function createTwitchControlsVisibilityManager({
 
   function dispose() {
     if (disposed) return;
-    for (const owner of [...owners.keys()]) clearOwnerTimer(owner);
+    for (const owner of owners.keys()) clearOwnerTimer(owner);
     owners.clear();
     disconnectObserver();
     releaseStyles();
     disposed = true;
   }
 
-  return { hold, refresh, release, has, reveal, dispose, get size() { return owners.size; } };
+  return { hold, release, has, reveal, dispose, get size() { return owners.size; } };
 }

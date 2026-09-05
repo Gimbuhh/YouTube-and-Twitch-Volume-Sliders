@@ -3,7 +3,7 @@ import { getVolumeTickInterval } from './volume.js';
 export function createOverlayUi(dependencies) {
   const {
     document, window, isAlwaysExpandedEnabled, isSliderOnVideo,
-    updateOverlayOpacity, updateOverlaySize, finishExpandedHoldIfDue, getVolumeStep,
+    updateOverlayOpacity, finishExpandedHoldIfDue, getVolumeStep,
     accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
     arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
   } = dependencies;
@@ -171,25 +171,12 @@ export function createOverlayUi(dependencies) {
             transformOrigin: onVideo ? 'center bottom' : 'center center'
         };
 
-        if (expanded) {
-            overlay.classList.remove('tm-collapsed');
-            overlay.classList.add('tm-expanded');
-            Object.assign(overlay.style, pillStyle, {
-                width: 'var(--tm-pill-expanded-width)',
-                padding: '0 12px 0 0'
-            });
-            updateOverlaySize(overlay);
-            updateOverlayOpacity(overlay);
-            return;
-        }
-
-        overlay.classList.remove('tm-expanded');
-        overlay.classList.add('tm-collapsed');
+        overlay.classList.toggle('tm-expanded', expanded);
+        overlay.classList.toggle('tm-collapsed', !expanded);
         Object.assign(overlay.style, pillStyle, {
-            width: '40px',
-            padding: '0'
+            width: expanded ? 'var(--tm-pill-expanded-width)' : '40px',
+            padding: expanded ? '0 12px 0 0' : '0'
         });
-        updateOverlaySize(overlay);
         updateOverlayOpacity(overlay);
     }
 
@@ -438,5 +425,5 @@ export function createOverlayUi(dependencies) {
         return svg;
     }
 
-  return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHoldTimer, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks };
+  return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks };
 }

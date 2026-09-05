@@ -1,10 +1,10 @@
 import { normalizeVolumeStep } from './volume.js';
 
-export const MODES = ['off', 'on', 'replace-native'];
-export const LOCATIONS = ['controls', 'video'];
-export const APPEARANCES = ['new', 'classic'];
+const MODES = ['off', 'on', 'replace-native'];
+const LOCATIONS = ['controls', 'video'];
+const APPEARANCES = ['new', 'classic'];
 
-export function normalizeChoice(value, choices) {
+function normalizeChoice(value, choices) {
   return choices.includes(value) ? value : null;
 }
 
@@ -49,38 +49,6 @@ export function normalizeSliderThicknessPercent(value, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(125, Math.max(25, number));
-}
-
-export function createSettings(storage, keys) {
-  const read = (key) => { try { return storage.getItem(key); } catch { return null; } };
-  const write = (key, value) => { try { storage.setItem(key, value); } catch { /* storage may be unavailable */ } };
-  return {
-    get mode() { return normalizeChoice(read(keys.mode), MODES) ?? 'on'; },
-    set mode(value) { write(keys.mode, normalizeChoice(value, MODES) ?? 'on'); },
-    get location() { return normalizeChoice(read(keys.location), LOCATIONS) ?? 'controls'; },
-    set location(value) { write(keys.location, normalizeChoice(value, LOCATIONS) ?? 'controls'); },
-    get replacePlacement() { return normalizeChoice(read(keys.replacePlacement), ['native', 'custom']) ?? 'native'; },
-    set replacePlacement(value) { write(keys.replacePlacement, normalizeChoice(value, ['native', 'custom']) ?? 'native'); },
-    get volumeStep() {
-      return normalizeVolumeStep(read(keys.step)) ||
-        (normalizeBooleanSetting(read(keys.legacySnap ?? keys.snap)) === true ? 5 : 1);
-    },
-    set volumeStep(value) { write(keys.step, String(normalizeVolumeStep(value) || 1)); },
-    get alwaysExpanded() { return normalizeBooleanSetting(read(keys.expanded)) ?? false; },
-    set alwaysExpanded(value) { write(keys.expanded, value ? 'true' : 'false'); },
-    get savedVolume() {
-      const raw = read(keys.volume);
-      if (raw === null) return null;
-      const parsed = Number.parseInt(raw, 10);
-      return Number.isNaN(parsed) ? null : Math.min(100, Math.max(0, parsed));
-    },
-    saveVolume(value) { write(keys.volume, String(Math.round(Math.min(100, Math.max(0, value))))); },
-    get savedMute() {
-      if (!keys.mute) return null;
-      return normalizeBooleanSetting(read(keys.mute));
-    },
-    saveMute(value) { if (keys.mute) write(keys.mute, value ? 'true' : 'false'); }
-  };
 }
 
 export function createVolumeSettings({
@@ -388,15 +356,15 @@ export function createVolumeSettings({
   const shouldUseNativeReplacementSlot = () => isNativeVolumeReplacementEnabled() && getReplaceNativePlacement() === 'native';
 
   return {
-    getSavedVolumeSliderMode, getVolumeSliderMode, getReplaceNativePlacement, getSliderLocation,
+    getVolumeSliderMode, getReplaceNativePlacement,
     isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance,
-    updateOverlayAppearance, getSavedVolumeStep, getVolumeStep, setVolumeStep, updateVolumeStepUi,
+    updateOverlayAppearance, getVolumeStep, setVolumeStep,
     isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
     getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent,
     getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent,
     beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview,
-    updateOverlaySize, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode,
+    updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode,
     isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot
   };
 }

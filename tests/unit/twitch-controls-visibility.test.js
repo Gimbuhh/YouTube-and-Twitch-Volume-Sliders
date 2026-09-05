@@ -53,9 +53,9 @@ test('Twitch visibility owners overlap without releasing each other',()=>{
 test('Twitch visibility refresh replaces only its owner deadline',()=>{
   const current=harness();
   current.manager.hold('options');
-  current.manager.refresh('keyboard-volume',3000);
+  current.manager.hold('keyboard-volume',3000);
   const first=[...current.timers.keys()][0];
-  current.manager.refresh('keyboard-volume',3000);
+  current.manager.hold('keyboard-volume',3000);
   assert.equal(current.timers.has(first),false);
   const refreshed=[...current.timers.values()][0];
   refreshed();
