@@ -2,6 +2,12 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.8.2 - 2026-09-05
+
+### Changed
+
+- **Both:** Reduced redundant slider layout updates and options-menu settings reads.
+
 ## 2.8.1 - 2026-08-12
 
 ### Fixed

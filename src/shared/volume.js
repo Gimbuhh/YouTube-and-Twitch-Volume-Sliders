@@ -30,27 +30,6 @@ export function getVolumeTickInterval(step) {
   return normalizedStep === 1 ? 10 : normalizedStep;
 }
 
-export function getSpeakerIconMode(value, muted) {
-  const percent = clampVolume(value);
-  if (muted || percent === 0) return 'muted';
-  return percent <= 50 ? 'low' : 'high';
-}
-
-export function restoreSavedVolume(platform, video, settings) {
-  const value = settings.savedVolume;
-  if (value !== null) platform.restoreVolume(video, value);
-  if (settings.savedMute !== null) platform.setMuted(video, settings.savedMute);
-  return value;
-}
-
-export function setVolumeFromUser(platform, video, settings, value) {
-  const next = clampVolume(value);
-  platform.setVolumeFromUser(video, next);
-  settings.saveVolume(next);
-  if (settings.savedMute !== null) settings.saveMute(false);
-  return next;
-}
-
 export function createVolumePersistence({ window, storage, storageKey, debounceMs, getVolumeStep }) {
   let saveTimer = 0;
 

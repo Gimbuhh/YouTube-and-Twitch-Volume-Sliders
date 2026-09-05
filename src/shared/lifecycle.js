@@ -81,26 +81,3 @@ export function createVideoLocator(document, window) {
 
   return { getVideoElement, resetVideoElement, ensurePlayerPositioning };
 }
-
-export function createRafCoalescer(window, callback) {
-  let frame = 0;
-  let generation = 0;
-  return {
-    schedule() {
-      if (frame) return;
-      const ownedGeneration = generation;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        if (ownedGeneration === generation) callback();
-      });
-    },
-    invalidate() {
-      generation += 1;
-      if (frame) window.cancelAnimationFrame?.(frame);
-      frame = 0;
-    },
-    dispose() {
-      this.invalidate();
-    }
-  };
-}

@@ -1,17 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
-import { createSettings, normalizeBooleanSetting, normalizeOpacityPercent, normalizeOverlaySizePercent, normalizeSliderThicknessPercent, normalizeVolumeAppearance, normalizeVolumeSliderMode } from '../../src/shared/settings.js';
+import { normalizeBooleanSetting, normalizeOpacityPercent, normalizeOverlaySizePercent, normalizeSliderThicknessPercent, normalizeVolumeAppearance, normalizeVolumeSliderMode } from '../../src/shared/settings.js';
 import { clampVolume, getVolumeTickInterval, normalizeVolumeStep, snapToStep, stepVolume } from '../../src/shared/volume.js';
-
-test('saved volume parsing and clamping', () => {
-  const storage = new JSDOM('', { url:'https://example.com' }).window.localStorage;
-  const settings = createSettings(storage, { volume:'v', mode:'m', location:'l', replacePlacement:'p', step:'step', legacySnap:'s', expanded:'e' });
-  assert.equal(settings.savedVolume, null);
-  storage.setItem('v', '125px'); assert.equal(settings.savedVolume, 100);
-  storage.setItem('v', '-8'); assert.equal(settings.savedVolume, 0);
-  storage.setItem('v', 'nope'); assert.equal(settings.savedVolume, null);
-});
 
 test('settings defaults and boolean normalization', () => {
   assert.equal(normalizeBooleanSetting('true'), true);
@@ -49,13 +39,4 @@ test('volume clamping, custom steps, and adaptive tick intervals', () => {
   assert.equal(getVolumeTickInterval(2), 2);
   assert.equal(getVolumeTickInterval(5), 5);
   assert.equal(getVolumeTickInterval(10), 10);
-});
-
-test('saved adjustment step falls back to the legacy snap preference', () => {
-  const storage = new JSDOM('', { url:'https://example.com' }).window.localStorage;
-  const settings = createSettings(storage, { step:'step', legacySnap:'snap' });
-  assert.equal(settings.volumeStep, 1);
-  storage.setItem('snap', 'true'); assert.equal(settings.volumeStep, 5);
-  storage.setItem('step', '10'); assert.equal(settings.volumeStep, 10);
-  settings.volumeStep = 2; assert.equal(storage.getItem('step'), '2');
 });

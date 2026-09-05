@@ -65,7 +65,7 @@ export function createVolumeControlElements({
 
   sliderWrap.append(sliderTrack, slider, tickOverlay);
   overlay.append(panelBg, iconCell, topRow, sliderWrap);
-  return { iconCell, indicator, panelBg, topRow, label, sliderWrap, tickOverlay, sliderTrack, slider };
+  return { iconCell, topRow, label, tickOverlay, slider };
 }
 
 export function syncVolumeControl({ slider, label, overlay, value, muted, updateSliderBar, updateVolumeIndicator }) {
