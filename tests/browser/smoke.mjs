@@ -333,7 +333,27 @@ async function wheelSmoke(browser, platform) {
     } finally {
       await page.keyboard.up('Control');
     }
+    await page.locator('#tm-volume-options-button').click();
+    const thickness = page.locator('#tm-volume-options-thickness-section input');
+    const startPreview = async () => {
+      await thickness.scrollIntoViewIfNeeded();
+      const box = await thickness.boundingBox();
+      assert.ok(box, `${platform}: thickness control has rendered geometry`);
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.waitForFunction(() => document.querySelector('#tm-volume-slider-overlay').dataset.tmOptionsPreview === 'thickness');
+    };
+    await startPreview();
+    await page.mouse.move(1100, 700);
+    await page.mouse.up();
+    await page.waitForFunction(() => !document.querySelector('#tm-volume-slider-overlay').dataset.tmOptionsPreview);
+    await startPreview();
+    await page.keyboard.press('Escape');
+    await page.locator('#tm-volume-options-popup').waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('#tm-volume-slider-overlay').getAttribute('data-tm-options-preview'), null, `${platform}: closing options ends the preview`);
+    await page.mouse.up();
     console.log(`browser smoke: ${platform} mouse wheel, smooth scrolling, and zoom pass-through passed`);
+    console.log(`browser smoke: ${platform} options preview release and Escape cleanup passed`);
   } finally {
     await context.close();
   }

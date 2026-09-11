@@ -71,6 +71,84 @@ function waitForTimers(runtime) {
   return new Promise((resolve)=>runtime.window.setTimeout(resolve,0));
 }
 
+async function trackedOptions(config, t) {
+  const runtime = createRuntime(config.url, { runScripts: 'outside-only' });
+  t.after(() => runtime.close());
+  config.fixture(runtime.document);
+  runtime.window.localStorage.setItem(config.locationKey, 'video');
+  runInContext(await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`, import.meta.url), 'utf8'), runtime.dom.getInternalVMContext());
+  await waitForTimers(runtime);
+  const releaseEvents = ['pointerup', 'pointercancel', 'mouseup', 'touchend', 'touchcancel'];
+  const listeners = [];
+  for (const target of [runtime.document, runtime.window]) {
+    const add = target.addEventListener.bind(target);
+    const remove = target.removeEventListener.bind(target);
+    const active = new Map(releaseEvents.map(type => [type, new Set()]));
+    listeners.push(active);
+    target.addEventListener = (type, handler, options) => {
+      active.get(type)?.add(handler);
+      return add(type, handler, options);
+    };
+    target.removeEventListener = (type, handler, options) => {
+      active.get(type)?.delete(handler);
+      return remove(type, handler, options);
+    };
+  }
+  const listenerCount = () => listeners.reduce((sum, active) => sum + [...active.values()].reduce((count, set) => count + set.size, 0), 0);
+  const open = () => {
+    runtime.document.getElementById('tm-volume-options-button').click();
+    return runtime.document.getElementById('tm-volume-options-popup');
+  };
+  const close = () => runtime.document.dispatchEvent(new runtime.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  return { runtime, listenerCount, open, close };
+}
+
+for (const config of platforms) test(`${config.name}: replacing idle options popups does not accumulate release listeners`, async (t) => {
+  const { runtime, listenerCount, open, close } = await trackedOptions(config, t);
+  for (let index = 0; index < 3; index++) {
+    const popup = open();
+    assert.equal(listenerCount(), 0, 'idle options need no page-level release listeners');
+    const size = popup.querySelector('#tm-volume-options-size-section input');
+    size.dispatchEvent(new runtime.window.Event('pointerdown', { bubbles: true }));
+    assert.equal(listenerCount(), 0, 'size has no preview to finish');
+    close();
+    popup.remove();
+  }
+});
+
+for (const config of platforms) test(`${config.name}: active preview listeners are released on completion, close, and replacement`, async (t) => {
+  const { runtime, listenerCount, open, close } = await trackedOptions(config, t);
+  let popup = open();
+  const overlay = runtime.document.getElementById('tm-volume-slider-overlay');
+  const start = () => {
+    const slider = popup.querySelector('#tm-volume-options-thickness-section input');
+    slider.dispatchEvent(new runtime.window.Event('pointerdown', { bubbles: true }));
+    assert.equal(overlay.dataset.tmOptionsPreview, 'thickness');
+    const count = listenerCount();
+    assert.ok(count > 0, 'preview listens for release outside the slider');
+    slider.dispatchEvent(new runtime.window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    assert.equal(listenerCount(), count, 'compatibility events do not duplicate listeners');
+  };
+  for (const type of ['pointerup', 'pointercancel', 'mouseup', 'touchend', 'touchcancel']) {
+    start();
+    runtime.window.dispatchEvent(new runtime.window.Event(type));
+    assert.equal(listenerCount(), 0);
+    assert.equal(overlay.dataset.tmOptionsPreview, undefined);
+  }
+  start();
+  close();
+  assert.equal(listenerCount(), 0, 'closing options ends an active preview');
+  assert.equal(overlay.dataset.tmOptionsPreview, undefined);
+  popup = open();
+  start();
+  popup.remove();
+  popup = open();
+  assert.equal(listenerCount(), 0, 'rebuilding options disposes the previous preview');
+  assert.equal(overlay.dataset.tmOptionsPreview, undefined);
+  close();
+  assert.equal(popup.hidden, true, 'Escape targets the replacement popup');
+});
+
 function hideAndRevealControls(runtime, config) {
   if (config.file === 'youtube') {
     const player=runtime.document.getElementById('movie_player');

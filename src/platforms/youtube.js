@@ -1,8 +1,8 @@
-import { createOverlayUi } from '../shared/overlay-ui.js';
+import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
 import { clampVolume, createVolumePersistence, snapToStep } from '../shared/volume.js';
-import { createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
+import { bindOptionsPopupKeyboard, createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
 import { createCleanupRegistry, createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
 import { createStyleElement } from '../shared/styles.js';
 import { installOptionsStyles } from '../shared/options-styles.js';
@@ -559,7 +559,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     // -------------------------------------
 
     let optionsPopupOutsideHandler = null;
-    let optionsPopupKeyHandler = null;
+    let optionsPopupKeyboardCleanup = null;
     let optionsPopupRepositionHandler = null;
     let optionsCloseHideControlsHandler = null;
     let optionsPopupOpener = null;
@@ -574,7 +574,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
 
-    const { buildOptionsPopup, syncOptionsPopupState } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         getVolumeAppearance, setVolumeAppearance,
@@ -607,6 +607,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
         let popup = getOptionsPopup();
         if (!popup || !popup.isConnected) {
+            closeVolumeOptionsPopup();
             popup?.remove();
             popup = buildOptionsPopup();
             ensurePlayerPositioning(player);
@@ -738,28 +739,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             };
             document.addEventListener('click', optionsPopupOutsideHandler, true);
         }
-        if (!optionsPopupKeyHandler) {
-            optionsPopupKeyHandler = (event) => {
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    closeVolumeOptionsPopup(true);
-                    return;
-                }
-                if (event.key !== 'Tab') return;
-                const focusable = getOptionsPopupFocusable(popup);
-                if (!focusable.length) return;
-                const first = focusable[0];
-                const last = focusable[focusable.length - 1];
-                if (event.shiftKey && document.activeElement === first) {
-                    event.preventDefault();
-                    last.focus();
-                } else if (!event.shiftKey && document.activeElement === last) {
-                    event.preventDefault();
-                    first.focus();
-                }
-            };
-            document.addEventListener('keydown', optionsPopupKeyHandler, true);
+        if (!optionsPopupKeyboardCleanup) {
+            optionsPopupKeyboardCleanup = bindOptionsPopupKeyboard({ document, popup, closePopup: closeVolumeOptionsPopup });
         }
         if (!optionsPopupRepositionHandler) {
             optionsPopupRepositionHandler = () => positionOptionsPopup(popup);
@@ -770,6 +751,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function closeVolumeOptionsPopup(restoreFocus = false) {
+        stopOptionsPreview();
         const popup = getOptionsPopup();
         if (popup) {
             if (popup.contains(document.activeElement)) document.activeElement.blur();
@@ -783,10 +765,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             document.removeEventListener('click', optionsPopupOutsideHandler, true);
             optionsPopupOutsideHandler = null;
         }
-        if (optionsPopupKeyHandler) {
-            document.removeEventListener('keydown', optionsPopupKeyHandler, true);
-            optionsPopupKeyHandler = null;
-        }
+        optionsPopupKeyboardCleanup?.();
+        optionsPopupKeyboardCleanup = null;
         if (optionsPopupRepositionHandler) {
             window.removeEventListener('resize', optionsPopupRepositionHandler, true);
             window.visualViewport?.removeEventListener('resize', optionsPopupRepositionHandler, true);
@@ -847,39 +827,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
         createStylesIfNeeded();
 
-        const overlay = document.createElement('div');
-        overlay.id = OVERLAY_ID;
-        overlay.className = 'tm-collapsed';
-
-        Object.assign(overlay.style, {
-            position: 'relative',
-            transform: 'translateY(0)',
-            width: '40px',
-            minWidth: '0',
-            maxWidth: 'none',
-            height: '40px',
-            minHeight: '40px',
-            padding: '0',
-            background: 'transparent',
-            backdropFilter: 'none',
-            WebkitBackdropFilter: 'none',
-            borderRadius: '20px',
-            border: 'none',
-            display: 'flex',
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'flex-start',
-            gap: '0',
-            zIndex: '2',
-            pointerEvents: 'auto',
-            boxSizing: 'border-box',
-            overflow: 'hidden',
-            opacity: '1',
-            flex: '0 0 auto',
-            margin: '0 4px',
-            alignSelf: 'center',
-            transition: 'width 0.22s cubic-bezier(0.16, 1, 0.3, 1)'
-        });
+        const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
         const cleanupRegistry = createCleanupRegistry();
 
         let hasPointerIntent = false;
@@ -1056,6 +1004,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function disposeActiveOverlay() {
+        stopOptionsPreview();
         requestedVolumeIntent = null;
         overlayLifecycle.dispose();
     }
@@ -1306,10 +1255,5 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         setupYtNavigationHandler();
     }
 
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        init();
-    } else {
-        applyNativeVolumeVisibility();
-        init();
-    }
+    init();
 }

@@ -6,6 +6,8 @@ Unit tests cover shared settings, storage failure and recovery, volume functions
 
 Tests do not contact either service. A frozen install is the only step that may access a package registry.
 
+Options lifecycle regressions verify that popup replacement does not accumulate page-level release listeners and that previews end on release, cancellation, close, and replacement. Browser checks also exercise releasing an options drag outside the slider and closing the popup with Escape during a drag.
+
 ## Real-browser smoke checks
 
 Run the opt-in Chrome smoke suite when changing input defaults, focus modality, rendered geometry, overflow, or Twitch controls-visibility timing:

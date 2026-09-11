@@ -79,6 +79,41 @@
   }
 
   // src/shared/overlay-ui.js
+  function createVolumeOverlay({ document: document2, overlayId }) {
+    const overlay = document2.createElement("div");
+    overlay.id = overlayId;
+    overlay.className = "tm-collapsed";
+    Object.assign(overlay.style, {
+      position: "relative",
+      transform: "translateY(0)",
+      width: "40px",
+      minWidth: "0",
+      maxWidth: "none",
+      height: "40px",
+      minHeight: "40px",
+      padding: "0",
+      background: "transparent",
+      backdropFilter: "none",
+      WebkitBackdropFilter: "none",
+      borderRadius: "20px",
+      border: "none",
+      display: "flex",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-start",
+      gap: "0",
+      zIndex: "2",
+      pointerEvents: "auto",
+      boxSizing: "border-box",
+      overflow: "hidden",
+      opacity: "1",
+      flex: "0 0 auto",
+      margin: "0 4px",
+      alignSelf: "center",
+      transition: "width 0.22s cubic-bezier(0.16, 1, 0.3, 1)"
+    });
+    return overlay;
+  }
   function createOverlayUi(dependencies) {
     const {
       document: document2,
@@ -501,6 +536,22 @@
       beginOpacitySliderPreview,
       endOpacitySliderPreview
     } = dependencies;
+    const previewEndEvents = ["pointerup", "pointercancel", "mouseup", "touchend", "touchcancel"];
+    const previewTargets = [document2, document2.defaultView].filter(Boolean);
+    let activePreview = null;
+    function stopOptionsPreview() {
+      const preview = activePreview;
+      if (!preview) {
+        return;
+      }
+      activePreview = null;
+      for (const target of previewTargets) {
+        for (const type of previewEndEvents) {
+          target.removeEventListener(type, stopOptionsPreview, true);
+        }
+      }
+      preview.onEnd?.();
+    }
     function getEnabledRadios(group) {
       return Array.from(group.querySelectorAll('[role="radio"]:not(:disabled)'));
     }
@@ -800,32 +851,31 @@
       ["click", "mousedown", "pointerdown", "keydown"].forEach((type) => {
         slider.addEventListener(type, (event) => event.stopPropagation());
       });
-      let previewActive = false;
       const hasPreview = !!(onPreviewStart || onPreviewEnd);
-      const view = document2.defaultView;
-      const isFocusInOptionsPopup = (target) => !!target && !!document2.getElementById(OPTIONS_POPUP_ID)?.contains(target);
-      const startPreview = (event) => {
-        if (!hasPreview) return;
-        if (event?.type === "mousedown" && event.button !== 0) return;
-        previewActive = true;
-        onPreviewStart?.();
-      };
-      const endPreview = () => {
-        if (!hasPreview) return;
-        if (!previewActive) return;
-        previewActive = false;
-        onPreviewEnd?.();
-      };
-      ["pointerdown", "mousedown", "touchstart"].forEach((type) => {
-        slider.addEventListener(type, startPreview);
-      });
-      [document2, view].filter(Boolean).forEach((target) => {
-        ["pointerup", "pointercancel", "mouseup", "touchend", "touchcancel"].forEach((type) => target.addEventListener(type, endPreview, true));
-      });
-      slider.addEventListener("blur", (event) => {
-        if (isFocusInOptionsPopup(event.relatedTarget)) return;
-        endPreview();
-      });
+      if (hasPreview) {
+        const startPreview = (event) => {
+          if (activePreview?.slider === slider || event.type === "mousedown" && event.button !== 0) {
+            return;
+          }
+          stopOptionsPreview();
+          onPreviewStart?.();
+          activePreview = { slider, onEnd: onPreviewEnd };
+          for (const target of previewTargets) {
+            for (const type of previewEndEvents) {
+              target.addEventListener(type, stopOptionsPreview, true);
+            }
+          }
+        };
+        for (const type of ["pointerdown", "mousedown", "touchstart"]) {
+          slider.addEventListener(type, startPreview);
+        }
+        slider.addEventListener("blur", (event) => {
+          if (activePreview?.slider !== slider || document2.getElementById(OPTIONS_POPUP_ID)?.contains(event.relatedTarget)) {
+            return;
+          }
+          stopOptionsPreview();
+        });
+      }
       slider.addEventListener("input", () => {
         const value = Number(slider.value);
         const pct = Number.isFinite(value) ? value : fallback;
@@ -917,6 +967,7 @@
       return section;
     }
     function buildOptionsPopup() {
+      stopOptionsPreview();
       const popup = document2.createElement("div");
       popup.id = OPTIONS_POPUP_ID;
       popup.setAttribute("role", "dialog");
@@ -943,7 +994,7 @@
       popup.addEventListener("click", (event) => event.stopPropagation());
       return popup;
     }
-    return { buildOptionsPopup, syncOptionsPopupState };
+    return { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview };
   }
 
   // src/shared/settings.js
@@ -1320,6 +1371,34 @@
   }
   function getOptionsPopupFocusable(popup) {
     return Array.from(popup.querySelectorAll(focusableSelector)).filter((element) => !isHiddenFromFocus(element, popup));
+  }
+  function bindOptionsPopupKeyboard({ document: document2, popup, closePopup }) {
+    const handler = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closePopup(true);
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      const focusable = getOptionsPopupFocusable(popup);
+      if (!focusable.length) {
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document2.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document2.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document2.addEventListener("keydown", handler, true);
+    return () => document2.removeEventListener("keydown", handler, true);
   }
   function createOptionsButtonIconSvg(document2) {
     const namespace = "http://www.w3.org/2000/svg";
@@ -2954,7 +3033,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       closeVolumeOptionsPopup();
     }
     let optionsPopupOutsideHandler = null;
-    let optionsPopupKeyHandler = null;
+    let optionsPopupKeyboardCleanup = null;
     let optionsPopupRepositionHandler = null;
     let optionsCloseHideControlsHandler = null;
     let optionsPopupOpener = null;
@@ -2965,7 +3044,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       const popup = getOptionsPopup();
       return !!popup && !popup.hasAttribute("hidden");
     }
-    const { buildOptionsPopup, syncOptionsPopupState } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview } = createOptionsUi({
       document,
       optionsPopupId: OPTIONS_POPUP_ID,
       refreshOptionsPopupState,
@@ -3003,6 +3082,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       if (!player) return null;
       let popup = getOptionsPopup();
       if (!popup || !popup.isConnected) {
+        closeVolumeOptionsPopup();
         popup?.remove();
         popup = buildOptionsPopup();
         ensurePlayerPositioning(player);
@@ -3118,28 +3198,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         };
         document.addEventListener("click", optionsPopupOutsideHandler, true);
       }
-      if (!optionsPopupKeyHandler) {
-        optionsPopupKeyHandler = (event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            closeVolumeOptionsPopup(true);
-            return;
-          }
-          if (event.key !== "Tab") return;
-          const focusable = getOptionsPopupFocusable(popup);
-          if (!focusable.length) return;
-          const first = focusable[0];
-          const last = focusable[focusable.length - 1];
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
-        };
-        document.addEventListener("keydown", optionsPopupKeyHandler, true);
+      if (!optionsPopupKeyboardCleanup) {
+        optionsPopupKeyboardCleanup = bindOptionsPopupKeyboard({ document, popup, closePopup: closeVolumeOptionsPopup });
       }
       if (!optionsPopupRepositionHandler) {
         optionsPopupRepositionHandler = () => positionOptionsPopup(popup);
@@ -3149,6 +3209,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       }
     }
     function closeVolumeOptionsPopup(restoreFocus = false) {
+      stopOptionsPreview();
       const popup = getOptionsPopup();
       if (popup) {
         if (popup.contains(document.activeElement)) document.activeElement.blur();
@@ -3161,10 +3222,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         document.removeEventListener("click", optionsPopupOutsideHandler, true);
         optionsPopupOutsideHandler = null;
       }
-      if (optionsPopupKeyHandler) {
-        document.removeEventListener("keydown", optionsPopupKeyHandler, true);
-        optionsPopupKeyHandler = null;
-      }
+      optionsPopupKeyboardCleanup?.();
+      optionsPopupKeyboardCleanup = null;
       if (optionsPopupRepositionHandler) {
         window.removeEventListener("resize", optionsPopupRepositionHandler, true);
         window.visualViewport?.removeEventListener("resize", optionsPopupRepositionHandler, true);
@@ -3217,38 +3276,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         return existing;
       }
       createStylesIfNeeded();
-      const overlay = document.createElement("div");
-      overlay.id = OVERLAY_ID;
-      overlay.className = "tm-collapsed";
-      Object.assign(overlay.style, {
-        position: "relative",
-        transform: "translateY(0)",
-        width: "40px",
-        minWidth: "0",
-        maxWidth: "none",
-        height: "40px",
-        minHeight: "40px",
-        padding: "0",
-        background: "transparent",
-        backdropFilter: "none",
-        WebkitBackdropFilter: "none",
-        borderRadius: "20px",
-        border: "none",
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "flex-start",
-        gap: "0",
-        zIndex: "2",
-        pointerEvents: "auto",
-        boxSizing: "border-box",
-        overflow: "hidden",
-        opacity: "1",
-        flex: "0 0 auto",
-        margin: "0 4px",
-        alignSelf: "center",
-        transition: "width 0.22s cubic-bezier(0.16, 1, 0.3, 1)"
-      });
+      const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
       const cleanupRegistry = createCleanupRegistry();
       let hasPointerIntent = false;
       const markPointerIntent = () => {
@@ -3410,6 +3438,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       return overlay;
     }
     function disposeActiveOverlay() {
+      stopOptionsPreview();
       requestedVolumeIntent = null;
       overlayLifecycle.dispose();
     }
@@ -3620,12 +3649,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       setupAttachObserver();
       setupYtNavigationHandler();
     }
-    if (document.readyState === "complete" || document.readyState === "interactive") {
-      init();
-    } else {
-      applyNativeVolumeVisibility();
-      init();
-    }
+    init();
   }
 
   // src/entries/youtube.user.js
