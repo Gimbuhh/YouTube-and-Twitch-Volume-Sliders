@@ -2,6 +2,14 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.8.3 - 2026-09-11
+
+### Fixed
+
+- **Both:** Accumulated small trackpad scroll movements before adjusting volume, while preserving discrete mouse-wheel steps.
+- **Both:** Preserved browser zoom gestures over the circular volume control.
+- **Both:** Kept option changes and resets effective for the current page session when browser storage is unavailable.
+
 ## 2.8.2 - 2026-09-05
 
 ### Changed

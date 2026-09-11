@@ -22,6 +22,35 @@ export function getOptionsPopupFocusable(popup) {
     .filter((element) => !isHiddenFromFocus(element, popup));
 }
 
+export function bindOptionsPopupKeyboard({ document, popup, closePopup }) {
+  const handler = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closePopup(true);
+      return;
+    }
+    if (event.key !== 'Tab') {
+      return;
+    }
+    const focusable = getOptionsPopupFocusable(popup);
+    if (!focusable.length) {
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener('keydown', handler, true);
+  return () => document.removeEventListener('keydown', handler, true);
+}
+
 export function createOptionsButtonIconSvg(document) {
   const namespace = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(namespace, 'svg');

@@ -1,5 +1,41 @@
 import { getVolumeTickInterval } from './volume.js';
 
+export function createVolumeOverlay({ document, overlayId }) {
+  const overlay = document.createElement('div');
+  overlay.id = overlayId;
+  overlay.className = 'tm-collapsed';
+  Object.assign(overlay.style, {
+    position: 'relative',
+    transform: 'translateY(0)',
+    width: '40px',
+    minWidth: '0',
+    maxWidth: 'none',
+    height: '40px',
+    minHeight: '40px',
+    padding: '0',
+    background: 'transparent',
+    backdropFilter: 'none',
+    WebkitBackdropFilter: 'none',
+    borderRadius: '20px',
+    border: 'none',
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: '0',
+    zIndex: '2',
+    pointerEvents: 'auto',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    opacity: '1',
+    flex: '0 0 auto',
+    margin: '0 4px',
+    alignSelf: 'center',
+    transition: 'width 0.22s cubic-bezier(0.16, 1, 0.3, 1)'
+  });
+  return overlay;
+}
+
 export function createOverlayUi(dependencies) {
   const {
     document, window, isAlwaysExpandedEnabled, isSliderOnVideo,

@@ -65,9 +65,34 @@ export function createVolumeSettings({
   collapseOverlayIfIdle,
   ensureOverlay
 }) {
-  const read = (key) => { try { return storage.getItem(key); } catch { return null; } };
-  const write = (key, value) => { try { storage.setItem(key, value); } catch { /* storage may be unavailable */ } };
-  const remove = (key) => { try { storage.removeItem(key); } catch { /* storage may be unavailable */ } };
+  const sessionValues = new Map();
+  const read = (key) => {
+    const cached = sessionValues.get(key);
+    // Unsaved choices own this session; stale storage must not revert them.
+    if (cached?.unsaved) {
+      return cached.value;
+    }
+    try {
+      const value = storage.getItem(key);
+      sessionValues.set(key, { value, unsaved: false });
+      return value;
+    } catch {
+      return cached?.value ?? null;
+    }
+  };
+  const write = (key, value) => {
+    const cached = { value, unsaved: true };
+    sessionValues.set(key, cached);
+    try {
+      if (value === null) {
+        storage.removeItem(key);
+      } else {
+        storage.setItem(key, value);
+      }
+      cached.unsaved = false;
+    } catch { /* keep the choice, including resets, for this session */ }
+  };
+  const remove = (key) => write(key, null);
   const getOverlay = () => ensureOverlay?.() || document.getElementById(overlayId);
 
   function getSavedVolumeSliderMode() {

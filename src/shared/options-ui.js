@@ -14,6 +14,24 @@ export function createOptionsUi(dependencies) {
     beginOpacitySliderPreview, endOpacitySliderPreview
   } = dependencies;
 
+  const previewEndEvents = ['pointerup', 'pointercancel', 'mouseup', 'touchend', 'touchcancel'];
+  const previewTargets = [document, document.defaultView].filter(Boolean);
+  let activePreview = null;
+
+  function stopOptionsPreview() {
+    const preview = activePreview;
+    if (!preview) {
+      return;
+    }
+    activePreview = null;
+    for (const target of previewTargets) {
+      for (const type of previewEndEvents) {
+        target.removeEventListener(type, stopOptionsPreview, true);
+      }
+    }
+    preview.onEnd?.();
+  }
+
     function getEnabledRadios(group) {
         return Array.from(group.querySelectorAll('[role="radio"]:not(:disabled)'));
     }
@@ -360,33 +378,32 @@ export function createOptionsUi(dependencies) {
         ['click', 'mousedown', 'pointerdown', 'keydown'].forEach((type) => {
             slider.addEventListener(type, (event) => event.stopPropagation());
         });
-        let previewActive = false;
         const hasPreview = !!(onPreviewStart || onPreviewEnd);
-        const view = document.defaultView;
-        const isFocusInOptionsPopup = (target) => !!target && !!document.getElementById(OPTIONS_POPUP_ID)?.contains(target);
-        const startPreview = (event) => {
-            if (!hasPreview) return;
-            if (event?.type === 'mousedown' && event.button !== 0) return;
-            previewActive = true;
-            onPreviewStart?.();
-        };
-        const endPreview = () => {
-            if (!hasPreview) return;
-            if (!previewActive) return;
-            previewActive = false;
-            onPreviewEnd?.();
-        };
-        ['pointerdown', 'mousedown', 'touchstart'].forEach((type) => {
-            slider.addEventListener(type, startPreview);
-        });
-        [document, view].filter(Boolean).forEach((target) => {
-            ['pointerup', 'pointercancel', 'mouseup', 'touchend', 'touchcancel']
-                .forEach((type) => target.addEventListener(type, endPreview, true));
-        });
-        slider.addEventListener('blur', (event) => {
-            if (isFocusInOptionsPopup(event.relatedTarget)) return;
-            endPreview();
-        });
+        if (hasPreview) {
+            const startPreview = (event) => {
+                if (activePreview?.slider === slider || (event.type === 'mousedown' && event.button !== 0)) {
+                    return;
+                }
+                stopOptionsPreview();
+                // Starting a preview may recreate the overlay and dispose its old state.
+                onPreviewStart?.();
+                activePreview = { slider, onEnd: onPreviewEnd };
+                for (const target of previewTargets) {
+                    for (const type of previewEndEvents) {
+                        target.addEventListener(type, stopOptionsPreview, true);
+                    }
+                }
+            };
+            for (const type of ['pointerdown', 'mousedown', 'touchstart']) {
+                slider.addEventListener(type, startPreview);
+            }
+            slider.addEventListener('blur', (event) => {
+                if (activePreview?.slider !== slider || document.getElementById(OPTIONS_POPUP_ID)?.contains(event.relatedTarget)) {
+                    return;
+                }
+                stopOptionsPreview();
+            });
+        }
         slider.addEventListener('input', () => {
             const value = Number(slider.value);
             const pct = Number.isFinite(value) ? value : fallback;
@@ -488,6 +505,7 @@ export function createOptionsUi(dependencies) {
     }
 
     function buildOptionsPopup() {
+        stopOptionsPreview();
         const popup = document.createElement('div');
         popup.id = OPTIONS_POPUP_ID;
         popup.setAttribute('role', 'dialog');
@@ -518,5 +536,5 @@ export function createOptionsUi(dependencies) {
         return popup;
     }
 
-  return { buildOptionsPopup, syncOptionsPopupState };
+  return { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview };
 }

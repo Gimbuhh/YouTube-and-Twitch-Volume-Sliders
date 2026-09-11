@@ -55,7 +55,7 @@ Both scripts replace or complement the sites' native controls with a small indic
 
 Download: [GitHub Releases](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases)
 
-Choose the latest YouTube or Twitch `.user.js` asset, approve the install prompt in your userscript manager, then reload the video page.
+Install version 2.8.3: [YouTube userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.8.3/YouTube.Volume.Slider.2.8.3.user.js) or [Twitch userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.8.3/Twitch.Volume.Slider.2.8.3.user.js). Approve the install prompt in your userscript manager, then reload the video page.
 
 ### Tampermonkey Setup
 
@@ -78,6 +78,8 @@ Choose the latest YouTube or Twitch `.user.js` asset, approve the install prompt
 ## Volume adjustment
 
 The **Adjustment step** option controls slider dragging and scrolling on the circular volume control. The selected value is saved separately for YouTube and Twitch.
+
+Small trackpad movements accumulate before changing volume; normal mouse-wheel input keeps one selected step per event. Browser zoom gestures pass through the circular control without adjusting volume.
 
 | Adjustment step | Slider marks |
 | --- | --- |
@@ -118,6 +120,8 @@ Bug reports and focused pull requests are welcome. Read [CONTRIBUTING.md](CONTRI
 ## Privacy
 
 The userscripts make no network requests or telemetry calls. Settings remain in each site's `localStorage`.
+
+If browser storage is unavailable, option changes and resets remain effective for the current page session but cannot be retained after reloading.
 
 ## Troubleshooting
 

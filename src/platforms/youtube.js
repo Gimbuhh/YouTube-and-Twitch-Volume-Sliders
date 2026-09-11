@@ -1,8 +1,8 @@
-import { createOverlayUi } from '../shared/overlay-ui.js';
+import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
 import { clampVolume, createVolumePersistence, snapToStep } from '../shared/volume.js';
-import { createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
+import { bindOptionsPopupKeyboard, createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
 import { createCleanupRegistry, createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
 import { createStyleElement } from '../shared/styles.js';
 import { installOptionsStyles } from '../shared/options-styles.js';
@@ -11,6 +11,11 @@ import { bindRangePointerInteraction, bindWheelVolumeStep, createVolumeControlEl
 
 export function startYouTubeVolumeSlider() {
     'use strict';
+
+    let storage = null;
+    try {
+        storage = localStorage;
+    } catch { /* settings can still work for this page session */ }
 
     const OVERLAY_ID = 'tm-volume-slider-overlay';
     const SLIDER_ID = 'tm-volume-slider-range';
@@ -97,7 +102,7 @@ export function startYouTubeVolumeSlider() {
 
 
     const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
-        document, storage: localStorage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
+        document, storage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
         keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
@@ -111,7 +116,7 @@ export function startYouTubeVolumeSlider() {
         }
     });
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
-        window, storage: localStorage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
+        window, storage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
         getVolumeStep
     });
 
@@ -554,7 +559,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     // -------------------------------------
 
     let optionsPopupOutsideHandler = null;
-    let optionsPopupKeyHandler = null;
+    let optionsPopupKeyboardCleanup = null;
     let optionsPopupRepositionHandler = null;
     let optionsCloseHideControlsHandler = null;
     let optionsPopupOpener = null;
@@ -569,7 +574,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
 
-    const { buildOptionsPopup, syncOptionsPopupState } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         getVolumeAppearance, setVolumeAppearance,
@@ -602,6 +607,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
         let popup = getOptionsPopup();
         if (!popup || !popup.isConnected) {
+            closeVolumeOptionsPopup();
             popup?.remove();
             popup = buildOptionsPopup();
             ensurePlayerPositioning(player);
@@ -733,28 +739,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             };
             document.addEventListener('click', optionsPopupOutsideHandler, true);
         }
-        if (!optionsPopupKeyHandler) {
-            optionsPopupKeyHandler = (event) => {
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    closeVolumeOptionsPopup(true);
-                    return;
-                }
-                if (event.key !== 'Tab') return;
-                const focusable = getOptionsPopupFocusable(popup);
-                if (!focusable.length) return;
-                const first = focusable[0];
-                const last = focusable[focusable.length - 1];
-                if (event.shiftKey && document.activeElement === first) {
-                    event.preventDefault();
-                    last.focus();
-                } else if (!event.shiftKey && document.activeElement === last) {
-                    event.preventDefault();
-                    first.focus();
-                }
-            };
-            document.addEventListener('keydown', optionsPopupKeyHandler, true);
+        if (!optionsPopupKeyboardCleanup) {
+            optionsPopupKeyboardCleanup = bindOptionsPopupKeyboard({ document, popup, closePopup: closeVolumeOptionsPopup });
         }
         if (!optionsPopupRepositionHandler) {
             optionsPopupRepositionHandler = () => positionOptionsPopup(popup);
@@ -765,6 +751,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function closeVolumeOptionsPopup(restoreFocus = false) {
+        stopOptionsPreview();
         const popup = getOptionsPopup();
         if (popup) {
             if (popup.contains(document.activeElement)) document.activeElement.blur();
@@ -778,10 +765,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             document.removeEventListener('click', optionsPopupOutsideHandler, true);
             optionsPopupOutsideHandler = null;
         }
-        if (optionsPopupKeyHandler) {
-            document.removeEventListener('keydown', optionsPopupKeyHandler, true);
-            optionsPopupKeyHandler = null;
-        }
+        optionsPopupKeyboardCleanup?.();
+        optionsPopupKeyboardCleanup = null;
         if (optionsPopupRepositionHandler) {
             window.removeEventListener('resize', optionsPopupRepositionHandler, true);
             window.visualViewport?.removeEventListener('resize', optionsPopupRepositionHandler, true);
@@ -842,39 +827,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
         createStylesIfNeeded();
 
-        const overlay = document.createElement('div');
-        overlay.id = OVERLAY_ID;
-        overlay.className = 'tm-collapsed';
-
-        Object.assign(overlay.style, {
-            position: 'relative',
-            transform: 'translateY(0)',
-            width: '40px',
-            minWidth: '0',
-            maxWidth: 'none',
-            height: '40px',
-            minHeight: '40px',
-            padding: '0',
-            background: 'transparent',
-            backdropFilter: 'none',
-            WebkitBackdropFilter: 'none',
-            borderRadius: '20px',
-            border: 'none',
-            display: 'flex',
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'flex-start',
-            gap: '0',
-            zIndex: '2',
-            pointerEvents: 'auto',
-            boxSizing: 'border-box',
-            overflow: 'hidden',
-            opacity: '1',
-            flex: '0 0 auto',
-            margin: '0 4px',
-            alignSelf: 'center',
-            transition: 'width 0.22s cubic-bezier(0.16, 1, 0.3, 1)'
-        });
+        const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
         const cleanupRegistry = createCleanupRegistry();
 
         let hasPointerIntent = false;
@@ -1051,6 +1004,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function disposeActiveOverlay() {
+        stopOptionsPreview();
         requestedVolumeIntent = null;
         overlayLifecycle.dispose();
     }
@@ -1301,10 +1255,5 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         setupYtNavigationHandler();
     }
 
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        init();
-    } else {
-        applyNativeVolumeVisibility();
-        init();
-    }
+    init();
 }

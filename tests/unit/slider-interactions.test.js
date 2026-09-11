@@ -1,6 +1,75 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bindRangePointerInteraction, getMajorTickPressValue } from '../../src/shared/slider-interactions.js';
+import { bindRangePointerInteraction, bindWheelVolumeStep, getMajorTickPressValue } from '../../src/shared/slider-interactions.js';
+
+function createWheelFixture() {
+  const target = new EventTarget();
+  const slider = { value: '50' };
+  const applied = [];
+  let time = 0;
+  const dispose = bindWheelVolumeStep({ target, slider, getVolumeStep: () => 5, applyValue: value => applied.push(value) });
+  const wheel = (deltaY, options = {}) => {
+    const event = new Event('wheel', { cancelable: true });
+    const { elapsed = 10, ...properties } = options;
+    time += elapsed;
+    for (const [key, value] of Object.entries({ deltaY, deltaMode: 0, timeStamp: time, ...properties })) {
+      Object.defineProperty(event, key, { value });
+    }
+    target.dispatchEvent(event);
+    return event;
+  };
+  return { slider, applied, wheel, dispose };
+}
+
+test('wheel input accumulates tiny pixel deltas and keeps discrete mouse steps', () => {
+  const { slider, applied, wheel, dispose } = createWheelFixture();
+  for (let index = 0; index < 10; index++) {
+    assert.equal(wheel(-0.1).defaultPrevented, true);
+  }
+  assert.equal(slider.value, '50');
+  assert.deepEqual(applied, []);
+  wheel(-20);
+  wheel(-20);
+  assert.equal(slider.value, '55');
+  wheel(-100);
+  assert.equal(slider.value, '60');
+  wheel(3, { deltaMode: 1 });
+  assert.equal(slider.value, '55');
+  wheel(1, { deltaMode: 2 });
+  assert.equal(slider.value, '50');
+  dispose();
+  wheel(-100);
+  assert.equal(slider.value, '50');
+});
+
+test('zoom gestures pass through without changing volume or consuming partial scroll', () => {
+  const { slider, applied, wheel } = createWheelFixture();
+  for (const modifier of ['ctrlKey', 'metaKey']) {
+    wheel(-30);
+    assert.equal(wheel(-100, { [modifier]: true }).defaultPrevented, false);
+    wheel(-10);
+    assert.equal(slider.value, '50');
+    wheel(0);
+  }
+  assert.deepEqual(applied, []);
+});
+
+test('wheel accumulation resets after a pause or direction change and clamps at bounds', () => {
+  const { slider, applied, wheel } = createWheelFixture();
+  wheel(-30);
+  wheel(-10, { elapsed: 300 });
+  assert.equal(slider.value, '50');
+  wheel(30);
+  assert.equal(slider.value, '50');
+  wheel(10);
+  assert.equal(slider.value, '45');
+  slider.value = '100';
+  wheel(-100);
+  assert.deepEqual(applied, [45]);
+  wheel(100);
+  assert.equal(slider.value, '95');
+  assert.equal(wheel(0).defaultPrevented, false);
+});
 
 function createTickFixture() {
   const left = 100;
