@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { runInContext } from 'node:vm';
 import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
@@ -8,6 +9,50 @@ const platforms = [
   { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', stepKey:'tm-yt-volume-slider-step', legacySnapKey:'tm-yt-volume-slider-snap-to-5', sizeKey:'tm-yt-volume-slider-size', thicknessKey:'tm-yt-volume-slider-thickness', appearanceKey:'tm-yt-volume-slider-appearance' },
   { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', stepKey:'tm-twitch-volume-slider-step', legacySnapKey:'tm-twitch-volume-slider-snap-to-5', sizeKey:'tm-twitch-volume-slider-size', thicknessKey:'tm-twitch-volume-slider-thickness', appearanceKey:'tm-twitch-volume-slider-appearance' }
 ];
+
+for (const config of platforms) {
+  for (const failure of ['writes', 'access']) {
+    test(`${config.name}: options remain usable with failed storage ${failure}`, async (t) => {
+      const runtime = createRuntime(config.url, { runScripts: 'outside-only' });
+      t.after(() => runtime.close());
+      config.fixture(runtime.document);
+      const storage = runtime.window.localStorage;
+      storage.setItem(config.stepKey, '2');
+      storage.setItem(config.thicknessKey, '100');
+      const deny = () => { throw new Error('Storage denied'); };
+      if (failure === 'access') {
+        Object.defineProperty(runtime.window, 'localStorage', { get: deny });
+      } else {
+        const prototype = Object.getPrototypeOf(storage);
+        Object.defineProperty(prototype, 'setItem', { value: deny });
+        Object.defineProperty(prototype, 'removeItem', { value: deny });
+      }
+      runInContext(await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`, import.meta.url), 'utf8'), runtime.dom.getInternalVMContext());
+      runtime.document.getElementById('tm-volume-options-button').click();
+      const popup = runtime.document.getElementById('tm-volume-options-popup');
+      popup.querySelector('#tm-volume-options-step-10').click();
+      popup.querySelector('#tm-volume-options-appearance-classic').click();
+      assert.equal(popup.querySelector('#tm-volume-options-step-10').getAttribute('aria-checked'), 'true');
+      assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').dataset.tmAppearance, 'classic');
+      popup.querySelector('#tm-volume-options-thickness-section button').click();
+      assert.equal(popup.querySelector('#tm-volume-options-thickness-section input').value, '75');
+
+      popup.querySelector('#tm-volume-options-mode-off').click();
+      assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'), null);
+      popup.querySelector('#tm-volume-options-mode-on').click();
+      const slider = runtime.document.getElementById('tm-volume-slider-range');
+      assert.equal(slider.dataset.tmVolumeStep, '10');
+      assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').dataset.tmAppearance, 'classic');
+      const before = Number(slider.value);
+      runtime.document.querySelector('.tm-volume-icon-cell').dispatchEvent(new runtime.window.WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }));
+      assert.equal(Number(slider.value), Math.min(100, (Math.floor(before / 10) + 1) * 10));
+      if (failure === 'writes') {
+        assert.equal(storage.getItem(config.stepKey), '2', 'session choices override stale saved values');
+        assert.equal(storage.getItem(config.thicknessKey), '100', 'failed resets do not restore stale saved values');
+      }
+    });
+  }
+}
 
 async function openOptions(config, mode = 'on', location = 'controls', setup = () => {}) {
   const runtime=createRuntime(config.url,{runScripts:'outside-only'});

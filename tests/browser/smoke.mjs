@@ -291,11 +291,61 @@ async function twitchPreviewSmoke(browser){
   }finally{await context.close();}
 }
 
+async function wheelSmoke(browser, platform) {
+  const youtube = platform === 'youtube';
+  const prefix = youtube ? 'tm-yt' : 'tm-twitch';
+  const { context, page } = await preparedPage(browser, {
+    platform,
+    url: youtube ? 'https://www.youtube.com/watch?v=wheel' : 'https://www.twitch.tv/wheel',
+    html: youtube ? youtubeHtml : twitchHtml,
+    storage: { [`${prefix}-volume`]: '50', [`${prefix}-muted`]: 'false', [`${prefix}-volume-slider-step`]: '5' }
+  });
+  try {
+    await page.locator('.tm-volume-icon-cell').hover();
+    await page.evaluate(() => {
+      window.__wheelEvidence = [];
+      window.addEventListener('wheel', event => {
+        queueMicrotask(() => window.__wheelEvidence.push({ prevented: event.defaultPrevented }));
+      }, true);
+    });
+    const wheel = async (delta) => {
+      const count = await page.evaluate(() => window.__wheelEvidence.length);
+      await page.mouse.wheel(0, delta);
+      await page.waitForFunction(previous => window.__wheelEvidence.length > previous, count);
+    };
+    const slider = page.locator('#tm-volume-slider-range');
+    await wheel(-100);
+    assert.equal(await slider.inputValue(), '55', `${platform}: discrete wheel input keeps one selected step`);
+    await wheel(100);
+    assert.equal(await slider.inputValue(), '50');
+    for (let index = 0; index < 10; index++) {
+      await wheel(-0.1);
+    }
+    assert.equal(await slider.inputValue(), '50', `${platform}: tiny trackpad events do not run away`);
+    await wheel(-20);
+    await wheel(-20);
+    assert.equal(await slider.inputValue(), '55', `${platform}: smooth scrolling accumulates into a step`);
+    await page.keyboard.down('Control');
+    try {
+      await wheel(-100);
+      assert.equal(await slider.inputValue(), '55', `${platform}: Ctrl+wheel does not change volume`);
+      assert.equal(await page.evaluate(() => window.__wheelEvidence.at(-1).prevented), false, `${platform}: zoom gesture is not cancelled`);
+    } finally {
+      await page.keyboard.up('Control');
+    }
+    console.log(`browser smoke: ${platform} mouse wheel, smooth scrolling, and zoom pass-through passed`);
+  } finally {
+    await context.close();
+  }
+}
+
 const browser=await chromium.launch({headless:true,executablePath,args:['--disable-background-networking','--disable-component-update','--no-first-run']});
 try{
   await youtubeSmoke(browser);
   await twitchSmoke(browser);
   await twitchPreviewSmoke(browser);
+  await wheelSmoke(browser, 'youtube');
+  await wheelSmoke(browser, 'twitch');
   console.log(`browser smoke passed with ${executablePath}`);
 }finally{
   await browser.close();

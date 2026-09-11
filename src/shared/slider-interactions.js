@@ -76,15 +76,40 @@ export function syncVolumeControl({ slider, label, overlay, value, muted, update
 }
 
 export function bindWheelVolumeStep({ target, slider, getVolumeStep, beforeApply, applyValue }) {
+  const pixelThreshold = 40;
+  const gestureGapMs = 250;
+  let accumulatedPixels = 0;
+  let lastDirection = 0;
+  let lastTime = 0;
   const handler = (event) => {
-    if (event.deltaY === 0) return;
+    if (event.ctrlKey || event.metaKey || event.defaultPrevented || !Number.isFinite(event.deltaY) || event.deltaY === 0) {
+      accumulatedPixels = 0;
+      lastDirection = 0;
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
-    const currentValue = Number(slider.value) || 0;
     const direction = event.deltaY < 0 ? 1 : -1;
+    if (direction !== lastDirection || event.timeStamp - lastTime > gestureGapMs) {
+      accumulatedPixels = 0;
+    }
+    lastDirection = direction;
+    lastTime = event.timeStamp;
+    // Accumulate smooth pixel scrolling, but retain one step per discrete
+    // mouse-wheel event, including line/page units and large pixel deltas.
+    accumulatedPixels += (event.deltaMode || 0) === 0
+      ? Math.min(Math.abs(event.deltaY), pixelThreshold)
+      : pixelThreshold;
+    if (accumulatedPixels < pixelThreshold) {
+      return;
+    }
+    accumulatedPixels -= pixelThreshold;
+    const currentValue = Number(slider.value) || 0;
     const step = getVolumeStep();
     const nextValue = stepVolume(currentValue, direction, step);
-    if (nextValue === currentValue) return;
+    if (nextValue === currentValue) {
+      return;
+    }
     beforeApply?.(event, nextValue);
     slider.value = String(nextValue);
     applyValue(nextValue);
