@@ -21,8 +21,8 @@
     "release": "node scripts/release.mjs"
   },
   "devDependencies": {
-    "esbuild": "0.25.5",
+    "esbuild": "0.28.2",
     "jsdom": "26.1.0",
-    "playwright-core": "1.61.1"
+    "playwright-core": "1.63.0"
   }
 }
