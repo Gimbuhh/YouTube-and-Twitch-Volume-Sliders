@@ -773,7 +773,8 @@ for(const config of platforms){
     assert.equal(overlayStyle.getPropertyValue('--tm-pill-min-width').trim(),'228px');
     assert.equal(overlayStyle.getPropertyValue('--tm-pill-zoom-adaptive-width').trim(),'calc(34vw - 92px)');
     assert.equal(overlayStyle.getPropertyValue('--tm-pill-max-width').trim(),'368px');
-    assert.equal(overlayStyle.getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width))');
+    // CSS serialization may omit whitespace after commas without changing the expression.
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-expanded-width').trim().replace(/,\s*/g,','),'clamp(var(--tm-pill-min-width),var(--tm-pill-zoom-adaptive-width),var(--tm-pill-max-width))');
     assert.match(style.textContent,/Browser zoom reduces the CSS viewport width/);
     assert.match(style.textContent,/@media \(max-width:\s*320px\)\s*{[^}]*--tm-pill-min-width:\s*176px/s);
     assert.match(style.textContent,/@media \(max-width:\s*320px\)[\s\S]*--tm-pill-zoom-adaptive-width:\s*min\(216px,\s*calc\(64vw - 14px\)\)/);
@@ -825,7 +826,7 @@ for(const config of platforms){
     assert.equal(overlayStyle.getPropertyValue('--tm-pill-min-width').trim(),'274px');
     assert.equal(overlayStyle.getPropertyValue('--tm-pill-zoom-adaptive-width').trim(),'calc(34vw - 46px)');
     assert.equal(overlayStyle.getPropertyValue('--tm-pill-max-width').trim(),'414px');
-    assert.equal(overlayStyle.getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width))');
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-expanded-width').trim().replace(/,\s*/g,','),'clamp(var(--tm-pill-min-width),var(--tm-pill-zoom-adaptive-width),var(--tm-pill-max-width))');
     assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/@media \(max-width:\s*320px\)[\s\S]*tm-volume-appearance-classic[\s\S]*--tm-pill-min-width:\s*196px/);
     assert.match(runtime.document.getElementById('tm-volume-slider-style').textContent,/@media \(max-width:\s*320px\)[\s\S]*tm-volume-appearance-classic[\s\S]*--tm-pill-zoom-adaptive-width:\s*min\(262px,\s*calc\(64vw \+ 6px\)\)/);
     assert.equal(runtime.window.getComputedStyle(overlay).getPropertyValue('--tm-slider-row-offset').trim(),'108px');
@@ -905,7 +906,8 @@ for(const config of platforms){
     assert.ok(overlay.classList.contains('tm-collapsed'));
     assert.equal(overlayStyle.width,'40px');
     assert.equal(overlayStyle.paddingRight,'0px');
-    assert.equal(overlayStyle.overflow,'hidden');
+    // Twitch's native control footprint clips overflow without creating a scroll container.
+    assert.equal(overlayStyle.overflow,config.file==='twitch'?'clip':'hidden');
     const sliderRowStyle=runtime.window.getComputedStyle(sliderRow);
     assert.equal(sliderRowStyle.opacity,'0');
     assert.equal(sliderRowStyle.pointerEvents,'none');
@@ -925,7 +927,7 @@ for(const config of platforms){
     const sliderRowStyle=runtime.window.getComputedStyle(sliderRow);
     const ticksStyle=runtime.window.getComputedStyle(ticks);
     const overlayStyle=runtime.window.getComputedStyle(overlay);
-    assert.equal(overlayStyle.getPropertyValue('--tm-pill-expanded-width').trim(),'clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width))');
+    assert.equal(overlayStyle.getPropertyValue('--tm-pill-expanded-width').trim().replace(/,\s*/g,','),'clamp(var(--tm-pill-min-width),var(--tm-pill-zoom-adaptive-width),var(--tm-pill-max-width))');
     assert.equal(sliderRow.style.width,'');
     assert.equal(sliderRow.style.flex,'');
     assert.equal(ticksStyle.opacity,'1');
