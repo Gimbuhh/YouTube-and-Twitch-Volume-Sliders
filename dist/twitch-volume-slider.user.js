@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.8.3
+// @version      2.9
 // @description  Compact in-bar volume indicator that expands into a wide Twitch volume slider.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
@@ -76,6 +76,340 @@
       }, debounceMs);
     }
     return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
+  }
+
+  // src/shared/normalization.js
+  var outputPercent = (value) => value > 0 ? Math.max(1, Math.round(clampVolume(value))) : 0;
+  var TARGET_RMS = 0.1;
+  function measureAudioLevel(channels) {
+    if (ArrayBuffer.isView(channels)) channels = [channels];
+    let power = 0;
+    for (const samples of channels) {
+      let sum = 0;
+      for (const sample of samples) {
+        if (!Number.isFinite(sample)) return null;
+        sum += sample * sample;
+      }
+      power = Math.max(power, sum / Math.max(1, samples.length));
+    }
+    return power;
+  }
+  function createLoudnessTracker() {
+    const history2 = [];
+    let time = 0;
+    let gain = 1;
+    return {
+      update(samples, elapsedSeconds, maxGain = 100) {
+        const measuredPower = measureAudioLevel(samples);
+        const dt = Math.min(0.25, Math.max(0, elapsedSeconds));
+        if (!Number.isFinite(dt)) return gain;
+        time += dt;
+        while (history2.length && history2[0].time <= time - 3) history2.shift();
+        if (measuredPower === null || measuredPower < 1e-4 || dt === 0) return gain;
+        history2.push({ power: measuredPower, duration: dt, time });
+        let audibleSeconds = 0, energy = 0;
+        for (const frame of history2) {
+          audibleSeconds += frame.duration;
+          energy += frame.power * frame.duration;
+        }
+        const average = energy / audibleSeconds;
+        let duration = 0, gatedEnergy = 0;
+        for (const frame of history2) {
+          if (frame.power < average * 0.1) continue;
+          duration += frame.duration;
+          gatedEnergy += frame.power * frame.duration;
+        }
+        const power = gatedEnergy / duration;
+        const reference = Math.max(power, measuredPower);
+        let desired = Math.min(maxGain, Math.max(0.1, TARGET_RMS / Math.sqrt(reference)));
+        if (audibleSeconds < 0.4) desired = Math.min(1, desired);
+        const seconds = desired < gain ? 0.12 : audibleSeconds < 3 ? 0.9 : 1.8;
+        gain = Math.exp(Math.log(gain) + (Math.log(desired) - Math.log(gain)) * (1 - Math.exp(-dt / seconds)));
+        return gain;
+      }
+    };
+  }
+  function createVolumeNormalizer({ window: window2, getVolume, setVolume, isMuted, onStatusChanged = () => {
+  } }) {
+    let enabled = false;
+    let session = null;
+    let status = "Off";
+    let lastDetails = "";
+    let lastUiUpdate = -Infinity;
+    function getDetails() {
+      if (!session || !status.startsWith("Active")) return "";
+      const { preferred, applied } = session;
+      const action = applied < preferred ? "Reducing loud audio" : applied > preferred ? "Raising quiet audio" : "Near target";
+      return `${action} \xB7 Output ${applied}% for your ${preferred}% setting`;
+    }
+    function report(next) {
+      const changed = status !== next;
+      status = next;
+      const details = getDetails();
+      const now = window2.performance.now();
+      if (!changed && (details === lastDetails || now - lastUiUpdate < 500)) return;
+      lastDetails = details;
+      lastUiUpdate = now;
+      onStatusChanged();
+    }
+    function readPreferred(owned, rawVolume) {
+      if (owned.writing) return owned.preferred;
+      const actual = clampVolume(rawVolume ?? getVolume(owned.video));
+      if (Math.abs(actual - owned.applied) > 0.6) {
+        owned.preferred = actual;
+        owned.applied = actual;
+        owned.gain = 1;
+        owned.tracker = createLoudnessTracker();
+      }
+      return owned.preferred;
+    }
+    function writeOutput(owned, value) {
+      const next = outputPercent(value);
+      if (next === owned.applied) return;
+      owned.applied = next;
+      owned.writing = true;
+      try {
+        setVolume(owned.video, next, { preserveMute: true });
+      } finally {
+        owned.writing = false;
+      }
+    }
+    function restore(owned) {
+      const preferred = readPreferred(owned);
+      owned.gain = 1;
+      writeOutput(owned, preferred);
+      owned.tracker = createLoudnessTracker();
+    }
+    function releaseCapture(owned) {
+      owned.source?.disconnect();
+      owned.splitter?.disconnect();
+      owned.analysers?.forEach((analyser) => analyser.disconnect());
+      owned.source = owned.splitter = owned.analysers = owned.track = null;
+      if (owned.stream) {
+        owned.stream.removeEventListener("addtrack", owned.onTrack);
+        for (const track of owned.stream.getTracks()) track.stop();
+        owned.stream = null;
+      }
+      if (owned.context) {
+        owned.context.close().catch(() => {
+        });
+        owned.context = null;
+      }
+    }
+    function unavailable(owned) {
+      try {
+        restore(owned);
+      } catch {
+      }
+      releaseCapture(owned);
+      owned.blocked = true;
+      report("Audio unavailable \u2014 normal volume");
+    }
+    function connectTrack(owned) {
+      for (const track2 of owned.stream.getVideoTracks()) track2.stop();
+      const track = owned.stream.getAudioTracks().find((item) => item.readyState === "live");
+      if (!track || track === owned.track) return;
+      if (owned.track) restore(owned);
+      owned.source?.disconnect();
+      owned.source = owned.context.createMediaStreamSource(new window2.MediaStream([track]));
+      owned.source.connect(owned.splitter);
+      owned.track = track;
+      owned.tracker = createLoudnessTracker();
+    }
+    function resume(owned) {
+      if (!owned.context || owned.context.state !== "suspended" || owned.resuming) return;
+      owned.resuming = true;
+      owned.context.resume().catch(() => {
+      }).finally(() => {
+        owned.resuming = false;
+      });
+    }
+    function tick() {
+      const owned = session;
+      if (!owned) return;
+      const video = owned.video;
+      if (!video.isConnected) {
+        bind(null);
+        return;
+      }
+      if (owned.blocked) return;
+      if (video.mediaKeys) {
+        unavailable(owned);
+        return;
+      }
+      if (video.paused || video.ended || video.readyState < 2) {
+        report("Waiting for playback");
+        return;
+      }
+      try {
+        if (!owned.stream) {
+          const capture = video.captureStream || video.mozCaptureStream;
+          const AudioContext = window2.AudioContext || window2.webkitAudioContext;
+          if (!capture || !AudioContext || !window2.MediaStream) {
+            owned.blocked = true;
+            report("Unavailable in this browser");
+            return;
+          }
+          owned.stream = capture.call(video);
+          owned.context = new AudioContext();
+          owned.splitter = owned.context.createChannelSplitter(6);
+          owned.analysers = Array.from({ length: 6 }, (_, channel) => {
+            const analyser = owned.context.createAnalyser();
+            analyser.fftSize = Math.min(32768, 2 ** Math.ceil(Math.log2((owned.context.sampleRate || 48e3) * 0.15)));
+            owned.splitter.connect(analyser, channel);
+            return analyser;
+          });
+          owned.samples = owned.analysers.map((analyser) => new Float32Array(analyser.fftSize));
+          owned.onTrack = () => {
+            try {
+              connectTrack(owned);
+            } catch {
+              unavailable(owned);
+            }
+          };
+          owned.stream.addEventListener("addtrack", owned.onTrack);
+          connectTrack(owned);
+          resume(owned);
+        }
+        connectTrack(owned);
+        readPreferred(owned);
+        if (owned.context.state !== "running") {
+          restore(owned);
+          report("Click the player to activate");
+          return;
+        }
+        if (!owned.track || owned.track.muted || owned.track.readyState !== "live") {
+          restore(owned);
+          report("Waiting for accessible audio");
+          return;
+        }
+        if (isMuted(video) || owned.preferred === 0) {
+          report("Muted");
+          return;
+        }
+        owned.analysers.forEach((analyser, channel) => analyser.getFloatTimeDomainData(owned.samples[channel]));
+        const now = window2.performance.now();
+        const dt = (now - owned.lastSample) / 1e3;
+        owned.lastSample = now;
+        owned.gain = owned.tracker.update(owned.samples, dt, 100 / Math.max(1, owned.preferred));
+        writeOutput(owned, owned.preferred * owned.gain);
+        report(owned.applied === 100 && owned.gain > 1 ? "Active \u2014 at volume limit" : "Active");
+      } catch {
+        unavailable(owned);
+      }
+    }
+    function bind(video) {
+      if (session?.video === video) return;
+      if (session) {
+        const owned2 = session;
+        if (owned2.video.isConnected) restore(owned2);
+        session = null;
+        window2.clearInterval(owned2.timer);
+        for (const type of ["emptied", "loadstart"]) owned2.video.removeEventListener(type, owned2.reset);
+        for (const type of ["playing", "loadedmetadata"]) owned2.video.removeEventListener(type, owned2.retry);
+        window2.document.removeEventListener("pointerdown", owned2.gesture, true);
+        window2.document.removeEventListener("keydown", owned2.gesture, true);
+        releaseCapture(owned2);
+      }
+      if (!enabled || !video) {
+        report(enabled ? "Waiting for playback" : "Off");
+        return;
+      }
+      const preferred = clampVolume(getVolume(video));
+      const owned = session = {
+        video,
+        preferred,
+        applied: preferred,
+        gain: 1,
+        tracker: createLoudnessTracker(),
+        lastSample: window2.performance.now(),
+        blocked: false
+      };
+      owned.reset = () => {
+        restore(owned);
+        releaseCapture(owned);
+        owned.blocked = false;
+        report("Waiting for playback");
+      };
+      owned.retry = () => {
+        owned.blocked = false;
+        tick();
+      };
+      owned.gesture = () => {
+        resume(owned);
+        tick();
+      };
+      for (const type of ["emptied", "loadstart"]) video.addEventListener(type, owned.reset);
+      for (const type of ["playing", "loadedmetadata"]) video.addEventListener(type, owned.retry);
+      window2.document.addEventListener("pointerdown", owned.gesture, true);
+      window2.document.addEventListener("keydown", owned.gesture, true);
+      owned.timer = window2.setInterval(tick, 100);
+      tick();
+    }
+    return {
+      bind,
+      setEnabled(value) {
+        enabled = !!value;
+        if (!enabled) bind(null);
+        else if (!session) report("Waiting for playback");
+      },
+      getStatus: () => status,
+      getDetails,
+      getPreferredVolume(video, rawVolume) {
+        return session?.video === video ? readPreferred(session, rawVolume) : rawVolume;
+      },
+      setPreferredVolume(video, value, options) {
+        let output = clampVolume(value);
+        const owned = session?.video === video ? session : null;
+        if (owned) {
+          owned.preferred = output;
+          output = outputPercent(output * owned.gain);
+          owned.applied = output;
+          owned.writing = true;
+        }
+        try {
+          setVolume(video, output, options);
+        } finally {
+          if (owned) owned.writing = false;
+        }
+      }
+    };
+  }
+
+  // src/shared/normalization-ui.js
+  function createNormalizationIcon(document2) {
+    const icon = document2.createElement("span");
+    icon.className = "tm-normalization-icon";
+    icon.hidden = true;
+    icon.title = "Auto-normalize volume is on";
+    icon.setAttribute("aria-hidden", "true");
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document2.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 14 14");
+    svg.setAttribute("focusable", "false");
+    const frame = document2.createElementNS(ns, "circle");
+    frame.setAttribute("cx", "7");
+    frame.setAttribute("cy", "7");
+    frame.setAttribute("r", "6.5");
+    const waveform = document2.createElementNS(ns, "path");
+    waveform.setAttribute("d", "M3.5 5.5v3 M7 3.5v7 M10.5 5.5v3");
+    svg.append(frame, waveform);
+    icon.append(svg);
+    return icon;
+  }
+  function updateNormalizationIcon(overlay, enabled) {
+    if (!overlay) return;
+    const icon = overlay.querySelector(".tm-normalization-icon");
+    const description = overlay.querySelector(".tm-normalization-description");
+    if (!icon || !description) return;
+    overlay.classList.toggle("tm-normalization-enabled", enabled);
+    icon.hidden = !enabled;
+    for (const control of overlay.querySelectorAll('.tm-volume-icon-cell, input[type="range"]')) {
+      const ids = (control.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== description.id);
+      if (enabled) ids.push(description.id);
+      if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
+      else control.removeAttribute("aria-describedby");
+    }
   }
 
   // src/shared/overlay-ui.js
@@ -516,6 +850,10 @@
       setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
+      isNormalizationEnabled,
+      setNormalizationEnabled,
+      getNormalizationStatus,
+      getNormalizationDetails,
       getVolumeStep,
       setVolumeStep,
       isAlwaysExpandedEnabled,
@@ -565,6 +903,18 @@
         });
       });
     }
+    function syncNormalizationStatus(popup) {
+      if (!popup) return;
+      const normalizationStatus = popup.querySelector("#tm-volume-options-normalization-status");
+      const status = getNormalizationStatus();
+      if (normalizationStatus && normalizationStatus.textContent !== status) normalizationStatus.textContent = status;
+      const normalizationDetails = popup.querySelector("#tm-volume-options-normalization-details");
+      const details = getNormalizationDetails();
+      if (normalizationDetails) {
+        if (normalizationDetails.textContent !== details) normalizationDetails.textContent = details;
+        normalizationDetails.hidden = !details;
+      }
+    }
     function syncOptionsPopupState(popup) {
       if (!popup) return;
       const selectedMode = getVolumeSliderMode();
@@ -572,6 +922,8 @@
       const selectedAppearance = getVolumeAppearance();
       const selectedStep = getVolumeStep();
       const onVideo = isSliderOnVideo();
+      popup.querySelector("#tm-volume-options-normalization")?.setAttribute("aria-checked", isNormalizationEnabled() ? "true" : "false");
+      syncNormalizationStatus(popup);
       ["on", "off", "replace-native"].forEach((mode) => {
         popup.querySelector(`#tm-volume-options-mode-${mode}`)?.setAttribute("aria-checked", selectedMode === mode ? "true" : "false");
       });
@@ -781,6 +1133,41 @@
       section.appendChild(segment);
       return section;
     }
+    function createNormalizationSection() {
+      const section = document2.createElement("div");
+      section.className = "tm-volume-options-section";
+      section.appendChild(createOptionsSectionLabel("Audio"));
+      const list = document2.createElement("div");
+      list.className = "tm-volume-options-checklist";
+      const toggle = createOptionsCheckboxRow(
+        "tm-volume-options-normalization",
+        "Auto-normalize volume",
+        isNormalizationEnabled(),
+        setNormalizationEnabled
+      );
+      toggle.setAttribute("aria-describedby", "tm-volume-options-normalization-help tm-volume-options-normalization-status");
+      list.appendChild(toggle);
+      section.appendChild(list);
+      const help = document2.createElement("p");
+      help.id = "tm-volume-options-normalization-help";
+      help.className = "tm-volume-options-help";
+      help.textContent = "Keeps sources closer in loudness. Your slider sets the listening level. Increases are limited to normal player volume.";
+      section.appendChild(help);
+      const status = document2.createElement("p");
+      status.id = "tm-volume-options-normalization-status";
+      status.className = "tm-volume-options-help";
+      status.setAttribute("role", "status");
+      status.textContent = getNormalizationStatus();
+      section.appendChild(status);
+      const details = document2.createElement("p");
+      details.id = "tm-volume-options-normalization-details";
+      details.className = "tm-volume-options-help";
+      details.setAttribute("aria-live", "off");
+      details.textContent = getNormalizationDetails();
+      details.hidden = !details.textContent;
+      section.appendChild(details);
+      return section;
+    }
     function createAppearanceSection() {
       const section = document2.createElement("div");
       section.className = "tm-volume-options-section";
@@ -986,6 +1373,7 @@
       body.appendChild(createAppearanceSection());
       body.appendChild(createVolumeStepSection());
       body.appendChild(createBehaviorSection());
+      body.appendChild(createNormalizationSection());
       body.appendChild(createThicknessSection());
       body.appendChild(createOpacitySection());
       body.appendChild(createSizeSection());
@@ -994,7 +1382,7 @@
       popup.addEventListener("click", (event) => event.stopPropagation());
       return popup;
     }
-    return { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview };
+    return { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview };
   }
 
   // src/shared/settings.js
@@ -1048,6 +1436,8 @@
     overlayId,
     onPlacementChanged,
     onModeChanged,
+    onNormalizationChanged = () => {
+    },
     clearExpandedHold,
     setOverlayExpanded,
     collapseOverlayIfIdle,
@@ -1184,6 +1574,13 @@
       if (keys.legacySnap) remove(keys.legacySnap);
       updateVolumeStepUi(getOverlay());
     }
+    function isNormalizationEnabled() {
+      return normalizeBooleanSetting(userSettings.normalizeVolume) ?? read(keys.normalization) === "true";
+    }
+    function setNormalizationEnabled(enabled) {
+      write(keys.normalization, enabled ? "true" : "false");
+      onNormalizationChanged();
+    }
     function isAlwaysExpandedEnabled() {
       const override = normalizeBooleanSetting(userSettings.alwaysExpanded);
       return override ?? read(keys.expanded) === "true";
@@ -1316,6 +1713,8 @@
     const isNativeVolumeReplacementEnabled = () => getVolumeSliderMode() === "replace-native";
     const shouldUseNativeReplacementSlot = () => isNativeVolumeReplacementEnabled() && getReplaceNativePlacement() === "native";
     return {
+      isNormalizationEnabled,
+      setNormalizationEnabled,
       getVolumeSliderMode,
       getReplaceNativePlacement,
       isSliderOnVideo,
@@ -1630,6 +2029,13 @@
                 display: flex;
                 flex-direction: column;
             }
+            #{{optionsPopupId}} .tm-volume-options-help {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                line-height: 1.4;
+                margin: 6px 0 0;
+                white-space: normal;
+            }
             #{{optionsPopupId}} .tm-volume-options-checklist .tm-volume-options-row {
                 align-items: center;
                 column-gap: 12px;
@@ -1936,6 +2342,7 @@
   --tm-pill-expanded-width: clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width));
   --tm-label-row-width: 50px;
   --tm-slider-row-offset: 62px;
+  --tm-normalization-accent: {{normalizationAccent}};
   filter: {{panelDropShadow}};
 }
 {{platformFootprintCss}}
@@ -2091,6 +2498,55 @@
   outline: 2px solid #fff;
   outline-offset: -4px;
   border-radius: 50%;
+}
+
+#{{overlayId}}.tm-normalization-enabled {
+  /* Keep the inset waveform visible at the pill's rounded edge. */
+  overflow: clip !important;
+  overflow-clip-margin: 8px;
+}
+
+#{{overlayId}} .tm-normalization-icon {
+  position: absolute;
+  left: 28px;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  display: block;
+  pointer-events: auto;
+}
+
+#{{overlayId}} .tm-normalization-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#{{overlayId}} .tm-normalization-icon circle {
+  fill: #17171b;
+  stroke: var(--tm-normalization-accent);
+  stroke-width: 1;
+}
+
+#{{overlayId}} .tm-normalization-icon path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+#{{overlayId}} .tm-normalization-icon[hidden] {
+  display: none;
+}
+
+#{{overlayId}} .tm-normalization-description {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 #{{overlayId}} .tm-volume-indicator {
@@ -2330,6 +2786,7 @@
       overlayId,
       valueLabelId,
       panelDropShadow,
+      normalizationAccent: platform === "twitch" ? "#a970ff" : "#cc4444",
       ...getSliderPlatformStyles(platform, overlayId)
     });
   }
@@ -2351,6 +2808,12 @@
     indicator.className = "tm-volume-indicator";
     indicator.appendChild(makeVolumeIndicatorSvg());
     iconCell.appendChild(indicator);
+    const normalizationIcon = createNormalizationIcon(document2);
+    const normalizationDescription = document2.createElement("span");
+    normalizationDescription.className = "tm-normalization-description";
+    normalizationDescription.id = `${overlay.id}-normalization-description`;
+    normalizationDescription.textContent = normalizationIcon.title;
+    iconCell.append(normalizationIcon, normalizationDescription);
     const panelBg = document2.createElement("div");
     panelBg.className = "tm-volume-panel-bg";
     const topRow = document2.createElement("div");
@@ -2759,7 +3222,9 @@
       // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 75
       sliderThickness: "saved",
       // Volume icon style: 'saved', 'new', or 'classic'. Default: 'saved'
-      volumeAppearance: "saved"
+      volumeAppearance: "saved",
+      // Loudness normalization: 'saved', true, or false. Default: off
+      normalizeVolume: "saved"
     };
     let cachedApi = null;
     let cachedApiFromElement = null;
@@ -2784,17 +3249,18 @@
     const NAV_REATTACH_DELAY_MS = 700;
     const NAV_LATE_RESTORE_DELAY_MS = 4200;
     const NAV_DEBOUNCE_MS = 180;
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
       document,
       storage,
       userSettings: USER_SETTINGS,
       overlayId: OVERLAY_ID,
-      keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+      keys: { normalization: "tm-twitch-volume-slider-normalization", mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
       defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
       onPlacementChanged: () => {
         attachSliderIfPossible();
         applyNativeVolumeVisibility();
       },
+      onNormalizationChanged: () => syncNormalization(),
       onModeChanged: (mode) => {
         if (mode === "off") removeOverlay();
         else attachSliderIfPossible();
@@ -2802,6 +3268,7 @@
         injectVolumeOptionsButton();
         refreshOptionsPopupState();
         updateOptionsButtonState();
+        syncNormalization();
       },
       clearExpandedHold: (overlay) => clearExpandedHold(overlay),
       setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
@@ -2811,6 +3278,20 @@
         return document.getElementById(OVERLAY_ID);
       }
     });
+    const normalizer = createVolumeNormalizer({
+      window,
+      getVolume: getRawVolume,
+      setVolume: setRawVolume,
+      isMuted,
+      onStatusChanged: () => syncNormalizationStatus(getOptionsPopup())
+    });
+    function syncNormalization() {
+      const enabled = isNormalizationEnabled() && isOverlayEnabled();
+      normalizer.setEnabled(enabled);
+      normalizer.bind(overlayLifecycle.active?.root?._tmVolumeVideo || null);
+      refreshOptionsPopupState();
+      updateNormalizationIcon(document.getElementById(OVERLAY_ID), enabled);
+    }
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
       window,
       storage,
@@ -3088,19 +3569,12 @@
       return null;
     }
     function getVolume(video) {
-      try {
-        const api = getTwitchPlayerApi(video);
-        if (api) {
-          if (api.isMuted && api.isMuted()) return 0;
-          const vol2 = api.getVolume();
-          return Math.round((typeof vol2 === "number" ? vol2 : 0) * 100);
-        }
-      } catch (e) {
-      }
-      const vol = (video.muted ? 0 : video.volume) || 0;
-      return Math.round(vol * 100);
+      return isMuted(video) ? 0 : getUnderlyingVolume(video);
     }
     function getUnderlyingVolume(video) {
+      return normalizer.getPreferredVolume(video, getRawVolume(video));
+    }
+    function getRawVolume(video) {
       try {
         const api = getTwitchPlayerApi(video);
         if (api) {
@@ -3116,6 +3590,9 @@
       video.muted = video.defaultMuted = !!muted;
     }
     function setVolume(video, value, options = {}) {
+      normalizer.setPreferredVolume(video, value, options);
+    }
+    function setRawVolume(video, value, options = {}) {
       const preserveMute = options.preserveMute === true;
       const api = getTwitchPlayerApi(video);
       if (api) {
@@ -3349,7 +3826,7 @@
       const popup = getOptionsPopup();
       return !!popup && !popup.hasAttribute("hidden");
     }
-    const { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview } = createOptionsUi({
       document,
       optionsPopupId: OPTIONS_POPUP_ID,
       refreshOptionsPopupState,
@@ -3359,6 +3836,10 @@
       setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
+      isNormalizationEnabled,
+      setNormalizationEnabled,
+      getNormalizationStatus: () => normalizer.getStatus(),
+      getNormalizationDetails: () => normalizer.getDetails(),
       getVolumeStep,
       setVolumeStep,
       isAlwaysExpandedEnabled,
@@ -3873,6 +4354,7 @@
       return overlay;
     }
     function disposeActiveOverlay() {
+      normalizer.bind(null);
       stopOptionsPreview();
       cancelDelayedFirstAttachRestore();
       overlayLifecycle.dispose();
@@ -3938,6 +4420,7 @@
       injectVolumeOptionsButton();
       ensureNativeSettingsHoldIsolation();
       ensureAttachObserver();
+      syncNormalization();
       return true;
     }
     function getAttachObserverRoot() {

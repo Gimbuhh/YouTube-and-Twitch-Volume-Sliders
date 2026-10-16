@@ -1,3 +1,5 @@
+import { createVolumeNormalizer } from '../shared/normalization.js';
+import { updateNormalizationIcon } from '../shared/normalization-ui.js';
 import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
@@ -84,7 +86,9 @@ export function startTwitchVolumeSlider() {
         // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 75
         sliderThickness: 'saved',
         // Volume icon style: 'saved', 'new', or 'classic'. Default: 'saved'
-        volumeAppearance: 'saved'
+        volumeAppearance: 'saved',
+        // Loudness normalization: 'saved', true, or false. Default: off
+        normalizeVolume: 'saved'
     };
 
     let cachedApi = null;
@@ -119,12 +123,13 @@ export function startTwitchVolumeSlider() {
 
 
 
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+        keys: { normalization: 'tm-twitch-volume-slider-normalization', mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
-        onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
+        onNormalizationChanged: () => syncNormalization(),
+        onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); syncNormalization(); },
         clearExpandedHold: (overlay) => clearExpandedHold(overlay),
         setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
         collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force),
@@ -133,6 +138,19 @@ export function startTwitchVolumeSlider() {
             return document.getElementById(OVERLAY_ID);
         }
     });
+    const normalizer = createVolumeNormalizer({
+        window, getVolume: getRawVolume, setVolume: setRawVolume, isMuted,
+        onStatusChanged: () => syncNormalizationStatus(getOptionsPopup())
+    });
+
+    function syncNormalization() {
+        const enabled = isNormalizationEnabled() && isOverlayEnabled();
+        normalizer.setEnabled(enabled);
+        normalizer.bind(overlayLifecycle.active?.root?._tmVolumeVideo || null);
+        refreshOptionsPopupState();
+        updateNormalizationIcon(document.getElementById(OVERLAY_ID), enabled);
+    }
+
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
         window, storage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
         getVolumeStep
@@ -513,19 +531,14 @@ export function startTwitchVolumeSlider() {
      * Get effective volume (0 when muted, else 0-100). Use for display when unmuted.
      */
     function getVolume(video) {
-        try {
-            const api = getTwitchPlayerApi(video);
-            if (api) {
-                if (api.isMuted && api.isMuted()) return 0;
-                const vol = api.getVolume();
-                return Math.round((typeof vol === 'number' ? vol : 0) * 100);
-            }
-        } catch (e) { /* fall through */ }
-        const vol = (video.muted ? 0 : video.volume) || 0;
-        return Math.round(vol * 100);
+        return isMuted(video) ? 0 : getUnderlyingVolume(video);
     }
 
     function getUnderlyingVolume(video) {
+        return normalizer.getPreferredVolume(video, getRawVolume(video));
+    }
+
+    function getRawVolume(video) {
         try {
             const api = getTwitchPlayerApi(video);
             if (api) {
@@ -545,6 +558,10 @@ export function startTwitchVolumeSlider() {
     }
 
     function setVolume(video, value, options = {}) {
+        normalizer.setPreferredVolume(video, value, options);
+    }
+
+    function setRawVolume(video, value, options = {}) {
         const preserveMute = options.preserveMute === true;
         const api = getTwitchPlayerApi(video);
         if (api) {
@@ -817,10 +834,12 @@ export function startTwitchVolumeSlider() {
     }
 
 
-    const { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         getVolumeAppearance, setVolumeAppearance,
+        isNormalizationEnabled, setNormalizationEnabled, getNormalizationStatus: () => normalizer.getStatus(),
+        getNormalizationDetails: () => normalizer.getDetails(),
         getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
         isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
         setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
@@ -1388,6 +1407,7 @@ export function startTwitchVolumeSlider() {
     }
 
     function disposeActiveOverlay() {
+        normalizer.bind(null);
         stopOptionsPreview();
         cancelDelayedFirstAttachRestore();
         overlayLifecycle.dispose();
@@ -1462,6 +1482,7 @@ export function startTwitchVolumeSlider() {
         injectVolumeOptionsButton();
         ensureNativeSettingsHoldIsolation();
         ensureAttachObserver();
+        syncNormalization();
         return true;
     }
 

@@ -1,4 +1,5 @@
 import { stepVolume } from './volume.js';
+import { createNormalizationIcon } from './normalization-ui.js';
 
 export function createVolumeControlElements({
   document,
@@ -17,6 +18,13 @@ export function createVolumeControlElements({
   indicator.className = 'tm-volume-indicator';
   indicator.appendChild(makeVolumeIndicatorSvg());
   iconCell.appendChild(indicator);
+
+  const normalizationIcon = createNormalizationIcon(document);
+  const normalizationDescription = document.createElement('span');
+  normalizationDescription.className = 'tm-normalization-description';
+  normalizationDescription.id = `${overlay.id}-normalization-description`;
+  normalizationDescription.textContent = normalizationIcon.title;
+  iconCell.append(normalizationIcon, normalizationDescription);
 
   const panelBg = document.createElement('div');
   panelBg.className = 'tm-volume-panel-bg';

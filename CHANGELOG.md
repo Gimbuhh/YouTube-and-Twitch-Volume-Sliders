@@ -2,6 +2,21 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.9 - Unreleased
+
+### Added
+
+- **Both:** **Auto-normalize volume** keeps sources closer in loudness while preserving the chosen slider value and mute state.
+  - The option starts disabled, saves separately for each site, and shows its current status under Audio in Volume Slider Options.
+  - Automatic corrections reduce louder sources, gradually raise quieter ones within the player's normal volume range, and leave silence and very low background levels alone.
+  - Channel-aware measurements and recent active audio improve matching across stereo content and speech; quiet sources can use the full remaining range up to 100%, with the adjusted output shown in Options.
+  - A small, static waveform icon tucked into the volume ring's upper-right edge indicates that normalization is enabled, with a slight overlap on the outer arc and a clear volume number. The original layout and round background stay unchanged. It hides when the option is off; current status and adjusted output remain available in Audio settings.
+  - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.
+
+### Known limitations
+
+- **Both:** Normalization requires supported browser audio capture and an accessible stream. Approximate loudness leveling cannot anticipate a new source's first loud moment or eliminate all perceived differences.
+
 ## 2.8.3 - 2026-09-11
 
 ### Fixed

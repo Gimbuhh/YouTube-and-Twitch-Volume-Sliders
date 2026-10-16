@@ -1,3 +1,5 @@
+import { createVolumeNormalizer } from '../shared/normalization.js';
+import { updateNormalizationIcon } from '../shared/normalization-ui.js';
 import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
@@ -78,7 +80,9 @@ export function startYouTubeVolumeSlider() {
         // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 75
         sliderThickness: 'saved',
         // Volume icon style: 'saved', 'new', or 'classic'. Default: 'saved'
-        volumeAppearance: 'saved'
+        volumeAppearance: 'saved',
+        // Loudness normalization: 'saved', true, or false. Default: off
+        normalizeVolume: 'saved'
     };
 
     let cachedYtPlayer = null;
@@ -101,12 +105,13 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+        keys: { normalization: 'tm-yt-volume-slider-normalization', mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
-        onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
+        onNormalizationChanged: () => syncNormalization(),
+        onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); syncNormalization(); },
         clearExpandedHold: (overlay) => clearExpandedHold(overlay),
         setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
         collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force),
@@ -115,6 +120,19 @@ export function startYouTubeVolumeSlider() {
             return document.getElementById(OVERLAY_ID);
         }
     });
+    const normalizer = createVolumeNormalizer({
+        window, getVolume: getRawVolume, setVolume: setRawVolume, isMuted,
+        onStatusChanged: () => syncNormalizationStatus(getOptionsPopup())
+    });
+
+    function syncNormalization() {
+        const enabled = isNormalizationEnabled() && isOverlayEnabled();
+        normalizer.setEnabled(enabled);
+        normalizer.bind(overlayLifecycle.active?.root?._tmVolumeVideo || null);
+        refreshOptionsPopupState();
+        updateNormalizationIcon(document.getElementById(OVERLAY_ID), enabled);
+    }
+
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
         window, storage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
         getVolumeStep
@@ -344,20 +362,14 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Get volume from YouTube's player API (0-100), falling back to video element.
      */
     function getVolume(video) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) {
-            const isMuted = ytPlayer.isMuted();
-            if (isMuted) {
-                return 0;
-            }
-            return ytPlayer.getVolume();
-        }
-        // Fallback to video element
-        const vol = (video.muted ? 0 : video.volume) || 0;
-        return Math.round(vol * 100);
+        return isMuted(video) ? 0 : getUnderlyingVolume(video);
     }
 
     function getUnderlyingVolume(video) {
+        return normalizer.getPreferredVolume(video, getRawVolume(video));
+    }
+
+    function getRawVolume(video) {
         const ytPlayer = getYouTubePlayer();
         if (ytPlayer) return Math.round(ytPlayer.getVolume());
         return Math.round((Number(video?.volume) || 0) * 100);
@@ -406,17 +418,21 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     /**
      * Set volume using YouTube's player API (0-100), falling back to video element.
      */
-    function setVolume(video, value) {
+    function setVolume(video, value, options = {}) {
+        normalizer.setPreferredVolume(video, value, options);
+    }
+
+    function setRawVolume(video, value, options = {}) {
         const ytPlayer = getYouTubePlayer();
         if (ytPlayer) {
-            if (ytPlayer.isMuted()) {
+            if (!options.preserveMute && ytPlayer.isMuted()) {
                 ytPlayer.unMute();
             }
             ytPlayer.setVolume(value);
         } else {
             // Fallback to video element
             video.volume = value / 100;
-            video.muted = false;
+            if (!options.preserveMute) video.muted = false;
         }
     }
 
@@ -574,10 +590,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
 
-    const { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         getVolumeAppearance, setVolumeAppearance,
+        isNormalizationEnabled, setNormalizationEnabled, getNormalizationStatus: () => normalizer.getStatus(),
+        getNormalizationDetails: () => normalizer.getDetails(),
         getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
         isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
         setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
@@ -1004,6 +1022,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function disposeActiveOverlay() {
+        normalizer.bind(null);
         stopOptionsPreview();
         requestedVolumeIntent = null;
         overlayLifecycle.dispose();
@@ -1061,6 +1080,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         injectVolumeOptionsButton();
         ensurePlayerControlsObserver();
         ensureAttachObserver();
+        syncNormalization();
         return true;
     }
 

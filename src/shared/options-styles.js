@@ -125,6 +125,13 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 display: flex;
                 flex-direction: column;
             }
+            #{{optionsPopupId}} .tm-volume-options-help {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                line-height: 1.4;
+                margin: 6px 0 0;
+                white-space: normal;
+            }
             #{{optionsPopupId}} .tm-volume-options-checklist .tm-volume-options-row {
                 align-items: center;
                 column-gap: 12px;

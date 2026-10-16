@@ -5,6 +5,7 @@ export function createOptionsUi(dependencies) {
     document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
     getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
     getVolumeAppearance, setVolumeAppearance,
+    isNormalizationEnabled, setNormalizationEnabled, getNormalizationStatus, getNormalizationDetails,
     getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
     setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
@@ -47,6 +48,19 @@ export function createOptionsUi(dependencies) {
         });
     }
 
+    function syncNormalizationStatus(popup) {
+        if (!popup) return;
+        const normalizationStatus = popup.querySelector('#tm-volume-options-normalization-status');
+        const status = getNormalizationStatus();
+        if (normalizationStatus && normalizationStatus.textContent !== status) normalizationStatus.textContent = status;
+        const normalizationDetails = popup.querySelector('#tm-volume-options-normalization-details');
+        const details = getNormalizationDetails();
+        if (normalizationDetails) {
+            if (normalizationDetails.textContent !== details) normalizationDetails.textContent = details;
+            normalizationDetails.hidden = !details;
+        }
+    }
+
     function syncOptionsPopupState(popup) {
         if (!popup) return;
 
@@ -55,6 +69,10 @@ export function createOptionsUi(dependencies) {
         const selectedAppearance = getVolumeAppearance();
         const selectedStep = getVolumeStep();
         const onVideo = isSliderOnVideo();
+
+        popup.querySelector('#tm-volume-options-normalization')
+            ?.setAttribute('aria-checked', isNormalizationEnabled() ? 'true' : 'false');
+        syncNormalizationStatus(popup);
 
         ['on', 'off', 'replace-native'].forEach((mode) => {
             popup.querySelector(`#tm-volume-options-mode-${mode}`)
@@ -299,6 +317,40 @@ export function createOptionsUi(dependencies) {
         return section;
     }
 
+    function createNormalizationSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+        section.appendChild(createOptionsSectionLabel('Audio'));
+        const list = document.createElement('div');
+        list.className = 'tm-volume-options-checklist';
+        const toggle = createOptionsCheckboxRow(
+            'tm-volume-options-normalization', 'Auto-normalize volume',
+            isNormalizationEnabled(), setNormalizationEnabled
+        );
+        toggle.setAttribute('aria-describedby', 'tm-volume-options-normalization-help tm-volume-options-normalization-status');
+        list.appendChild(toggle);
+        section.appendChild(list);
+        const help = document.createElement('p');
+        help.id = 'tm-volume-options-normalization-help';
+        help.className = 'tm-volume-options-help';
+        help.textContent = 'Keeps sources closer in loudness. Your slider sets the listening level. Increases are limited to normal player volume.';
+        section.appendChild(help);
+        const status = document.createElement('p');
+        status.id = 'tm-volume-options-normalization-status';
+        status.className = 'tm-volume-options-help';
+        status.setAttribute('role', 'status');
+        status.textContent = getNormalizationStatus();
+        section.appendChild(status);
+        const details = document.createElement('p');
+        details.id = 'tm-volume-options-normalization-details';
+        details.className = 'tm-volume-options-help';
+        details.setAttribute('aria-live', 'off');
+        details.textContent = getNormalizationDetails();
+        details.hidden = !details.textContent;
+        section.appendChild(details);
+        return section;
+    }
+
     function createAppearanceSection() {
         const section = document.createElement('div');
         section.className = 'tm-volume-options-section';
@@ -526,6 +578,7 @@ export function createOptionsUi(dependencies) {
         body.appendChild(createAppearanceSection());
         body.appendChild(createVolumeStepSection());
         body.appendChild(createBehaviorSection());
+        body.appendChild(createNormalizationSection());
         body.appendChild(createThicknessSection());
         body.appendChild(createOpacitySection());
         body.appendChild(createSizeSection());
@@ -536,5 +589,5 @@ export function createOptionsUi(dependencies) {
         return popup;
     }
 
-  return { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview };
+  return { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview };
 }
