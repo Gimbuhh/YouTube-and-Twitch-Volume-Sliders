@@ -1,4 +1,6 @@
 import { clampVolume } from './volume.js';
+import { createLufsAnalysis } from './lufs-analysis.js';
+import { createLufsGainController } from './lufs-meter.js';
 
 // Player APIs round percentages; a positive preference must stay audible.
 const outputPercent = (value) => value > 0 ? Math.max(1, Math.round(clampVolume(value))) : 0;
@@ -21,10 +23,10 @@ export function measureAudioLevel(channels) {
 }
 
 // A gated RMS approximation; this is not a LUFS meter or peak limiter.
-export function createLoudnessTracker() {
+export function createLoudnessTracker(initialGain = 1) {
   const history = [];
   let time = 0;
-  let gain = 1;
+  let gain = initialGain;
   return {
     update(samples, elapsedSeconds, maxGain = 100) {
       const measuredPower = measureAudioLevel(samples);
@@ -106,6 +108,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       owned.applied = actual;
       owned.gain = 1;
       owned.tracker = createLoudnessTracker();
+      owned.lufsTracker = null;
     }
     return owned.preferred;
   }
@@ -124,9 +127,13 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     owned.gain = 1;
     writeOutput(owned, preferred);
     owned.tracker = createLoudnessTracker();
+    owned.lufsTracker = null;
   }
 
   function releaseCapture(owned) {
+    owned.lufs?.dispose();
+    owned.lufs = null;
+    owned.lastLufsFrame = null;
     owned.source?.disconnect();
     owned.splitter?.disconnect();
     owned.analysers?.forEach((analyser) => analyser.disconnect());
@@ -154,11 +161,27 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     const track = owned.stream.getAudioTracks().find((item) => item.readyState === 'live');
     if (!track || track === owned.track) return;
     if (owned.track) restore(owned);
+    owned.lufs?.dispose();
+    owned.lastLufsFrame = null;
     owned.source?.disconnect();
     owned.source = owned.context.createMediaStreamSource(new window.MediaStream([track]));
     owned.source.connect(owned.splitter);
     owned.track = track;
     owned.tracker = createLoudnessTracker();
+    owned.lufsTracker = null;
+    owned.lufs = createLufsAnalysis({ window, context: owned.context, source: owned.source,
+      onFrame: frame => {
+        if (session !== owned) return;
+        owned.lastLufsFrame = window.performance.now();
+        if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== 'live' || isMuted(owned.video) || owned.preferred === 0 || owned.context.state !== 'running') return;
+        owned.lufsTracker ||= createLufsGainController(owned.gain);
+        owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
+      },
+      onFailure: () => {
+        owned.lastLufsFrame = null;
+        owned.tracker = createLoudnessTracker(owned.gain);
+      }
+    });
   }
 
   function resume(owned) {
@@ -221,11 +244,19 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         report('Muted');
         return;
       }
-      owned.analysers.forEach((analyser, channel) => analyser.getFloatTimeDomainData(owned.samples[channel]));
       const now = window.performance.now();
       const dt = (now - owned.lastSample) / 1000;
       owned.lastSample = now;
-      owned.gain = owned.tracker.update(owned.samples, dt, 100 / Math.max(1, owned.preferred));
+      if (owned.lastLufsFrame == null || now - owned.lastLufsFrame > 500) {
+        if (owned.lastLufsFrame != null) {
+          owned.lufs?.dispose();
+          owned.lufs = null;
+          owned.lastLufsFrame = null;
+          owned.tracker = createLoudnessTracker(owned.gain);
+        }
+        owned.analysers.forEach((analyser, channel) => analyser.getFloatTimeDomainData(owned.samples[channel]));
+        owned.gain = owned.tracker.update(owned.samples, dt, 100 / Math.max(1, owned.preferred));
+      }
       writeOutput(owned, owned.preferred * owned.gain);
       // A quiet measurement does not mean the live capture source disappeared.
       report(owned.applied === 100 && owned.gain > 1 ? 'Active — at volume limit' : 'Active');

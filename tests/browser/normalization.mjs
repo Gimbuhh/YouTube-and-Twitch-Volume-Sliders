@@ -15,7 +15,7 @@ if (!executablePath) {
   process.exit(0);
 }
 
-function wav(amplitude, channels = 1) {
+function wav(amplitude, channels = 1, frequency = 440) {
   const rate = 48000, count = rate * 15;
   const bytes = Buffer.alloc(44 + count * channels * 2);
   bytes.write('RIFF', 0); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write('WAVEfmt ', 8);
@@ -24,7 +24,7 @@ function wav(amplitude, channels = 1) {
   bytes.write('data', 36); bytes.writeUInt32LE(count * channels * 2, 40);
   for (let i = 0; i < count; i++) {
     const level = typeof amplitude === 'function' ? amplitude(i / rate) : amplitude;
-    const sample = Math.round(32767 * level * Math.sin(2 * Math.PI * 440 * i / rate));
+    const sample = Math.round(32767 * level * Math.sin(2 * Math.PI * frequency * i / rate));
     for (let channel = 0; channel < channels; channel++) bytes.writeInt16LE(channel === 1 ? -sample : sample, 44 + (i * channels + channel) * 2);
   }
   return bytes;
@@ -34,9 +34,12 @@ const loud = wav(0.7), quiet = wav(0.06), stereo = wav(0.7, 2);
 const burst = wav(time => time < 4 ? 0.06 : 0.7);
 // Continuous audible tone with a changing envelope, never digital silence.
 const soft = wav(time => 0.016 + 0.012 * Math.sin(2 * Math.PI * time));
+const bass = wav(0.2, 1, 80), high = wav(0.2, 1, 4000);
 const browser = await chromium.launch({ headless: true, executablePath, args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--no-first-run'] });
 try {
-  for (const [platform, preferred] of ['youtube', 'twitch'].flatMap(platform => [30, 40].map(preferred => [platform, preferred]))) {
+  const cases = ['youtube', 'twitch'].flatMap(platform => [30, 40].map(preferred => [platform, preferred, 'lufs']));
+  cases.push(['youtube', 30, 'blocked'], ['twitch', 40, 'unsupported']);
+  for (const [platform, preferred, engine] of cases) {
     const youtube = platform === 'youtube';
     const prefix = youtube ? 'yt' : 'twitch';
     const origin = youtube ? 'https://www.youtube.com' : 'https://www.twitch.tv';
@@ -61,12 +64,39 @@ try {
       localStorage.setItem('tm-${prefix}-volume','${preferred}');
       AudioContext.prototype.createMediaElementSource = () => {throw new Error('Must never reroute original playback')};
       window.__normalizationCaptures = 0;
+      window.__normalizationStreams = [];
+      window.__normalizationContexts = [];
+      window.__lufsFrames = 0;
+      window.__lufsOutputs = [];
+      const NativeWorklet = window.AudioWorkletNode;
+      window.AudioWorkletNode = class extends NativeWorklet {
+        constructor(...args) {
+          super(...args);
+          window.__lufsOutputs.push(this.numberOfOutputs);
+          this.port.addEventListener('message', event => { if (Number.isFinite(event.data.power)) window.__lufsFrames++; });
+          this.port.start();
+        }
+      };
+      if (${JSON.stringify(engine)} === 'unsupported') window.AudioWorkletNode = undefined;
+      const NativeContext = window.AudioContext;
+      window.AudioContext = class extends NativeContext {
+        constructor(...args) {
+          super(...args);
+          window.__normalizationContexts.push(this);
+          if (${JSON.stringify(engine)} === 'blocked') Object.defineProperty(this, 'audioWorklet', {value:{addModule:()=>Promise.reject(new Error('Fixture policy block'))}});
+        }
+      };
       const originalCapture = HTMLMediaElement.prototype.captureStream;
-      HTMLMediaElement.prototype.captureStream = function(...args) { window.__normalizationCaptures++; return originalCapture.apply(this,args); };
+      HTMLMediaElement.prototype.captureStream = function(...args) {
+        window.__normalizationCaptures++;
+        const stream = originalCapture.apply(this,args);
+        window.__normalizationStreams.push(stream);
+        return stream;
+      };
     </script><script>${artifact.replaceAll('</script>', '<\\/script>')}</script></body></html>`;
     await page.route('**/*', route => {
       const path = new URL(route.request().url()).pathname;
-      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : loud });
+      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
       return route.fulfill({ status: 200, contentType: 'text/html', body: html });
     });
     try {
@@ -77,6 +107,20 @@ try {
       const toggle = page.locator('#tm-volume-options-normalization');
       assert.equal(await toggle.getAttribute('aria-checked'), 'false');
       await toggle.click();
+      if (engine !== 'lufs') {
+        await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred);
+        assert.equal(await page.evaluate(() => window.__lufsFrames), 0);
+        assert.equal(await page.locator('#tm-volume-options-normalization-status').textContent(), 'Active');
+        await toggle.click();
+        await page.waitForFunction(() => window.__normalizationContexts.every(context => context.state === 'closed'));
+        assert.ok(await page.evaluate(() => window.__normalizationStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended'))));
+        assert.equal(await page.evaluate(() => document.querySelector('video').volume), preferred / 100);
+        assert.deepEqual(errors, []);
+        console.log(`${platform}: ${engine} AudioWorklet retains RMS leveling and releases capture on disable`);
+        continue;
+      }
+      await page.waitForFunction(() => window.__lufsFrames >= 4);
+      assert.ok((await page.evaluate(() => window.__lufsOutputs)).every(outputs => outputs === 0), 'continuous LUFS analysis has no speaker output');
       await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred, { timeout: 3000 });
       assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
       await page.waitForFunction(() => /Reducing loud audio/.test(document.querySelector('#tm-volume-options-normalization-details').textContent));
@@ -148,6 +192,18 @@ try {
       }));
       assert.ok(statusTrace.states.every(state => state.startsWith('Active')), `continuous audio status trace: ${JSON.stringify(statusTrace)}`);
       assert.equal(statusTrace.captureRestarts, 0, 'continuous audio keeps the same capture connection');
+      if (preferred === 30) {
+        const volumes = [];
+        for (const name of ['bass', 'high']) {
+          const before = await page.evaluate(() => window.__lufsFrames);
+          await page.evaluate(async name => { const v = document.querySelector('video'); v.src = `/${name}.wav`; await v.play(); }, name);
+          await page.waitForFunction(before => window.__lufsFrames >= before + 24, before);
+          volumes.push(await page.evaluate(() => document.querySelector('video').volume));
+        }
+        const difference = 20 * Math.log10(volumes[0] / volumes[1]);
+        assert.ok(Math.abs(difference - 5.7) < 1, `native output follows K weighting for equal-RMS bass/treble: ${difference} dB`);
+        console.log(`${platform}: equal-RMS bass/treble receive ${difference.toFixed(2)} dB different correction`);
+      }
       // Tainted media must continue playing at ordinary volume after capture
       // fails. The route intentionally sends no Access-Control-Allow-Origin.
       await page.evaluate(async () => { const v = document.querySelector('video'); v.src = 'https://media.example.invalid/loud.wav'; await v.play(); });
@@ -155,6 +211,9 @@ try {
       assert.equal(await page.evaluate(() => document.querySelector('video').volume), preferred / 100);
       const before = await page.evaluate(() => document.querySelector('video').currentTime);
       await page.waitForFunction(time => document.querySelector('video').currentTime > time + .2, before);
+      await toggle.click();
+      await page.waitForFunction(() => window.__normalizationContexts.every(context => context.state === 'closed'));
+      assert.ok(await page.evaluate(() => window.__normalizationStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended'))), 'source changes and disable stop captured tracks');
       assert.deepEqual(errors, []);
       console.log(`${platform} at ${preferred}%: loud output ${(loudOutput * 100).toFixed(0)}%, quiet output ${(quietOutput * 100).toFixed(0)}%, remaining difference ${differenceDb.toFixed(2)} dB; stereo, mute/preference and CORS fallback passed`);
     } finally { await context.close(); }

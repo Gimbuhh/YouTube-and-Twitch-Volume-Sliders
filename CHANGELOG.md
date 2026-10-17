@@ -8,9 +8,8 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 - **Both:** **Auto-normalize volume** keeps sources closer in loudness while preserving the chosen slider value and mute state.
   - The option starts disabled, saves separately for each site, and shows its current status under General → Audio in Volume Slider Options.
-  - Faster analysis and immediate cuts reduce spikes when louder audio returns after a quiet passage. Quieter sources rise cautiously within the player's normal volume range; short quiet introductions, silence, and very low background levels do not trigger increases.
-  - Channel-aware measurements and recent active audio improve matching across stereo content and speech; quiet sources can use the full remaining range up to 100%, with the adjusted output shown in Options.
-  - A small, static waveform icon tucked into the volume ring's upper-right edge indicates that normalization is enabled, with a slight overlap on the outer arc and a clear volume number. The original layout and round background stay unchanged. It hides when the option is off; current status and adjusted output remain available in Audio settings.
+  - Audio settings show the adjusted player volume.
+  - A waveform icon on the volume control indicates when normalization is enabled.
   - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.
 
 ### Changed

@@ -4,7 +4,7 @@
 
 Unit tests cover shared settings, storage failure and recovery, volume functions, custom adjustment steps, smooth wheel accumulation, zoom-gesture pass-through, and major-tick press behavior. Integration tests execute the generated `dist/*.user.js` files in explicit YouTube and Twitch fixtures. They verify standalone startup, mute-safe restoration, slider and wheel step selection, fixed keyboard steps, adaptive ticks, direct slider intent, accessible controls, options-dialog focus, tab keyboard navigation and preview cleanup on tab switches, options and resets with blocked storage, mode off, external detachment, and reattachment. This prevents source-only scaffolding from passing while production artifacts are broken.
 
-Tests do not contact either service. A frozen install is the only step that may access a package registry.
+Tests do not contact either service. A frozen install may access a package registry; optional reference audio for the comparison is acquired separately.
 
 Options lifecycle regressions verify that popup replacement does not accumulate page-level release listeners and that previews end on release, cancellation, tab switches, close, and replacement. Browser checks also exercise releasing an options drag outside the slider and closing the popup with Escape during a drag.
 
@@ -27,6 +27,41 @@ Twitch regressions distinguish narrow channel, video, and clip players from comp
 The browser suite also checks the static normalization icon in both themes and icon styles, at enlarged on-video sizes, and through output changes, mute, unavailable capture, and disabled states. It verifies the original circular layout, inset upper-right placement with overlap limited to the outer ring, unclipped center and perimeter at ten zoom levels from 50% through 200%, unobscured selected values through 100%, and thumb clearance at zero volume. It preserves the slider's preferred volume, accessible descriptions, and existing mute interaction. The waveform stays unchanged while enabled. Audio feedback checks verify two separate detail lines, containment inside the status card, and no text overlap at six zoom levels from 50% through 200%. These UI checks use a controlled capture fixture; the separate normalization suite below covers real audio capture.
 
 For normalization changes, also run `npm run test:normalization-browser`. It exercises real Web Audio capture with synthetic local WAV sources for both platform adapters, including loud/quiet transitions, mute and preferred-volume preservation, and cross-origin fallback. A same-source quiet-to-loud transition checks attenuation of an existing boost within 250 ms, with the custom slider and saved preference unchanged. Unit tests also cover the first louder measurement and short quiet introductions. See [normalization](normalization.md) for its scope and limitations.
+
+LUFS regressions require real AudioWorklet frames from the bundled scripts and verify that the analysis node has no outputs. Equal-RMS bass and treble receive different native-volume correction, demonstrating that the frequency-weighted path is active. Separate cases remove AudioWorklet or reject module loading and check RMS fallback, preferred-volume restoration, closed contexts, and stopped capture tracks. Pure tests verify reference levels at 44.1/48/96 kHz, chunk independence, channel energy, 400 ms/3 s windows, transient recovery, port cleanup, and ignored gain updates during pause/mute.
+
+## Loudness comparison
+
+Install FFmpeg with the `ebur128` filter, then run:
+
+```sh
+npm run test:normalization-compare
+```
+
+FFmpeg is a developer reference tool; it adds no package or userscript runtime dependency. The script performs no downloads and writes `comparison.json` under the OS temporary directory by default. Configure it with these optional environment variables:
+
+- `VOLUME_SLIDER_COMPARISON`: output directory for the JSON report.
+- `VOLUME_SLIDER_FFMPEG`: FFmpeg executable path.
+- `VOLUME_SLIDER_AUDIO_CORPUS`: directory containing the reference recordings, attribution files, and registry below.
+
+Without an external corpus, the script compares three synthetic tones at 80 Hz, 1 kHz, and 4 kHz. The full corpus adds six recordings and a constructed speech/music/effects mix. Each input runs at two source levels (1 and 0.45), selected volumes of 30% and 40%, and both RMS and LUFS controllers, producing 80 renders. Recordings are decoded to stereo at 48 kHz, repeated where necessary to make 30 seconds, and rescaled toward RMS 0.12 with a peak ceiling of 0.85.
+
+The renderer models 1% native-volume rounding and a 50 ms correction delay. FFmpeg measures output after the first five seconds. Summary statistics exclude the same input/volume cases from both engines when either applies 100% volume for at least 1% of its frames; all cases remain in the report. This compares the combined meters and gain policies. Browser capture/message delays and subjective loudness require separate evaluation.
+
+For the full corpus, acquire the following files from the [librosa example collection](https://librosa.org/doc/main/recordings.html). Download each `<basename>.hq.ogg` and its `<basename>.txt` attribution file from `https://librosa.org/data/audio/`, and save the [registry.txt](https://raw.githubusercontent.com/librosa/librosa/main/librosa/util/example_data/registry.txt) alongside them in a directory outside the repository.
+
+| Input | Basename | Attribution |
+| --- | --- | --- |
+| Speech 1 | `5703-47212-0000` | LibriSpeech, Garth Comira |
+| Speech 2 | `3436-172162-0000` | LibriSpeech, Anders Lankford |
+| Speech 3 | `198-209-0000` | LibriSpeech, Heather Barnett |
+| Jazz | `Kevin_MacLeod_-_Vibe_Ace` | Kevin MacLeod |
+| Orchestral | `Kevin_MacLeod_-_P_I_Tchaikovsky_Dance_of_the_Sugar_Plum_Fairy` | Kevin MacLeod |
+| Trumpet | `sorohanro_-_solo-trumpet-06` | Mihai Sorohan |
+
+The script verifies recording SHA-256 hashes against the registry and includes the supplied Creative Commons attribution text in its JSON report. Keep the attribution files with the recordings and follow their supplied license terms. Audio remains outside the repository; the harness retains measurements rather than output recordings.
+
+A 30-minute simulated audio soak at 96 kHz also checks the sample-clocked path. It runs faster than real time and is separate from live-browser testing. These fixtures do not establish compatibility with every live stream, player version, or ad transition. See [normalization](normalization.md) for feature behavior and limitations.
 
 ## Documentation screenshots
 

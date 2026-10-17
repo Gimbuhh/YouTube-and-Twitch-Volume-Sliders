@@ -255,3 +255,38 @@ test('unsupported browsers and protected content leave ordinary playback intact'
   const protectedVideo = fixture(); protectedVideo.video.mediaKeys = {}; protectedVideo.start();
   assert.equal(protectedVideo.audio.captures, 0); assert.equal(protectedVideo.raw, 50);
 });
+
+test('LUFS messages freeze during mute and pause; a stalled processor falls back and is released', async () => {
+  const f = fixture(), nodes = [], NativeContext = f.window.AudioContext;
+  f.window.AudioContext = class extends NativeContext {
+    constructor() { super(); this.audioWorklet = { addModule: async () => {} }; }
+  };
+  Object.assign(f.window, { Blob, URL: { createObjectURL: () => 'blob:meter', revokeObjectURL() {} },
+    AudioWorkletNode: class {
+      constructor() { this.port = { postMessage() {}, close() { this.closed = true; } }; nodes.push(this); }
+      disconnect() {}
+    }
+  });
+  f.start(); await new Promise(resolve => setImmediate(resolve));
+  const node = nodes[0];
+  const send = power => node.port.onmessage({ data: { power, rawPower: power, momentaryPower: power, duration: 0.05 } });
+  send(1); f.advance(0.1);
+  const before = f.raw;
+  for (const state of ['muted', 'paused']) {
+    if (state === 'muted') f.video.muted = true;
+    else f.audio.paused = true;
+    for (let i = 0; i < 100; i++) send(0.001);
+    f.advance(0.1);
+    assert.equal(f.raw, before, `${state} frames cannot adjust output`);
+    f.video.muted = false; f.audio.paused = false;
+  }
+  f.advance(1);
+  assert.equal(node.port.closed, true, 'stale LUFS analysis releases its port');
+  f.advance(20);
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.equal(f.raw, 10, 'the RMS fallback resumes normal leveling');
+  f.normalizer.setEnabled(false);
+  assert.equal(f.raw, 50);
+  assert.equal(f.timers.size, 0);
+  assert.equal(f.audio.contexts[0].closed, true);
+});

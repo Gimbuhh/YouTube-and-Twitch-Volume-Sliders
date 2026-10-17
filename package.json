@@ -13,6 +13,7 @@
     "test:integration": "node --test \"tests/integration/*.test.js\"",
     "test:browser": "node scripts/build.mjs && node tests/browser/smoke.mjs && node tests/browser/normalization-icon.mjs",
     "test:normalization-browser": "node scripts/build.mjs && node tests/browser/normalization.mjs",
+    "test:normalization-compare": "node scripts/compare-normalization.mjs",
     "check:syntax": "node scripts/check-syntax.mjs",
     "check:metadata": "node scripts/validate-metadata.mjs",
     "check:generated": "node scripts/verify-generated.mjs",
