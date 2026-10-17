@@ -6,7 +6,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Added
 
-- **Both:** **Auto-normalize volume** keeps sources closer in loudness while preserving the chosen slider value and mute state.
+- **Both:** **Auto-normalize volume** keeps sources closer in loudness, reacts quickly to loud spikes, and preserves the chosen slider value and mute state.
   - The option starts disabled, saves separately for each site, and shows its current status under General → Audio in Volume Slider Options.
   - Audio settings show the adjusted player volume.
   - A waveform icon on the volume control indicates when normalization is enabled.
@@ -18,7 +18,8 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Fixed
 
-- **Both:** Normalization can stay active when the site's security policy blocks its audio processor module.
+- **Both:** Slider drags finish once, without reacting to unrelated page releases.
+- **YouTube:** Volume and mute controls keep working when the player API is temporarily unavailable.
 - **YouTube:** Volume Slider Options stays visible when YouTube retains a hidden progress bar before the active controls. The popup anchors to a rendered progress bar in the current player, falling back to its own button when none is available.
 - **Twitch:** Narrow channel, video, and clip players keep the custom slider and Options button when zooming or resizing. Compact preview detection applies only on browsing pages, preventing native volume controls from appearing beside or replacing the custom slider.
 

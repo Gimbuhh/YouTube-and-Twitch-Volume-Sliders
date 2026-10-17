@@ -61,8 +61,9 @@ test('a blocked worklet reads native audio frames through the same LUFS meter', 
   const f = fixture(), capture = capturedFrames(f), owned = f.create();
   f.reject(new Error('CSP blocked blob:')); await flush();
   capture.send([0.1, -0.1], 96000); await flush();
-  assert.equal(f.frames.length, 2);
-  assert.ok(f.frames.every(frame => frame.power > 0 && Math.abs(frame.rawPower - .005) < 1e-8));
+  assert.equal(f.frames.filter(frame => frame.power != null).length, 2);
+  assert.equal(f.frames.filter(frame => frame.attackPower != null).length, 5);
+  assert.ok(f.frames.filter(frame => frame.power != null).every(frame => frame.power > 0 && Math.abs(frame.rawPower - .005) < 1e-8));
   assert.equal(f.nodes.length, 0, 'direct analysis creates no audio output node');
   assert.equal(f.revoked, 1);
   assert.deepEqual(f.failures, []);

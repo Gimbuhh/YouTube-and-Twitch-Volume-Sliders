@@ -6,6 +6,8 @@ Unit tests cover shared settings, storage failure and recovery, volume functions
 
 Tests do not contact either service. A frozen install may access a package registry; optional reference audio for the comparison is acquired separately.
 
+Release preflight tests exercise real temporary archives, checking both platform hashes, historical backfills, package-version mismatches, missing files, and directory substitutions. The runtime helper also verifies that restarted mutation observers cannot deliver callbacks after teardown.
+
 Options lifecycle regressions verify that popup replacement does not accumulate page-level release listeners and that previews end on release, cancellation, tab switches, close, and replacement. Browser checks also exercise releasing an options drag outside the slider and closing the popup with Escape during a drag.
 
 ## Real-browser smoke checks
@@ -20,6 +22,8 @@ The suite uses deterministic local YouTube and Twitch player contracts while rou
 
 The regular `npm run check` remains browser-independent and deterministic.
 
+Every smoke scenario rejects uncaught page errors before reporting success. This gate was verified by injecting an asynchronous exception into a temporary built artifact: the ordinary suite passed, while the altered artifact failed with the injected error.
+
 YouTube popup-positioning regressions cover a hidden duplicate progress bar, no rendered progress bar, and an unrelated progress bar outside the current player. At two viewport widths, the suite opens and closes Options and checks that the popup stays inside the player, uses the rendered bar or button fallback, and receives pointer input.
 
 Twitch regressions distinguish narrow channel, video, and clip players from compact browsing previews. Browser checks cross the old 720-pixel boundary at zoom levels from 100% through 200% and back, with Options open and page mutations between resizes. They verify that replacement mode keeps native controls hidden, retains the custom slider and Options button, and leaves the popup visible and interactive.
@@ -29,6 +33,8 @@ The browser suite also checks the static normalization icon in both themes and i
 For normalization changes, also run `npm run test:normalization-browser`. It exercises real Web Audio capture with synthetic local WAV sources for both platform adapters, including loud/quiet transitions, mute and preferred-volume preservation, and cross-origin fallback. A same-source quiet-to-loud transition checks attenuation of an existing boost within 250 ms, with the custom slider and saved preference unchanged. Unit tests also cover the first louder measurement and short quiet introductions. See [normalization](normalization.md) for its scope and limitations.
 
 LUFS regressions require real AudioWorklet frames from the bundled scripts and verify that the analysis node has no outputs. Equal-RMS bass and treble receive different native-volume correction, demonstrating that the frequency-weighted path is active. The same behavior runs under a real CSP that excludes Blob modules, and with AudioWorklet removed, using native `MediaStreamTrackProcessor` frames. A case with both APIs absent checks unavailable status, continued ordinary playback, preferred-volume restoration, closed contexts, and stopped capture tracks. Pure tests verify reference levels at 44.1/48/96 kHz, chunk independence, channel energy, 400 ms/3 s windows, transient recovery, port cleanup, startup/stalled-frame timeouts, and ignored gain updates during pause/mute. Native-reader tests cover stereo speaker mixing at 48/96 kHz, frame closure, cancellation, read/construction failures, and disposal during module loading. Artifact tests reject the former RMS controller and analyser graph in production bundles.
+
+Spike-response tests preserve the regular LUFS programme frames while checking the additional 20 ms K-weighted protection. Unit tests sweep 50 onset phases, verify immediate downward writes without a polling tick, and keep volume increases on the regular timer. Browser traces report when native volume stays within 2 dB of the synthetic loud-return target; these player-clock timings are not speaker-output latency guarantees. Set `VOLUME_SLIDER_NORMALIZATION_DIST` to a preserved pair of userscripts for before/after testing, and `VOLUME_SLIDER_ATTACK_REPORT` to a JSON output path for the measured timings.
 
 ## Loudness comparison
 
@@ -48,7 +54,7 @@ Without an external corpus, the script compares three synthetic tones at 80 Hz, 
 
 The historical RMS controller is frozen under `tests/fixtures/normalization-rms.js` solely for this comparison. Production userscripts contain only LUFS normalization. Controlled UI fixtures emit synthetic worklet energy frames; the separate audio browser suite tests native capture and metering.
 
-The renderer models 1% native-volume rounding and a 50 ms correction delay. FFmpeg measures output after the first five seconds. Summary statistics exclude the same input/volume cases from both engines when either applies 100% volume for at least 1% of its frames; all cases remain in the report. This compares the combined meters and gain policies. Browser capture/message delays and subjective loudness require separate evaluation.
+The renderer models 1% native-volume rounding, 50 ms programme measurements and volume increases, and immediate cuts from 20 ms K-weighted spike measurements. Its 10 ms render grid represents both intervals. The frozen RMS baseline retains its original 50 ms cadence. FFmpeg measures output after the first five seconds. Summary statistics exclude the same input/volume cases from both engines when either applies 100% volume for at least 1% of its frames; all cases remain in the report. This compares the combined meters and gain policies. Browser capture/message delays and subjective loudness require separate evaluation.
 
 For the full corpus, acquire the following files from the [librosa example collection](https://librosa.org/doc/main/recordings.html). Download each `<basename>.hq.ogg` and its `<basename>.txt` attribution file from `https://librosa.org/data/audio/`, and save the [registry.txt](https://raw.githubusercontent.com/librosa/librosa/main/librosa/util/example_data/registry.txt) alongside them in a directory outside the repository.
 

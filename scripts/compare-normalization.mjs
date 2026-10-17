@@ -12,7 +12,7 @@ import { createLufsMeter, createLufsGainController } from '../src/shared/lufs-me
 const directory = process.env.VOLUME_SLIDER_COMPARISON || join(tmpdir(), 'volume-slider-lufs-comparison');
 const corpus = process.env.VOLUME_SLIDER_AUDIO_CORPUS;
 const ffmpeg = process.env.VOLUME_SLIDER_FFMPEG || 'ffmpeg';
-const rate = 48000, frameLength = rate / 20;
+const rate = 48000;
 await mkdir(directory, { recursive: true });
 execFileSync(ffmpeg, ['-version'], { stdio: 'ignore' });
 
@@ -55,6 +55,9 @@ function decode(file) {
 }
 
 function render(channels, preferred, engine) {
+  // A 10 ms render grid represents 20 ms spike decisions and 50 ms programme
+  // frames/output ticks exactly. Preserve the frozen RMS engine's cadence.
+  const frameLength = rate / (engine === 'lufs' ? 100 : 20);
   const output = new Float32Array(channels[0].length * 2);
   const meter = engine === 'lufs' ? createLufsMeter(rate) : null;
   const controller = meter ? createLufsGainController() : createLoudnessTracker();
@@ -64,7 +67,9 @@ function render(channels, preferred, engine) {
   for (let offset = 0; offset < channels[0].length; offset += frameLength) {
     const end = Math.min(offset + frameLength, channels[0].length);
     for (let i = offset; i < end; i++) { output[2 * i] = channels[0][i] * applied / 100; output[2 * i + 1] = channels[1][i] * applied / 100; }
-    if (meter) meter.process(channels.map(channel => channel.subarray(offset, end)), frame => { gain = controller.update(frame, 100 / preferred); });
+    if (meter) meter.process(channels.map(channel => channel.subarray(offset, end)),
+      frame => { gain = controller.update(frame, 100 / preferred); },
+      attackPower => { gain = controller.update({ attackPower }, 100 / preferred); });
     else {
       // Match the preserved browser's overlapping 4096-sample analysis window.
       channels.forEach((channel, index) => {
@@ -74,7 +79,9 @@ function render(channels, preferred, engine) {
       });
       gain = controller.update(windows, (end - offset) / rate, 100 / preferred);
     }
-    applied = Math.max(1, Math.round(Math.min(100, preferred * gain)));
+    const next = Math.max(1, Math.round(Math.min(100, preferred * gain)));
+    // Volume increases retain the 50 ms output timer. Cuts bypass it.
+    if (!meter || next < applied || Math.floor(end / (rate * .05)) > Math.floor(offset / (rate * .05))) applied = next;
     if (applied === 100) limited++;
     frames++;
   }
@@ -150,7 +157,8 @@ const soakChannels = [soakSignal, soakSignal];
 let soakFrames = 0, soakGain;
 const onSoakFrame = frame => { soakFrames++; soakGain = soakController.update(frame, 100 / 30); assert.ok(Number.isFinite(soakGain)); };
 const soakStart = performance.now();
-for (let index = 0; index < soakRate * soakSeconds / 128; index++) soakMeter.process(soakChannels, onSoakFrame);
+for (let index = 0; index < soakRate * soakSeconds / 128; index++) soakMeter.process(soakChannels, onSoakFrame,
+  attackPower => { soakGain = soakController.update({ attackPower }, 100 / 30); assert.ok(Number.isFinite(soakGain)); });
 const soak = { sampleRate: soakRate, audioSeconds: soakSeconds, frames: soakFrames, processingMs: performance.now() - soakStart, finalGain: soakGain };
 assert.equal(soakFrames, soakSeconds * 20);
 const report = { reference: 'FFmpeg ebur128, output after the first five seconds; 1% native-volume quantization; headroom-limited cases excluded from summaries', corpus: corpus ? 'six attributed speech/music recordings, a speech/music/effects mix, and three tones' : 'three synthetic tones only', assets, validation, summaries, soak, rows };

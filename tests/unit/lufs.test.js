@@ -20,6 +20,8 @@ test('EBU Tech 3341 stereo 1 kHz reference levels match within 0.1 LU at multipl
       assert.equal(frames.length, 80);
       assert.equal(frames[6].momentaryLufs, null);
       assert.equal(frames[58].shortTermLufs, null);
+      assert.notEqual(frames[7].momentaryLufs, null, 'momentary window still starts at 400 ms');
+      assert.notEqual(frames[59].shortTermLufs, null, 'short-term window still starts at three seconds');
       assert.ok(Math.abs(frames.at(-1).momentaryLufs - level) <= 0.1);
       assert.ok(Math.abs(frames.at(-1).shortTermLufs - level) <= 0.1);
     }
@@ -80,6 +82,45 @@ test('LUFS gain waits before boosting, respects volume headroom, and cuts a loud
     const outputLufs = -0.691 + 10 * Math.log10(first.power * gain * gain);
     assert.ok(outputLufs <= -18 + 1e-8);
   }
+});
+
+test('a loud return reaches its safe correction within 40 ms across measurement phases', () => {
+  const rate = 48000;
+  for (let offsetMs = 0; offsetMs < 50; offsetMs++) {
+    const onset = Math.round(rate * (4 + offsetMs / 1000));
+    const signal = Float32Array.from({ length: onset + rate / 10 }, (_, i) =>
+      (i < onset ? .04 : .8) * Math.sin(2 * Math.PI * 440 * i / rate));
+    const controller = createLufsGainController();
+    let firstSafe, before;
+    const meter = createLufsMeter(rate);
+    for (let index = 0; index < signal.length; index += rate / 1000) {
+      const time = (index + rate / 1000) / rate;
+      const update = frame => {
+        const gain = controller.update(frame, 100 / 30);
+        if (time < onset / rate) before = gain;
+        else if (firstSafe == null && .8 / Math.sqrt(2) * gain <= .1 * 10 ** (1 / 20)) firstSafe = time;
+      };
+      const chunk = signal.subarray(index, index + rate / 1000);
+      meter.process([chunk, chunk], update, attackPower => update({ attackPower }));
+    }
+    assert.ok(before > 2, 'the quiet lead-in is boosted');
+    assert.ok(firstSafe != null && firstSafe - onset / rate <= .040001, `${offsetMs} ms phase: ${firstSafe - onset / rate} s`);
+  }
+});
+
+test('fast K-weighted protection leaves ordinary peaks alone and never raises gain', () => {
+  const target = 10 ** ((-18 + .691) / 10), controller = createLufsGainController();
+  const normal = { power: target, rawPower: .01, momentaryPower: target, duration: .05 };
+  for (let i = 0; i < 80; i++) controller.update(normal);
+  const before = controller.update(normal);
+  assert.equal(controller.update({ attackPower: target * 8 }), before, 'a 9 LU peak keeps the existing leveling policy');
+  assert.equal(controller.update({ attackPower: NaN }), before);
+  const reduced = controller.update({ attackPower: target * 16 });
+  assert.ok(reduced <= .25, 'a 12 LU spike cuts before the next programme frame');
+  assert.equal(controller.update({ attackPower: target }), reduced, 'short-window measurements never raise gain');
+  let gain;
+  for (let i = 0; i < 20; i++) gain = controller.update(normal);
+  assert.ok(gain > .95, 'a brief spike does not change the programme reference or hold recovery down');
 });
 
 test('temporary spike protection releases without holding the programme at the transient level', () => {

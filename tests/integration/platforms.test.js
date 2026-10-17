@@ -485,6 +485,129 @@ test('Twitch: volume API remains usable when optional mute methods are missing',
   runtime.close();
 });
 
+test('YouTube: incomplete player API retains volume controls and native mute fallback',async()=>{
+  const errors=[];
+  const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+    current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+    for(const method of ['isMuted','mute','unMute']) delete playerFixture.player[method];
+    playerFixture.video.muted=true;
+  });
+  try {
+    assert.deepEqual(errors,[]);
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    assert.ok(slider);
+    slider.value='60';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(fixture.state.volume,60);
+    assert.equal(fixture.video.muted,false);
+    const muteButton=runtime.document.querySelector('.tm-volume-icon-cell');
+    muteButton.click();
+    assert.equal(fixture.video.muted,true);
+    muteButton.click();
+    assert.equal(fixture.video.muted,false);
+    assert.deepEqual(errors,[]);
+  } finally {
+    runtime.close();
+  }
+});
+
+test('YouTube: throwing player API restores and changes volume through native video',async()=>{
+  const errors=[];
+  const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+    current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+    for(const method of ['getVolume','setVolume','isMuted','mute','unMute']) {
+      playerFixture.player[method]=()=>{throw new Error('player API is unavailable during replacement');};
+    }
+    current.window.localStorage.setItem(platforms[0].volumeKey,'35');
+    current.window.localStorage.setItem(platforms[0].muteKey,'true');
+  });
+  try {
+    assert.deepEqual(errors,[]);
+    assert.equal(fixture.video.volume,.35);
+    assert.equal(fixture.video.muted,true);
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    assert.ok(slider);
+    assert.equal(slider.value,'35');
+    slider.value='60';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(fixture.video.volume,.6);
+    assert.equal(fixture.video.muted,false);
+    runtime.document.querySelector('.tm-volume-icon-cell').click();
+    assert.equal(fixture.video.muted,true);
+    assert.deepEqual(errors,[]);
+  } finally {
+    runtime.close();
+  }
+});
+
+for(const setter of ['missing','throwing']) test(`YouTube: ${setter} volume setter keeps native fallback as the readback source`,async()=>{
+  const errors=[];
+  let healthySetter;
+  const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+    current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+    playerFixture.video.volume=.5;
+    healthySetter=playerFixture.player.setVolume;
+    if(setter==='missing') delete playerFixture.player.setVolume;
+    else playerFixture.player.setVolume=()=>{throw new Error('volume setter is unavailable');};
+  });
+  try {
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    slider.value='60';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    const now=runtime.window.Date.now();
+    runtime.window.Date.now=()=>now+6000;
+    fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+    assert.equal(fixture.video.volume,.6);
+    assert.equal(slider.value,'60');
+    assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'60%');
+    assert.deepEqual(errors,[]);
+
+    fixture.player.setVolume=healthySetter;
+    slider.value='70';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(fixture.state.volume,70,'a later adjustment retries a recovered player API');
+    runtime.window.Date.now=()=>now+12000;
+    fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+    assert.equal(slider.value,'70','successful API writes restore API readback');
+    assert.deepEqual(errors,[]);
+  } finally {
+    runtime.close();
+  }
+});
+
+for(const method of ['mute','unMute']) for(const failure of ['missing','throwing']) {
+  test(`YouTube: ${failure} ${method} keeps native mute state until an API write succeeds`,async()=>{
+    const errors=[];
+    const initiallyMuted=method==='unMute';
+    let healthyMethod;
+    const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+      current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+      playerFixture.video.muted=initiallyMuted;
+      if(initiallyMuted) playerFixture.player.mute();
+      healthyMethod=playerFixture.player[method];
+      if(failure==='missing') delete playerFixture.player[method];
+      else playerFixture.player[method]=()=>{throw new Error(`${method} is unavailable`);};
+    });
+    try {
+      const muteButton=runtime.document.querySelector('.tm-volume-icon-cell');
+      muteButton.click();
+      assert.equal(fixture.video.muted,!initiallyMuted);
+      assert.equal(muteButton.getAttribute('aria-label'),initiallyMuted?'Mute':'Unmute');
+      assert.equal(runtime.window.localStorage.getItem(platforms[0].muteKey),String(!initiallyMuted));
+
+      fixture.player[method]=healthyMethod;
+      muteButton.click();
+      assert.equal(fixture.state.muted,initiallyMuted,'the opposite API action recovers after a native toggle');
+      muteButton.click();
+      assert.equal(fixture.state.muted,!initiallyMuted,'a recovered API method is retried on the same player');
+      assert.equal(muteButton.getAttribute('aria-label'),initiallyMuted?'Mute':'Unmute');
+      assert.deepEqual(errors,[]);
+    } finally {
+      runtime.close();
+    }
+  });
+}
+
 test('Twitch: options button mounts when native controls appear before video',async()=>{
   const config=platforms[1];
   const runtime=await startBuiltArtifact(config);

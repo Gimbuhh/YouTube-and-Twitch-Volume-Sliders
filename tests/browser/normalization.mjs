@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, readFile, mkdir } from 'node:fs/promises';
+import { access, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium } from 'playwright-core';
 
@@ -36,6 +36,7 @@ const burst = wav(time => time < 4 ? 0.06 : 0.7);
 const soft = wav(time => 0.016 + 0.012 * Math.sin(2 * Math.PI * time));
 const bass = wav(0.2, 1, 80), high = wav(0.2, 1, 4000);
 const browser = await chromium.launch({ headless: true, executablePath, args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--no-first-run'] });
+const attackResults = [];
 try {
   const cases = ['youtube', 'twitch'].flatMap(platform => [30, 40].map(preferred => [platform, preferred, 'lufs']));
   cases.push(['youtube', 30, 'csp'], ['twitch', 40, 'native'], ['twitch', 40, 'unsupported']);
@@ -47,7 +48,9 @@ try {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    const artifact = await readFile(new URL(`../../dist/${platform}-volume-slider.user.js`, import.meta.url), 'utf8');
+    const artifact = await readFile(process.env.VOLUME_SLIDER_NORMALIZATION_DIST
+      ? join(process.env.VOLUME_SLIDER_NORMALIZATION_DIST, `${platform}-volume-slider.user.js`)
+      : new URL(`../../dist/${platform}-volume-slider.user.js`, import.meta.url), 'utf8');
     const player = youtube
       ? '<div id="movie_player"><video class="html5-main-video" src="/loud.wav" loop></video><div class="ytp-left-controls"><div class="ytp-volume-area"></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">Settings</button></div></div>'
       : '<div class="video-player" data-a-target="player-overlay-click-handler"><video src="/loud.wav" loop></video><div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings">Settings</button></div></div></div>';
@@ -201,9 +204,14 @@ try {
       assert.ok(afterAttack.length > 0, 'the captured trace includes the loud return');
       const worstBurstDb = Math.max(...afterAttack.map(row => 20 * Math.log10((0.7 / Math.sqrt(2) * row.volume) / (0.1 * preferred / 100))));
       assert.ok(worstBurstDb < 2, `loud return settles within 250 ms: ${worstBurstDb.toFixed(2)} dB above target`);
+      const withinTarget = row => 20 * Math.log10((0.7 / Math.sqrt(2) * row.volume) / (0.1 * preferred / 100)) < 2;
+      const settledIndex = burstTrace.findIndex((row, index) => row.time >= 4 && withinTarget(row) && burstTrace.slice(index).filter(next => next.time <= 4.7).every(withinTarget));
+      assert.ok(settledIndex >= 0, 'the loud return has a stable correction');
+      const reactionMs = (burstTrace[settledIndex].time - 4) * 1000;
+      attackResults.push({ platform, preferred, engine, reactionMs, worstBurstDb });
       assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
       assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
-      console.log(`${platform} (${engine}) at ${preferred}%: same-source loud return is ${worstBurstDb.toFixed(2)} dB above target after 250 ms`);
+      console.log(`${platform} (${engine}) at ${preferred}%: loud-return correction after ${reactionMs.toFixed(1)} ms; ${worstBurstDb.toFixed(2)} dB above target after 250 ms`);
       // The old mono analyser reads this audible stereo source as silence.
       await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/stereo.wav'; await v.play(); });
       await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred, { timeout: 3000 });
@@ -250,4 +258,7 @@ try {
       console.log(`${platform} (${engine}) at ${preferred}%: loud output ${(loudOutput * 100).toFixed(0)}%, quiet output ${(quietOutput * 100).toFixed(0)}%, remaining difference ${differenceDb.toFixed(2)} dB; stereo, mute/preference and CORS fallback passed`);
     } finally { await context.close(); }
   }
-} finally { await browser.close(); }
+} finally {
+  await browser.close();
+  if (process.env.VOLUME_SLIDER_ATTACK_REPORT) await writeFile(process.env.VOLUME_SLIDER_ATTACK_REPORT, JSON.stringify(attackResults, null, 2));
+}

@@ -86,6 +86,8 @@ export function startYouTubeVolumeSlider() {
     };
 
     let cachedYtPlayer = null;
+    const nativeVolumeOwners = new WeakSet();
+    const nativeMuteOwners = new WeakSet();
     let navReattachTimer = 0;
     let navDebounceTimer = 0;
     let attachObserver = null;
@@ -346,11 +348,13 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Get the YouTube player API object if available.
      */
     function getYouTubePlayer() {
-        if (cachedYtPlayer && cachedYtPlayer.isConnected && typeof cachedYtPlayer.getVolume === 'function') {
+        if (cachedYtPlayer && cachedYtPlayer.isConnected &&
+            typeof cachedYtPlayer.getVolume === 'function' && typeof cachedYtPlayer.setVolume === 'function') {
             return cachedYtPlayer;
         }
         const player = document.getElementById('movie_player');
-        if (player && typeof player.getVolume === 'function') {
+        if (player &&
+            typeof player.getVolume === 'function' && typeof player.setVolume === 'function') {
             cachedYtPlayer = player;
             return player;
         }
@@ -370,8 +374,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function getRawVolume(video) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) return Math.round(ytPlayer.getVolume());
+        if (!nativeVolumeOwners.has(video)) {
+            try {
+                const ytPlayer = getYouTubePlayer();
+                if (ytPlayer) return Math.round(ytPlayer.getVolume());
+            } catch { /* use the video while the player API is unavailable */ }
+        }
         return Math.round((Number(video?.volume) || 0) * 100);
     }
 
@@ -379,9 +387,11 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Check muted state via YouTube API or video element.
      */
     function isMuted(video) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer && typeof ytPlayer.isMuted === 'function') {
-            return ytPlayer.isMuted();
+        if (!nativeMuteOwners.has(video)) {
+            try {
+                const ytPlayer = getYouTubePlayer();
+                if (ytPlayer && typeof ytPlayer.isMuted === 'function') return ytPlayer.isMuted();
+            } catch { /* use the native mute state during player replacement */ }
         }
         return !!video.muted;
     }
@@ -390,29 +400,21 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Toggle mute via YouTube API or video element.
      */
     function toggleMute(video) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) {
-            if (ytPlayer.isMuted()) {
-                ytPlayer.unMute();
-            } else {
-                ytPlayer.mute();
-            }
-        } else {
-            video.muted = !video.muted;
-        }
+        setMuted(video, !isMuted(video));
     }
 
     function setMuted(video, muted) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) {
-            if (muted) {
-                ytPlayer.mute();
-            } else {
-                ytPlayer.unMute();
+        try {
+            const ytPlayer = getYouTubePlayer();
+            const method = muted ? 'mute' : 'unMute';
+            if (typeof ytPlayer?.[method] === 'function') {
+                ytPlayer[method]();
+                nativeMuteOwners.delete(video);
+                return;
             }
-        } else {
-            video.muted = !!muted;
-        }
+        } catch { /* use the native mute control while the API is unavailable */ }
+        nativeMuteOwners.add(video);
+        video.muted = !!muted;
     }
 
     /**
@@ -423,17 +425,20 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function setRawVolume(video, value, options = {}) {
+        if (!options.preserveMute && isMuted(video)) setMuted(video, false);
         const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) {
-            if (!options.preserveMute && ytPlayer.isMuted()) {
-                ytPlayer.unMute();
+        try {
+            if (ytPlayer) {
+                ytPlayer.setVolume(value);
+                nativeVolumeOwners.delete(video);
+                return;
             }
-            ytPlayer.setVolume(value);
-        } else {
-            // Fallback to video element
-            video.volume = value / 100;
-            if (!options.preserveMute) video.muted = false;
-        }
+        } catch { /* use the native volume control while the API is unavailable */ }
+        // Keep subsequent volumechange reads on the same native fallback until
+        // a later successful API write establishes ownership again.
+        nativeVolumeOwners.add(video);
+        video.volume = value / 100;
+        if (!options.preserveMute) video.muted = false;
     }
 
 

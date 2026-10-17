@@ -39,7 +39,7 @@ html,body{margin:0;background:#111;color:#fff;font-family:Arial;height:100%}.spa
 const twitchHtml=`<!doctype html><html><head><style>
 html,body{margin:0;background:#111;color:#fff;font-family:Arial;min-height:2200px}.video-player{position:relative;width:900px;height:506px;background:#222}video{display:block;width:100%;height:466px}[data-a-target="player-controls"]{height:40px;display:flex;align-items:center;justify-content:space-between}.player-controls__left-control-group,.player-controls__right-control-group{height:40px;display:flex;align-items:center}[data-a-target="player-volume-slider"]{width:80px;height:40px}#outside{margin-top:20px;height:60px}
 </style></head><body><div class="video-player" data-a-target="player-overlay-click-handler" tabindex="0"><video></video><div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings">S</button></div></div></div><div id="outside">Outside player</div><script>
-(()=>{const player=document.querySelector('.video-player');const video=player.querySelector('video');const state={volume:.5,muted:true,lastArrowPrevented:null};player._tmPlayerApi={getVolume:()=>state.volume,setVolume:value=>{state.volume=value;video.dispatchEvent(new Event('volumechange'));},isMuted:()=>state.muted,setMuted:value=>{state.muted=value;video.muted=value;video.dispatchEvent(new Event('volumechange'));}};player.__reactFiber$smoke={return:{memoizedProps:{mediaPlayerInstance:player._tmPlayerApi},return:null}};document.addEventListener('keydown',event=>{if(event.key==='ArrowUp'||event.key==='ArrowDown')state.lastArrowPrevented=event.defaultPrevented;});window.__smoke=state;})();
+(()=>{const player=document.querySelector('.video-player');const video=player.querySelector('video');const state={volume:.5,muted:true};player._tmPlayerApi={getVolume:()=>state.volume,setVolume:value=>{state.volume=value;video.dispatchEvent(new Event('volumechange'));},isMuted:()=>state.muted,setMuted:value=>{state.muted=value;video.muted=value;video.dispatchEvent(new Event('volumechange'));}};player.__reactFiber$smoke={return:{memoizedProps:{mediaPlayerInstance:player._tmPlayerApi},return:null}};window.__smoke=state;})();
 </script></body></html>`;
 
 const twitchPreviewHtml=twitchHtml
@@ -69,7 +69,7 @@ async function preparedPage(browser,{platform,url,html,storage,expectOverlay=tru
     await page.waitForTimeout(600);
     assert.equal(pageErrors.length,0,`${platform} preview has no page errors`);
   }
-  return {context,page};
+  return {context,page,pageErrors};
 }
 
 async function assertModeDropdown(page, platform) {
@@ -119,7 +119,7 @@ async function assertModeDropdown(page, platform) {
 
 async function modeDropdownSmoke(browser, platform) {
   const youtube = platform === 'youtube';
-  const { context, page } = await preparedPage(browser, {
+  const { context, page, pageErrors } = await preparedPage(browser, {
     platform,
     url: youtube ? 'https://www.youtube.com/watch?v=mode' : 'https://www.twitch.tv/mode',
     html: youtube ? youtubeHtml : twitchHtml,
@@ -128,6 +128,7 @@ async function modeDropdownSmoke(browser, platform) {
   try {
     await page.locator('#tm-volume-options-button').click();
     await assertModeDropdown(page, platform);
+    assert.deepEqual(pageErrors, [], `${platform}: Mode smoke has no page errors`);
     console.log(`browser smoke: ${platform} borderless Mode, option contrast, keyboard focus and native picker arrow on open/Escape/Enter/outside click passed`);
   } finally { await context.close(); }
 }
@@ -185,7 +186,7 @@ async function assertOptionsButtonAlignmentAtZoomLevels(page, platform){
 }
 
 async function youtubeSmoke(browser){
-  const {context,page}=await preparedPage(browser,{platform:'youtube',url:'https://www.youtube.com/watch?v=smoke',html:youtubeHtml,storage:{'tm-yt-volume':'50','tm-yt-muted':'false','tm-yt-volume-slider-mode':'replace-native','tm-yt-volume-slider-step':'10'}});
+  const {context,page,pageErrors}=await preparedPage(browser,{platform:'youtube',url:'https://www.youtube.com/watch?v=smoke',html:youtubeHtml,storage:{'tm-yt-volume':'50','tm-yt-muted':'false','tm-yt-volume-slider-mode':'replace-native','tm-yt-volume-slider-step':'10'}});
   try{
     await page.mouse.move(1100,700);
     await page.locator('.tm-volume-icon-cell').hover();
@@ -294,12 +295,13 @@ async function youtubeSmoke(browser){
     await page.mouse.click(tenPercentTick.x+(tenPercentTick.width/2),fineStepGeometry.y);
     assert.equal(Number(await slider.inputValue()),10,'one-percent direct press snaps to the nearby major tick');
     await page.keyboard.press('Escape');
+    assert.deepEqual(pageErrors, [], 'YouTube interaction smoke has no page errors');
     console.log('browser smoke: YouTube interaction, adjustment-step layout, focus modality, and native replacement passed');
   }finally{await context.close();}
 }
 
 async function twitchSmoke(browser){
-  const {context,page}=await preparedPage(browser,{platform:'twitch',url:'https://www.twitch.tv/smoke',html:twitchHtml,storage:{'tm-twitch-volume':'50','tm-twitch-muted':'true','tm-twitch-volume-slider-mode':'on','tm-twitch-volume-slider-step':'5'}});
+  const {context,page,pageErrors}=await preparedPage(browser,{platform:'twitch',url:'https://www.twitch.tv/smoke',html:twitchHtml,storage:{'tm-twitch-volume':'50','tm-twitch-muted':'true','tm-twitch-volume-slider-mode':'on','tm-twitch-volume-slider-step':'5'}});
   try{
     const dimensions=await page.evaluate(()=>({overlay:document.querySelector('#tm-volume-slider-overlay').getBoundingClientRect().height,panel:document.querySelector('.tm-volume-panel-bg').getBoundingClientRect().height,icon:document.querySelector('.tm-volume-icon-cell').getBoundingClientRect().height,controls:document.querySelector('[data-a-target="player-controls"]').getBoundingClientRect().height}));
     assert.equal(dimensions.overlay,32);
@@ -336,13 +338,14 @@ async function twitchSmoke(browser){
     assert.equal(outside.volume,.55);
     assert.equal(outside.prevented,false);
     assert.ok(outside.scrollY>0,'outside ArrowDown returns to page scrolling');
+    assert.deepEqual(pageErrors, [], 'Twitch interaction smoke has no page errors');
     console.log('browser smoke: Twitch dimensions, keyboard ownership, mute, visibility deadline, and scrolling passed');
   }finally{await context.close();}
 }
 
 async function twitchZoomSmoke(browser) {
   const html = twitchPreviewHtml.replace('width:533px', 'width:calc(100vw - 390px)');
-  const {context, page} = await preparedPage(browser, {
+  const {context, page, pageErrors} = await preparedPage(browser, {
     platform: 'twitch', url: 'https://www.twitch.tv/test', html,
     storage: {'tm-twitch-volume-slider-mode':'replace-native'}
   });
@@ -379,6 +382,7 @@ async function twitchZoomSmoke(browser) {
     await page.locator('#tm-volume-options-popup').waitFor({state:'hidden'});
     await page.locator('#tm-volume-options-button').click();
     await page.locator('#tm-volume-options-popup').waitFor({state:'visible'});
+    assert.deepEqual(pageErrors, [], 'Twitch zoom smoke has no page errors');
     console.log('browser smoke: Twitch zoom preserves replacement controls and usable settings from 100% through 200%');
   } finally {
     await context.close();
@@ -386,7 +390,7 @@ async function twitchZoomSmoke(browser) {
 }
 
 async function twitchPreviewSmoke(browser){
-  const {context,page}=await preparedPage(browser,{platform:'twitch',url:'https://www.twitch.tv/directory',html:twitchPreviewHtml,storage:{'tm-twitch-volume':'40','tm-twitch-muted':'false','tm-twitch-volume-slider-mode':'replace-native'},expectOverlay:false});
+  const {context,page,pageErrors}=await preparedPage(browser,{platform:'twitch',url:'https://www.twitch.tv/directory',html:twitchPreviewHtml,storage:{'tm-twitch-volume':'40','tm-twitch-muted':'false','tm-twitch-volume-slider-mode':'replace-native'},expectOverlay:false});
   try{
     const preview=await page.evaluate(()=>({
       overlay:!!document.querySelector('#tm-volume-slider-overlay'),
@@ -398,6 +402,7 @@ async function twitchPreviewSmoke(browser){
     assert.equal(preview.optionsButton,false);
     assert.equal(preview.nativeDisplay,'');
     assert.equal(preview.volume,.5);
+    assert.deepEqual(pageErrors, [], 'Twitch preview smoke has no page errors');
     console.log('browser smoke: Twitch compact preview remains native passed');
   }finally{await context.close();}
 }
@@ -405,7 +410,7 @@ async function twitchPreviewSmoke(browser){
 async function wheelSmoke(browser, platform) {
   const youtube = platform === 'youtube';
   const prefix = youtube ? 'tm-yt' : 'tm-twitch';
-  const { context, page } = await preparedPage(browser, {
+  const { context, page, pageErrors } = await preparedPage(browser, {
     platform,
     url: youtube ? 'https://www.youtube.com/watch?v=wheel' : 'https://www.twitch.tv/wheel',
     html: youtube ? youtubeHtml : twitchHtml,
@@ -464,6 +469,7 @@ async function wheelSmoke(browser, platform) {
     await page.locator('#tm-volume-options-popup').waitFor({ state: 'hidden' });
     assert.equal(await page.locator('#tm-volume-slider-overlay').getAttribute('data-tm-options-preview'), null, `${platform}: closing options ends the preview`);
     await page.mouse.up();
+    assert.deepEqual(pageErrors, [], `${platform}: wheel and preview smoke has no page errors`);
     console.log(`browser smoke: ${platform} mouse wheel, smooth scrolling, and zoom pass-through passed`);
     console.log(`browser smoke: ${platform} options preview release and Escape cleanup passed`);
   } finally {
@@ -482,7 +488,7 @@ async function youtubeOptionsPositionSmoke(browser) {
   ]) {
     const html = youtubeHtml.replace('<body>', `<body>${outside}`)
       .replace('<video class="html5-main-video">', `${bars}<video class="html5-main-video">`);
-    const { context, page } = await preparedPage(browser, {
+    const { context, page, pageErrors } = await preparedPage(browser, {
       platform: 'youtube', url: 'https://www.youtube.com/watch?v=smoke', html,
       storage: { 'tm-yt-volume-slider-mode': 'replace-native' }
     });
@@ -510,6 +516,7 @@ async function youtubeOptionsPositionSmoke(browser) {
         await page.keyboard.press('Escape');
         await page.locator('#tm-volume-options-popup').waitFor({ state: 'hidden' });
       }
+      assert.deepEqual(pageErrors, [], `YouTube ${label}: options positioning smoke has no page errors`);
     } finally {
       await context.close();
     }

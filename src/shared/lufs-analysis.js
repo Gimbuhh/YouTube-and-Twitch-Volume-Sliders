@@ -10,11 +10,12 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
     super();
     this.meter = createLufsMeter(sampleRate);
     this.send = frame => this.port.postMessage(frame);
+    this.attack = power => this.port.postMessage({ attackPower: power });
     this.port.onmessage = () => { this.stopped = true; };
   }
   process(inputs) {
     if (this.stopped) return false;
-    try { this.meter.process(inputs[0] || [], this.send); }
+    try { this.meter.process(inputs[0] || [], this.send, this.attack); }
     catch { this.port.postMessage({ failed: true }); return false; }
     return true;
   }
@@ -59,6 +60,7 @@ export function createLufsAnalysis({ window, context, source, track, onFrame, on
       // AudioData directly, using the same LUFS meter and no audio output.
       reader = new window.MediaStreamTrackProcessor({ track, maxBufferSize: 1 }).readable.getReader();
       let meter, rate, channels = [], stereo = [];
+      const onAttack = power => onFrame({ attackPower: power });
       while (!disposed) {
         const { value: frame, done } = await reader.read();
         if (done) break;
@@ -74,14 +76,14 @@ export function createLufsAnalysis({ window, context, source, track, onFrame, on
           }
           channels.forEach((channel, planeIndex) => frame.copyTo(channel, { planeIndex, format: 'f32-planar' }));
           // Match the worklet's explicit stereo speaker downmix (Web Audio).
-          if (channels.length === 1) meter.process([channels[0], channels[0]], onFrame);
+          if (channels.length === 1) meter.process([channels[0], channels[0]], onFrame, onAttack);
           else if (channels.length === 4 || channels.length === 6) {
             for (let i = 0; i < frame.numberOfFrames; i++) {
               stereo[0][i] = channels.length === 4 ? 0.5 * (channels[0][i] + channels[2][i]) : channels[0][i] + Math.SQRT1_2 * (channels[2][i] + channels[4][i]);
               stereo[1][i] = channels.length === 4 ? 0.5 * (channels[1][i] + channels[3][i]) : channels[1][i] + Math.SQRT1_2 * (channels[2][i] + channels[5][i]);
             }
-            meter.process(stereo, onFrame);
-          } else meter.process(channels.slice(0, 2), onFrame);
+            meter.process(stereo, onFrame, onAttack);
+          } else meter.process(channels.slice(0, 2), onFrame, onAttack);
         } finally { frame.close(); }
       }
     } catch { fail(); }

@@ -5,7 +5,7 @@ export function createRuntime(url = 'https://www.youtube.com/watch?v=test', opti
   const liveObservers = new Set();
   const NativeObserver = dom.window.MutationObserver;
   dom.window.MutationObserver = class extends NativeObserver {
-    constructor(callback) { super(callback); liveObservers.add(this); }
+    observe(target, options) { super.observe(target, options); liveObservers.add(this); }
     disconnect() { liveObservers.delete(this); super.disconnect(); }
   };
   return {

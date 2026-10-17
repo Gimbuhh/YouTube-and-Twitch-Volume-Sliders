@@ -50,9 +50,11 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
   function writeOutput(owned, value) {
     const next = outputPercent(value);
     if (next === owned.applied) return;
+    const previous = owned.applied;
     owned.applied = next; // Own synchronous and queued volumechange events.
     owned.writing = true;
     try { setVolume(owned.video, next, { preserveMute: true }); }
+    catch (error) { owned.applied = previous; throw error; }
     finally { owned.writing = false; }
   }
 
@@ -103,11 +105,18 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     owned.analysisStarted = window.performance.now();
     owned.lufs = createLufsAnalysis({ window, context: owned.context, source: owned.source, track,
       onFrame: frame => {
-        if (session !== owned) return;
+        if (session !== owned || !owned.video.isConnected || owned.blocked) return;
         owned.lastLufsFrame = window.performance.now();
         if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== 'live' || isMuted(owned.video) || owned.preferred === 0 || owned.context.state !== 'running') return;
-        owned.lufsTracker ||= createLufsGainController();
-        owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
+        try {
+          // Respect native input before a fast cut, just as the polling path
+          // does. Increases still wait for its regular 50 ms output tick.
+          readPreferred(owned);
+          owned.lufsTracker ||= createLufsGainController();
+          owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
+          const output = owned.preferred * owned.gain;
+          if (outputPercent(output) < owned.applied) writeOutput(owned, output);
+        } catch { unavailable(owned); }
       },
       onFailure: () => {
         if (session === owned) unavailable(owned);
@@ -195,7 +204,8 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     if (session) {
       const owned = session;
       // A detached player's API can already point at the incoming player.
-      if (owned.video.isConnected) restore(owned);
+      try { if (owned.video.isConnected) restore(owned); }
+      catch { /* a failing outgoing player must not prevent capture cleanup */ }
       session = null;
       window.clearInterval(owned.timer);
       for (const type of ['emptied', 'loadstart']) owned.video.removeEventListener(type, owned.reset);
@@ -213,7 +223,8 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       video, preferred, applied: preferred, gain: 1, blocked: false
     };
     owned.reset = () => {
-      restore(owned);
+      try { restore(owned); }
+      catch { /* the source can become inaccessible before its load event */ }
       releaseCapture(owned);
       owned.blocked = false;
       report('Waiting for playback');

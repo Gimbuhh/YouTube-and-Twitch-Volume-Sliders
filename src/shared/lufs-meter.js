@@ -20,9 +20,11 @@ export function createLufsMeter(sampleRate) {
     2 * (highPassK * highPassK - 1) / highPassDenominator,
     (1 - highPassK / 0.5003270373238773 + highPassK * highPassK) / highPassDenominator];
   const frameLength = Math.round(sampleRate / 20);
+  const attackLength = Math.round(sampleRate / 50);
   const powers = new Float64Array(60);
   let states = [], weights = [], rawEnergy = [];
   let frameSamples = 0, frameEnergy = 0, frameCount = 0;
+  let attackSamples = 0, attackEnergy = 0;
   const lufs = power => power > 0 ? -0.691 + 10 * Math.log10(power) : -Infinity;
 
   function filter(value, coefficients, state, offset) {
@@ -33,7 +35,7 @@ export function createLufsMeter(sampleRate) {
   }
 
   return {
-    process(channels, onFrame) {
+    process(channels, onFrame, onAttack) {
       if (!channels.length || !channels[0]?.length) return;
       if (channels.length !== states.length) {
         if (channels.length > 6) throw new RangeError('Unsupported channel layout');
@@ -44,6 +46,7 @@ export function createLufsMeter(sampleRate) {
         rawEnergy = channels.map(() => 0);
         powers.fill(0);
         frameSamples = frameEnergy = frameCount = 0;
+        attackSamples = attackEnergy = 0;
       }
       for (let index = 0; index < channels[0].length; index++) {
         for (let channel = 0; channel < channels.length; channel++) {
@@ -52,6 +55,13 @@ export function createLufsMeter(sampleRate) {
           rawEnergy[channel] += value * value;
           const weighted = filter(filter(value, shelf, states[channel], 0), highPass, states[channel], 2);
           frameEnergy += weights[channel] * weighted * weighted;
+          attackEnergy += weights[channel] * weighted * weighted;
+        }
+        // Reuse the K-weighted samples for faster spike protection, without
+        // changing the programme meter's 50 ms frames or LUFS windows.
+        if (++attackSamples === attackLength) {
+          onAttack?.(attackEnergy / attackLength);
+          attackSamples = attackEnergy = 0;
         }
         if (++frameSamples !== frameLength) continue;
         const power = frameEnergy / frameLength;
@@ -83,9 +93,18 @@ export function createLufsGainController() {
   // level. This is a live listening target, not the EBU broadcast target.
   const targetPower = 10 ** ((-18 + 0.691) / 10);
   const history = [];
-  let time = 0, gain = 1, programmeGain = 1;
+  let time = 0, gain = 1, programmeGain = 1, fastUntil = -Infinity;
   return {
     update(frame, maxGain = 100) {
+      if (frame.attackPower != null) {
+        const power = frame.attackPower;
+        if (!Number.isFinite(power) || power <= 0) return gain;
+        // Reserve the short-window cut for output >10 LU above target, so
+        // ordinary speech peaks keep the established programme behavior.
+        if (power * programmeGain * programmeGain > targetPower * 10) fastUntil = time + .1;
+        if (time < fastUntil) gain = Math.min(gain, Math.max(.1, Math.sqrt(targetPower / power)));
+        return gain;
+      }
       const dt = Math.min(0.25, Math.max(0, frame.duration));
       if (!Number.isFinite(dt) || !Number.isFinite(frame.power) || !Number.isFinite(frame.rawPower)) return gain;
       time += dt;

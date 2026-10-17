@@ -103,9 +103,11 @@
       (1 - highPassK / 0.5003270373238773 + highPassK * highPassK) / highPassDenominator
     ];
     const frameLength = Math.round(sampleRate / 20);
+    const attackLength = Math.round(sampleRate / 50);
     const powers = new Float64Array(60);
     let states = [], weights = [], rawEnergy = [];
     let frameSamples = 0, frameEnergy = 0, frameCount = 0;
+    let attackSamples = 0, attackEnergy = 0;
     const lufs = (power) => power > 0 ? -0.691 + 10 * Math.log10(power) : -Infinity;
     function filter(value, coefficients, state, offset) {
       const output = coefficients[0] * value + state[offset];
@@ -114,7 +116,7 @@
       return output;
     }
     return {
-      process(channels, onFrame) {
+      process(channels, onFrame, onAttack) {
         if (!channels.length || !channels[0]?.length) return;
         if (channels.length !== states.length) {
           if (channels.length > 6) throw new RangeError("Unsupported channel layout");
@@ -123,6 +125,7 @@
           rawEnergy = channels.map(() => 0);
           powers.fill(0);
           frameSamples = frameEnergy = frameCount = 0;
+          attackSamples = attackEnergy = 0;
         }
         for (let index = 0; index < channels[0].length; index++) {
           for (let channel = 0; channel < channels.length; channel++) {
@@ -131,6 +134,11 @@
             rawEnergy[channel] += value * value;
             const weighted = filter(filter(value, shelf, states[channel], 0), highPass, states[channel], 2);
             frameEnergy += weights[channel] * weighted * weighted;
+            attackEnergy += weights[channel] * weighted * weighted;
+          }
+          if (++attackSamples === attackLength) {
+            onAttack?.(attackEnergy / attackLength);
+            attackSamples = attackEnergy = 0;
           }
           if (++frameSamples !== frameLength) continue;
           const power = frameEnergy / frameLength;
@@ -159,9 +167,16 @@
   function createLufsGainController() {
     const targetPower = 10 ** ((-18 + 0.691) / 10);
     const history2 = [];
-    let time = 0, gain = 1, programmeGain = 1;
+    let time = 0, gain = 1, programmeGain = 1, fastUntil = -Infinity;
     return {
       update(frame, maxGain = 100) {
+        if (frame.attackPower != null) {
+          const power = frame.attackPower;
+          if (!Number.isFinite(power) || power <= 0) return gain;
+          if (power * programmeGain * programmeGain > targetPower * 10) fastUntil = time + 0.1;
+          if (time < fastUntil) gain = Math.min(gain, Math.max(0.1, Math.sqrt(targetPower / power)));
+          return gain;
+        }
         const dt = Math.min(0.25, Math.max(0, frame.duration));
         if (!Number.isFinite(dt) || !Number.isFinite(frame.power) || !Number.isFinite(frame.rawPower)) return gain;
         time += dt;
@@ -208,11 +223,12 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
     super();
     this.meter = createLufsMeter(sampleRate);
     this.send = frame => this.port.postMessage(frame);
+    this.attack = power => this.port.postMessage({ attackPower: power });
     this.port.onmessage = () => { this.stopped = true; };
   }
   process(inputs) {
     if (this.stopped) return false;
-    try { this.meter.process(inputs[0] || [], this.send); }
+    try { this.meter.process(inputs[0] || [], this.send, this.attack); }
     catch { this.port.postMessage({ failed: true }); return false; }
     return true;
   }
@@ -264,6 +280,7 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
       try {
         reader = new window2.MediaStreamTrackProcessor({ track, maxBufferSize: 1 }).readable.getReader();
         let meter, rate, channels = [], stereo = [];
+        const onAttack = (power) => onFrame({ attackPower: power });
         while (!disposed) {
           const { value: frame, done } = await reader.read();
           if (done) break;
@@ -278,14 +295,14 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
               stereo = Array.from({ length: 2 }, () => new Float32Array(frame.numberOfFrames));
             }
             channels.forEach((channel, planeIndex) => frame.copyTo(channel, { planeIndex, format: "f32-planar" }));
-            if (channels.length === 1) meter.process([channels[0], channels[0]], onFrame);
+            if (channels.length === 1) meter.process([channels[0], channels[0]], onFrame, onAttack);
             else if (channels.length === 4 || channels.length === 6) {
               for (let i = 0; i < frame.numberOfFrames; i++) {
                 stereo[0][i] = channels.length === 4 ? 0.5 * (channels[0][i] + channels[2][i]) : channels[0][i] + Math.SQRT1_2 * (channels[2][i] + channels[4][i]);
                 stereo[1][i] = channels.length === 4 ? 0.5 * (channels[1][i] + channels[3][i]) : channels[1][i] + Math.SQRT1_2 * (channels[2][i] + channels[5][i]);
               }
-              meter.process(stereo, onFrame);
-            } else meter.process(channels.slice(0, 2), onFrame);
+              meter.process(stereo, onFrame, onAttack);
+            } else meter.process(channels.slice(0, 2), onFrame, onAttack);
           } finally {
             frame.close();
           }
@@ -364,10 +381,14 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     function writeOutput(owned, value) {
       const next = outputPercent(value);
       if (next === owned.applied) return;
+      const previous = owned.applied;
       owned.applied = next;
       owned.writing = true;
       try {
         setVolume(owned.video, next, { preserveMute: true });
+      } catch (error) {
+        owned.applied = previous;
+        throw error;
       } finally {
         owned.writing = false;
       }
@@ -424,11 +445,18 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         source: owned.source,
         track,
         onFrame: (frame) => {
-          if (session !== owned) return;
+          if (session !== owned || !owned.video.isConnected || owned.blocked) return;
           owned.lastLufsFrame = window2.performance.now();
           if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || isMuted(owned.video) || owned.preferred === 0 || owned.context.state !== "running") return;
-          owned.lufsTracker || (owned.lufsTracker = createLufsGainController());
-          owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
+          try {
+            readPreferred(owned);
+            owned.lufsTracker || (owned.lufsTracker = createLufsGainController());
+            owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
+            const output = owned.preferred * owned.gain;
+            if (outputPercent(output) < owned.applied) writeOutput(owned, output);
+          } catch {
+            unavailable(owned);
+          }
         },
         onFailure: () => {
           if (session === owned) unavailable(owned);
@@ -532,7 +560,10 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       if (session?.video === video) return;
       if (session) {
         const owned2 = session;
-        if (owned2.video.isConnected) restore(owned2);
+        try {
+          if (owned2.video.isConnected) restore(owned2);
+        } catch {
+        }
         session = null;
         window2.clearInterval(owned2.timer);
         for (const type of ["emptied", "loadstart"]) owned2.video.removeEventListener(type, owned2.reset);
@@ -554,7 +585,10 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         blocked: false
       };
       owned.reset = () => {
-        restore(owned);
+        try {
+          restore(owned);
+        } catch {
+        }
         releaseCapture(owned);
         owned.blocked = false;
         report("Waiting for playback");
@@ -3358,6 +3392,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       return value;
     };
     const finish = (event) => {
+      if (!pointerActive) return;
       const wasDragging = overlay.dataset.tmDragging === "true";
       if (event?.type === "pointerup" && wasDragging) snapDirectClickIfNeeded();
       overlay.dataset.tmDragging = "false";
@@ -3393,9 +3428,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     };
     slider.addEventListener("pointerdown", start);
     slider.addEventListener("pointermove", move);
-    slider.addEventListener("pointerup", finish);
     slider.addEventListener("click", snapDirectClickIfNeeded);
-    slider.addEventListener("pointercancel", finish);
     window2.addEventListener("pointerup", finish, true);
     window2.addEventListener("pointercancel", finish, true);
     window2.addEventListener("blur", finish);
@@ -3404,9 +3437,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       dispose() {
         slider.removeEventListener("pointerdown", start);
         slider.removeEventListener("pointermove", move);
-        slider.removeEventListener("pointerup", finish);
         slider.removeEventListener("click", snapDirectClickIfNeeded);
-        slider.removeEventListener("pointercancel", finish);
         window2.removeEventListener("pointerup", finish, true);
         window2.removeEventListener("pointercancel", finish, true);
         window2.removeEventListener("blur", finish);
