@@ -156,10 +156,10 @@
       }
     };
   }
-  function createLufsGainController(initialGain = 1) {
+  function createLufsGainController() {
     const targetPower = 10 ** ((-18 + 0.691) / 10);
     const history = [];
-    let time = 0, gain = initialGain, programmeGain = initialGain;
+    let time = 0, gain = 1, programmeGain = 1;
     return {
       update(frame, maxGain = 100) {
         const dt = Math.min(0.25, Math.max(0, frame.duration));
@@ -223,23 +223,29 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
     loaded.catch(() => modules.delete(context));
     return loaded;
   }
-  function createLufsAnalysis({ window: window2, context, source, onFrame, onFailure }) {
-    if (!context.audioWorklet || !window2.AudioWorkletNode || !window2.URL?.createObjectURL || !window2.Blob) return null;
-    let disposed = false, node = null;
+  function createLufsAnalysis({ window: window2, context, source, track, onFrame, onFailure }) {
+    const hasWorklet = context.audioWorklet && window2.AudioWorkletNode && window2.URL?.createObjectURL && window2.Blob;
+    if (!hasWorklet && !window2.MediaStreamTrackProcessor) return null;
+    let disposed = false, node = null, reader = null;
+    function releaseNode() {
+      if (!node) return;
+      try {
+        source.disconnect(node);
+      } catch {
+      }
+      node.disconnect();
+      node.port.onmessage = null;
+      node.onprocessorerror = null;
+      node.port.postMessage("stop");
+      node.port.close();
+      node = null;
+    }
     const owned = {
       dispose() {
         disposed = true;
-        if (!node) return;
-        try {
-          source.disconnect(node);
-        } catch {
-        }
-        node.disconnect();
-        node.port.onmessage = null;
-        node.onprocessorerror = null;
-        node.port.postMessage("stop");
-        node.port.close();
-        node = null;
+        if (reader) reader.cancel().catch(() => {
+        });
+        releaseNode();
       }
     };
     const fail = () => {
@@ -248,6 +254,52 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
         onFailure();
       }
     };
+    const readTrack = async () => {
+      if (disposed) return;
+      releaseNode();
+      if (!window2.MediaStreamTrackProcessor) {
+        fail();
+        return;
+      }
+      try {
+        reader = new window2.MediaStreamTrackProcessor({ track, maxBufferSize: 1 }).readable.getReader();
+        let meter, rate, channels = [], stereo = [];
+        while (!disposed) {
+          const { value: frame, done } = await reader.read();
+          if (done) break;
+          try {
+            if (disposed) break;
+            if (!meter || rate !== frame.sampleRate) {
+              rate = frame.sampleRate;
+              meter = createLufsMeter(rate);
+            }
+            if (channels.length !== frame.numberOfChannels || channels[0]?.length !== frame.numberOfFrames) {
+              channels = Array.from({ length: frame.numberOfChannels }, () => new Float32Array(frame.numberOfFrames));
+              stereo = Array.from({ length: 2 }, () => new Float32Array(frame.numberOfFrames));
+            }
+            channels.forEach((channel, planeIndex) => frame.copyTo(channel, { planeIndex, format: "f32-planar" }));
+            if (channels.length === 1) meter.process([channels[0], channels[0]], onFrame);
+            else if (channels.length === 4 || channels.length === 6) {
+              for (let i = 0; i < frame.numberOfFrames; i++) {
+                stereo[0][i] = channels.length === 4 ? 0.5 * (channels[0][i] + channels[2][i]) : channels[0][i] + Math.SQRT1_2 * (channels[2][i] + channels[4][i]);
+                stereo[1][i] = channels.length === 4 ? 0.5 * (channels[1][i] + channels[3][i]) : channels[1][i] + Math.SQRT1_2 * (channels[2][i] + channels[5][i]);
+              }
+              meter.process(stereo, onFrame);
+            } else meter.process(channels.slice(0, 2), onFrame);
+          } finally {
+            frame.close();
+          }
+        }
+      } catch {
+        fail();
+      } finally {
+        reader?.releaseLock();
+      }
+    };
+    if (!hasWorklet) {
+      readTrack();
+      return owned;
+    }
     try {
       loadMeter(window2, context).then(() => {
         if (disposed || context.state === "closed") return;
@@ -265,68 +317,15 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
         };
         node.onprocessorerror = fail;
         source.connect(node);
-      }).catch(fail);
+      }).catch(readTrack);
     } catch {
-      fail();
+      readTrack();
     }
     return owned;
   }
 
   // src/shared/normalization.js
   var outputPercent = (value) => value > 0 ? Math.max(1, Math.round(clampVolume(value))) : 0;
-  var TARGET_RMS = 0.1;
-  function measureAudioLevel(channels) {
-    if (ArrayBuffer.isView(channels)) channels = [channels];
-    let power = 0;
-    for (const samples of channels) {
-      let sum = 0;
-      for (const sample of samples) {
-        if (!Number.isFinite(sample)) return null;
-        sum += sample * sample;
-      }
-      power = Math.max(power, sum / Math.max(1, samples.length));
-    }
-    return power;
-  }
-  function createLoudnessTracker(initialGain = 1) {
-    const history = [];
-    let time = 0;
-    let gain = initialGain;
-    return {
-      update(samples, elapsedSeconds, maxGain = 100) {
-        const measuredPower = measureAudioLevel(samples);
-        const dt = Math.min(0.25, Math.max(0, elapsedSeconds));
-        if (!Number.isFinite(dt)) return gain;
-        time += dt;
-        while (history.length && history[0].time <= time - 3) history.shift();
-        if (measuredPower === null || measuredPower < 1e-4 || dt === 0) return gain;
-        history.push({ power: measuredPower, duration: dt, time });
-        let audibleSeconds = 0, energy = 0;
-        for (const frame of history) {
-          audibleSeconds += frame.duration;
-          energy += frame.power * frame.duration;
-        }
-        const average = energy / audibleSeconds;
-        let duration = 0, gatedEnergy = 0;
-        for (const frame of history) {
-          if (frame.power < average * 0.1) continue;
-          duration += frame.duration;
-          gatedEnergy += frame.power * frame.duration;
-        }
-        const power = gatedEnergy / duration;
-        const reference = Math.max(power, measuredPower);
-        let desired = Math.min(maxGain, Math.max(0.1, TARGET_RMS / Math.sqrt(reference)));
-        if (audibleSeconds < 1) desired = Math.min(1, desired);
-        if (desired < gain) {
-          gain = desired;
-        } else {
-          const seconds = time < 3 ? 0.9 : 3;
-          gain = Math.exp(Math.log(gain) + (Math.log(desired) - Math.log(gain)) * (1 - Math.exp(-dt / seconds)));
-        }
-        return gain;
-      }
-    };
-  }
   function createVolumeNormalizer({ window: window2, getVolume, setVolume, isMuted, onStatusChanged = () => {
   } }) {
     let enabled = false;
@@ -358,7 +357,6 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         owned.preferred = actual;
         owned.applied = actual;
         owned.gain = 1;
-        owned.tracker = createLoudnessTracker();
         owned.lufsTracker = null;
       }
       return owned.preferred;
@@ -378,17 +376,16 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       const preferred = readPreferred(owned);
       owned.gain = 1;
       writeOutput(owned, preferred);
-      owned.tracker = createLoudnessTracker();
       owned.lufsTracker = null;
+      owned.lastLufsFrame = null;
+      owned.analysisStarted = window2.performance.now();
     }
     function releaseCapture(owned) {
       owned.lufs?.dispose();
       owned.lufs = null;
       owned.lastLufsFrame = null;
       owned.source?.disconnect();
-      owned.splitter?.disconnect();
-      owned.analysers?.forEach((analyser) => analyser.disconnect());
-      owned.source = owned.splitter = owned.analysers = owned.track = null;
+      owned.source = owned.track = null;
       if (owned.stream) {
         owned.stream.removeEventListener("addtrack", owned.onTrack);
         for (const track of owned.stream.getTracks()) track.stop();
@@ -418,26 +415,29 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       owned.lastLufsFrame = null;
       owned.source?.disconnect();
       owned.source = owned.context.createMediaStreamSource(new window2.MediaStream([track]));
-      owned.source.connect(owned.splitter);
       owned.track = track;
-      owned.tracker = createLoudnessTracker();
       owned.lufsTracker = null;
+      owned.analysisStarted = window2.performance.now();
       owned.lufs = createLufsAnalysis({
         window: window2,
         context: owned.context,
         source: owned.source,
+        track,
         onFrame: (frame) => {
           if (session !== owned) return;
           owned.lastLufsFrame = window2.performance.now();
           if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || isMuted(owned.video) || owned.preferred === 0 || owned.context.state !== "running") return;
-          owned.lufsTracker || (owned.lufsTracker = createLufsGainController(owned.gain));
+          owned.lufsTracker || (owned.lufsTracker = createLufsGainController());
           owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
         },
         onFailure: () => {
-          owned.lastLufsFrame = null;
-          owned.tracker = createLoudnessTracker(owned.gain);
+          if (session === owned) unavailable(owned);
         }
       });
+      if (owned.blocked) {
+        owned.lufs?.dispose();
+        owned.lufs = null;
+      } else if (!owned.lufs) unavailable(owned);
     }
     function resume(owned) {
       if (!owned.context || owned.context.state !== "suspended" || owned.resuming) return;
@@ -461,6 +461,8 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         return;
       }
       if (video.paused || video.ended || video.readyState < 2) {
+        owned.lastLufsFrame = null;
+        owned.analysisStarted = window2.performance.now();
         report("Waiting for playback");
         return;
       }
@@ -468,21 +470,14 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         if (!owned.stream) {
           const capture = video.captureStream || video.mozCaptureStream;
           const AudioContext = window2.AudioContext || window2.webkitAudioContext;
-          if (!capture || !AudioContext || !window2.MediaStream) {
+          const hasAnalysis = window2.MediaStreamTrackProcessor || window2.AudioWorkletNode && window2.Blob && window2.URL?.createObjectURL;
+          if (!capture || !AudioContext || !window2.MediaStream || !hasAnalysis) {
             owned.blocked = true;
             report("Unavailable in this browser");
             return;
           }
           owned.stream = capture.call(video);
           owned.context = new AudioContext();
-          owned.splitter = owned.context.createChannelSplitter(6);
-          owned.analysers = Array.from({ length: 6 }, (_, channel) => {
-            const analyser = owned.context.createAnalyser();
-            analyser.fftSize = Math.min(32768, 2 ** Math.ceil(Math.log2((owned.context.sampleRate || 48e3) * 0.05)));
-            owned.splitter.connect(analyser, channel);
-            return analyser;
-          });
-          owned.samples = owned.analysers.map((analyser) => new Float32Array(analyser.fftSize));
           owned.onTrack = () => {
             try {
               connectTrack(owned);
@@ -492,9 +487,11 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           };
           owned.stream.addEventListener("addtrack", owned.onTrack);
           connectTrack(owned);
+          if (owned.blocked) return;
           resume(owned);
         }
         connectTrack(owned);
+        if (owned.blocked) return;
         readPreferred(owned);
         if (owned.context.state !== "running") {
           restore(owned);
@@ -507,21 +504,23 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           return;
         }
         if (isMuted(video) || owned.preferred === 0) {
+          owned.lastLufsFrame = null;
+          owned.analysisStarted = window2.performance.now();
           report("Muted");
           return;
         }
         const now = window2.performance.now();
-        const dt = (now - owned.lastSample) / 1e3;
-        owned.lastSample = now;
-        if (owned.lastLufsFrame == null || now - owned.lastLufsFrame > 500) {
-          if (owned.lastLufsFrame != null) {
-            owned.lufs?.dispose();
-            owned.lufs = null;
-            owned.lastLufsFrame = null;
-            owned.tracker = createLoudnessTracker(owned.gain);
+        if (owned.lastLufsFrame == null) {
+          if (now - owned.analysisStarted > 3e3) {
+            unavailable(owned);
+            return;
           }
-          owned.analysers.forEach((analyser, channel) => analyser.getFloatTimeDomainData(owned.samples[channel]));
-          owned.gain = owned.tracker.update(owned.samples, dt, 100 / Math.max(1, owned.preferred));
+          report("Starting audio analysis");
+          return;
+        }
+        if (now - owned.lastLufsFrame > 500) {
+          unavailable(owned);
+          return;
         }
         writeOutput(owned, owned.preferred * owned.gain);
         report(owned.applied === 100 && owned.gain > 1 ? "Active \u2014 at volume limit" : "Active");
@@ -552,8 +551,6 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         preferred,
         applied: preferred,
         gain: 1,
-        tracker: createLoudnessTracker(),
-        lastSample: window2.performance.now(),
         blocked: false
       };
       owned.reset = () => {
@@ -1375,7 +1372,6 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       help.className = "tm-volume-options-help";
       help.textContent = "Keeps sources closer in loudness. Your slider sets the listening level. Increases are limited to normal player volume.";
       help.hidden = true;
-      toggle.title = help.textContent;
       section.appendChild(help);
       const feedback = document2.createElement("div");
       feedback.className = "tm-volume-options-normalization-feedback";

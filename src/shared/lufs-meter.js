@@ -78,12 +78,12 @@ export function createLufsMeter(sampleRate) {
 // The meter stays ungated. This separate live gain policy excludes quiet phrase
 // endings and preserves the noise-floor hold. Temporary protection recovers
 // separately so one transient cannot keep the programme quiet for seconds.
-export function createLufsGainController(initialGain = 1) {
+export function createLufsGainController() {
   // Source reference before the user's volume, close to the previous steady-tone
   // level. This is a live listening target, not the EBU broadcast target.
   const targetPower = 10 ** ((-18 + 0.691) / 10);
   const history = [];
-  let time = 0, gain = initialGain, programmeGain = initialGain;
+  let time = 0, gain = 1, programmeGain = 1;
   return {
     update(frame, maxGain = 100) {
       const dt = Math.min(0.25, Math.max(0, frame.duration));

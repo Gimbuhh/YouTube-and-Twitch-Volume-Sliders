@@ -23,12 +23,98 @@ function fixture() {
   };
   const context = { state: 'running', audioWorklet: { addModule() { loads++; return loaded; } } };
   const source = { connect(node) { connected.add(node); }, disconnect(node) { connected.delete(node); } };
-  const create = () => createLufsAnalysis({ window, context, source, onFrame: frame => frames.push(frame), onFailure: () => failures.push(true) });
+  const track = {};
+  const create = () => createLufsAnalysis({ window, context, source, track, onFrame: frame => frames.push(frame), onFailure: () => failures.push(true) });
   return { window, context, nodes, connected, frames, failures, create, resolve, reject,
-    get loads() { return loads; }, get revoked() { return revoked; }, get moduleBlob() { return moduleBlob; } };
+    track, get loads() { return loads; }, get revoked() { return revoked; }, get moduleBlob() { return moduleBlob; } };
 }
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
+
+function capturedFrames(f) {
+  let input, cancelled = 0;
+  const readable = new ReadableStream({ start(controller) { input = controller; }, cancel() { cancelled++; } });
+  f.window.MediaStreamTrackProcessor = class {
+    constructor(options) {
+      assert.equal(options.track, f.track);
+      assert.equal(options.maxBufferSize, 1);
+      this.readable = readable;
+    }
+  };
+  const frames = [];
+  return { readable, get cancelled() { return cancelled; },
+    fail() { input.error(new Error('Capture failed')); },
+    send(levels, rate = 48000, broken = false) {
+      const frame = { sampleRate: rate, numberOfChannels: levels.length, numberOfFrames: rate / 10, closed: 0,
+        copyTo(destination, { planeIndex, format }) {
+          assert.equal(format, 'f32-planar');
+          if (broken) throw new Error('Unreadable AudioData');
+          for (let i = 0; i < destination.length; i++) destination[i] = levels[planeIndex] * Math.sin(2 * Math.PI * 1000 * i / rate);
+        }, close() { this.closed++; }
+      };
+      frames.push(frame); input.enqueue(frame); return frame;
+    }, frames
+  };
+}
+
+test('a blocked worklet reads native audio frames through the same LUFS meter', async () => {
+  const f = fixture(), capture = capturedFrames(f), owned = f.create();
+  f.reject(new Error('CSP blocked blob:')); await flush();
+  capture.send([0.1, -0.1], 96000); await flush();
+  assert.equal(f.frames.length, 2);
+  assert.ok(f.frames.every(frame => frame.power > 0 && Math.abs(frame.rawPower - .005) < 1e-8));
+  assert.equal(f.nodes.length, 0, 'direct analysis creates no audio output node');
+  assert.equal(f.revoked, 1);
+  assert.deepEqual(f.failures, []);
+  owned.dispose(); await flush();
+  assert.equal(capture.cancelled, 1);
+  assert.equal(capture.readable.locked, false);
+  assert.ok(capture.frames.every(frame => frame.closed === 1));
+});
+
+test('direct frame analysis matches stereo speaker mixing at both sample rates', async () => {
+  for (const rate of [48000, 96000]) {
+    // Identical stereo and duplicated mono have the same power. Quad mixes
+    // front/rear at 0.5; 5.1 center at sqrt(0.5); LFE is excluded.
+    for (const [levels, expectedLufs] of [
+      [[.1], -20], [[.1, -.1], -20], [[0, 0, .2, -.2], -20],
+      [[0, 0, .1, 0, 0, 0], -23.01], [[0, 0, 0, .9, 0, 0], -Infinity]
+    ]) {
+      const f = fixture(), capture = capturedFrames(f);
+      delete f.window.AudioWorkletNode;
+      const owned = f.create(); capture.send(levels, rate); await flush();
+      const frame = f.frames.at(-1);
+      const lufs = -.691 + 10 * Math.log10(frame.power);
+      assert.ok(lufs === expectedLufs || Math.abs(lufs - expectedLufs) < .05, `${levels} at ${rate}: ${lufs} LUFS`);
+      owned.dispose(); await flush();
+      assert.deepEqual(f.failures, []);
+      assert.equal(capture.readable.locked, false);
+    }
+  }
+});
+
+test('direct capture errors close frames, cancel the reader and fail only once', async () => {
+  for (const mode of ['constructor', 'read', 'copy']) {
+    const f = fixture(), capture = capturedFrames(f);
+    delete f.context.audioWorklet;
+    if (mode === 'constructor') f.window.MediaStreamTrackProcessor = class { constructor() { throw new Error('Unsupported track'); } };
+    const owned = f.create();
+    if (mode === 'read') capture.fail();
+    if (mode === 'copy') capture.send([.1], 48000, true);
+    await flush(); owned.dispose(); await flush();
+    assert.equal(f.failures.length, 1);
+    assert.ok(capture.frames.every(frame => frame.closed === 1));
+    assert.equal(capture.readable.locked, false);
+  }
+});
+
+test('disposal during module loading does not start a late native reader', async () => {
+  const f = fixture(), capture = capturedFrames(f), owned = f.create();
+  owned.dispose(); f.reject(new Error('CSP')); await flush();
+  assert.equal(capture.readable.locked, false);
+  assert.deepEqual(f.failures, []);
+  assert.equal(f.frames.length, 0);
+});
 
 test('worklet is analysis-only, reuses its context module, and releases ports and connections', async () => {
   const f = fixture(), first = f.create();

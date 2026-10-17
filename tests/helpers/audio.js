@@ -1,7 +1,8 @@
 // A controllable analysis-only capture contract. Real Web Audio coverage lives
 // in tests/browser/normalization.mjs; this fixture never claims browser support.
 export function mockAudioCapture(window, video) {
-  const state = { amplitude: 0.5, paused: false, readyState: 4, muted: false, captures: 0, contexts: [], streams: [], captureError: null, sampleError: false };
+  const state = { amplitude: 0.5, paused: false, readyState: 4, captures: 0, contexts: [], streams: [], nodes: [],
+    captureError: null, loadError: false, processorError: false, stalled: false };
   class Track extends window.EventTarget {
     constructor(kind) { super(); this.kind = kind; this.readyState = 'live'; this.muted = false; }
     stop() { this.readyState = 'ended'; }
@@ -13,22 +14,45 @@ export function mockAudioCapture(window, video) {
     getVideoTracks() { return this.tracks.filter(track => track.kind === 'video'); }
   }
   class AudioContext {
-    constructor() { this.state = 'running'; this.closed = false; state.contexts.push(this); }
-    createAnalyser() {
-      return { fftSize: 2048, disconnect() {}, getFloatTimeDomainData(samples) {
-        if (state.sampleError) throw new Error('Audio access lost');
-        samples.fill(state.amplitude);
-      } };
+    constructor() {
+      this.state = 'running'; this.closed = false; state.contexts.push(this);
+      this.audioWorklet = { addModule: async () => { if (state.loadError) throw new Error('Module blocked'); } };
     }
     createMediaStreamSource(stream) {
-      return { stream, connect() {}, disconnect() {} };
+      const connected = new Set();
+      return { stream, connect(node) { connected.add(node); node.connected = true; },
+        disconnect(node) {
+          for (const item of connected) if (!node || node === item) { item.connected = false; connected.delete(item); }
+        } };
     }
-    createChannelSplitter() { return { connect() {}, disconnect() {} }; }
+    createAnalyser() { throw new Error('RMS analyser must not be allocated'); }
+    createChannelSplitter() { throw new Error('RMS splitter must not be allocated'); }
     resume() { this.state = 'running'; return Promise.resolve(); }
     close() { this.closed = true; this.state = 'closed'; return Promise.resolve(); }
   }
   window.AudioContext = AudioContext;
   window.MediaStream = Stream;
+  window.Blob ||= class {};
+  window.URL ||= {};
+  window.URL.createObjectURL = () => 'blob:mock-audio';
+  window.URL.revokeObjectURL = () => {};
+  window.AudioWorkletNode = class {
+    constructor(context) {
+      state.nodes.push(this);
+      this.port = { onmessage: null, postMessage() {}, close: () => {
+        this.port.closed = true; window.clearInterval(this.timer);
+      } };
+      this.timer = window.setInterval(() => {
+        if (!this.connected || context.state !== 'running' || state.stalled) return;
+        if (state.processorError) { this.onprocessorerror?.(); return; }
+        // Controlled stereo energy frames, not a replacement audio engine.
+        // Native meter behavior is covered by the real-browser audio suite.
+        const rawPower = state.amplitude ** 2, power = 2 * rawPower;
+        this.port.onmessage?.({ data: { power, rawPower, momentaryPower: power, duration: 0.05 } });
+      }, 50);
+    }
+    disconnect() { this.connected = false; }
+  };
   video.captureStream = () => {
     state.captures++;
     if (state.captureError) throw state.captureError;

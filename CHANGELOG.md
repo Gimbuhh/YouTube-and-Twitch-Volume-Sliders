@@ -18,6 +18,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Fixed
 
+- **Both:** Normalization can stay active when the site's security policy blocks its audio processor module.
 - **YouTube:** Volume Slider Options stays visible when YouTube retains a hidden progress bar before the active controls. The popup anchors to a rendered progress bar in the current player, falling back to its own button when none is available.
 - **Twitch:** Narrow channel, video, and clip players keep the custom slider and Options button when zooming or resizing. Compact preview detection applies only on browsing pages, preventing native volume controls from appearing beside or replacing the custom slider.
 

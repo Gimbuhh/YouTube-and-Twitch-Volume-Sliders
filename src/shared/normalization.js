@@ -4,71 +4,6 @@ import { createLufsGainController } from './lufs-meter.js';
 
 // Player APIs round percentages; a positive preference must stay audible.
 const outputPercent = (value) => value > 0 ? Math.max(1, Math.round(clampVolume(value))) : 0;
-const TARGET_RMS = 0.1; // Leave more headroom to match quiet sources without amplification.
-
-// Measure channels independently: an analyser's mono downmix can cancel stereo
-// audio. The loudest channel also works for mono and center-channel dialogue.
-export function measureAudioLevel(channels) {
-  if (ArrayBuffer.isView(channels)) channels = [channels];
-  let power = 0;
-  for (const samples of channels) {
-    let sum = 0;
-    for (const sample of samples) {
-      if (!Number.isFinite(sample)) return null;
-      sum += sample * sample;
-    }
-    power = Math.max(power, sum / Math.max(1, samples.length));
-  }
-  return power;
-}
-
-// A gated RMS approximation; this is not a LUFS meter or peak limiter.
-export function createLoudnessTracker(initialGain = 1) {
-  const history = [];
-  let time = 0;
-  let gain = initialGain;
-  return {
-    update(samples, elapsedSeconds, maxGain = 100) {
-      const measuredPower = measureAudioLevel(samples);
-      const dt = Math.min(0.25, Math.max(0, elapsedSeconds));
-      if (!Number.isFinite(dt)) return gain;
-      time += dt;
-      while (history.length && history[0].time <= time - 3) history.shift();
-      // Freeze through silence/noise floors instead of turning them up.
-      if (measuredPower === null || measuredPower < 0.0001 || dt === 0) return gain;
-      history.push({ power: measuredPower, duration: dt, time });
-      let audibleSeconds = 0, energy = 0;
-      for (const frame of history) {
-        audibleSeconds += frame.duration;
-        energy += frame.power * frame.duration;
-      }
-      const average = energy / audibleSeconds;
-      // Ignore frames more than 10 dB below the current active average, so a
-      // sentence's quiet endings do not keep pulling the level estimate down.
-      let duration = 0, gatedEnergy = 0;
-      for (const frame of history) {
-        if (frame.power < average * 0.1) continue;
-        duration += frame.duration;
-        gatedEnergy += frame.power * frame.duration;
-      }
-      const power = gatedEnergy / duration;
-      // A new loud passage can attenuate immediately instead of waiting for
-      // the three-second history to catch up. Quiet passages recover slowly.
-      const reference = Math.max(power, measuredPower);
-      let desired = Math.min(maxGain, Math.max(0.1, TARGET_RMS / Math.sqrt(reference)));
-      if (audibleSeconds < 1) desired = Math.min(1, desired);
-      if (desired < gain) {
-        // Once louder audio is measured, remove the boost without another ramp.
-        gain = desired;
-      } else {
-        // Recover cautiously between phrases; sustained quiet sources still match.
-        const seconds = time < 3 ? 0.9 : 3;
-        gain = Math.exp(Math.log(gain) + (Math.log(desired) - Math.log(gain)) * (1 - Math.exp(-dt / seconds)));
-      }
-      return gain;
-    }
-  };
-}
 
 // Capture is an analysis-only branch. Never route it to speakers or attach a
 // MediaElementAudioSourceNode: a CORS failure must not silence normal playback.
@@ -107,7 +42,6 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       owned.preferred = actual;
       owned.applied = actual;
       owned.gain = 1;
-      owned.tracker = createLoudnessTracker();
       owned.lufsTracker = null;
     }
     return owned.preferred;
@@ -126,8 +60,9 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     const preferred = readPreferred(owned);
     owned.gain = 1;
     writeOutput(owned, preferred);
-    owned.tracker = createLoudnessTracker();
     owned.lufsTracker = null;
+    owned.lastLufsFrame = null;
+    owned.analysisStarted = window.performance.now();
   }
 
   function releaseCapture(owned) {
@@ -135,9 +70,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     owned.lufs = null;
     owned.lastLufsFrame = null;
     owned.source?.disconnect();
-    owned.splitter?.disconnect();
-    owned.analysers?.forEach((analyser) => analyser.disconnect());
-    owned.source = owned.splitter = owned.analysers = owned.track = null;
+    owned.source = owned.track = null;
     if (owned.stream) {
       owned.stream.removeEventListener('addtrack', owned.onTrack);
       for (const track of owned.stream.getTracks()) track.stop();
@@ -165,23 +98,23 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     owned.lastLufsFrame = null;
     owned.source?.disconnect();
     owned.source = owned.context.createMediaStreamSource(new window.MediaStream([track]));
-    owned.source.connect(owned.splitter);
     owned.track = track;
-    owned.tracker = createLoudnessTracker();
     owned.lufsTracker = null;
-    owned.lufs = createLufsAnalysis({ window, context: owned.context, source: owned.source,
+    owned.analysisStarted = window.performance.now();
+    owned.lufs = createLufsAnalysis({ window, context: owned.context, source: owned.source, track,
       onFrame: frame => {
         if (session !== owned) return;
         owned.lastLufsFrame = window.performance.now();
         if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== 'live' || isMuted(owned.video) || owned.preferred === 0 || owned.context.state !== 'running') return;
-        owned.lufsTracker ||= createLufsGainController(owned.gain);
+        owned.lufsTracker ||= createLufsGainController();
         owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
       },
       onFailure: () => {
-        owned.lastLufsFrame = null;
-        owned.tracker = createLoudnessTracker(owned.gain);
+        if (session === owned) unavailable(owned);
       }
     });
+    if (owned.blocked) { owned.lufs?.dispose(); owned.lufs = null; }
+    else if (!owned.lufs) unavailable(owned);
   }
 
   function resume(owned) {
@@ -198,6 +131,8 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     if (owned.blocked) return;
     if (video.mediaKeys) { unavailable(owned); return; }
     if (video.paused || video.ended || video.readyState < 2) {
+      owned.lastLufsFrame = null;
+      owned.analysisStarted = window.performance.now();
       report('Waiting for playback');
       return;
     }
@@ -205,30 +140,24 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       if (!owned.stream) {
         const capture = video.captureStream || video.mozCaptureStream;
         const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (!capture || !AudioContext || !window.MediaStream) {
+        const hasAnalysis = window.MediaStreamTrackProcessor || (window.AudioWorkletNode && window.Blob && window.URL?.createObjectURL);
+        if (!capture || !AudioContext || !window.MediaStream || !hasAnalysis) {
           owned.blocked = true;
           report('Unavailable in this browser');
           return;
         }
         owned.stream = capture.call(video);
         owned.context = new AudioContext();
-        owned.splitter = owned.context.createChannelSplitter(6);
-        owned.analysers = Array.from({ length: 6 }, (_, channel) => {
-          const analyser = owned.context.createAnalyser();
-          // Cover each 50 ms tick without retaining a long pre-spike average.
-          analyser.fftSize = Math.min(32768, 2 ** Math.ceil(Math.log2((owned.context.sampleRate || 48000) * 0.05)));
-          owned.splitter.connect(analyser, channel);
-          return analyser;
-        });
-        owned.samples = owned.analysers.map((analyser) => new Float32Array(analyser.fftSize));
         owned.onTrack = () => {
           try { connectTrack(owned); } catch { unavailable(owned); }
         };
         owned.stream.addEventListener('addtrack', owned.onTrack);
         connectTrack(owned);
+        if (owned.blocked) return;
         resume(owned);
       }
       connectTrack(owned);
+      if (owned.blocked) return;
       readPreferred(owned);
       if (owned.context.state !== 'running') {
         restore(owned);
@@ -241,22 +170,18 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         return;
       }
       if (isMuted(video) || owned.preferred === 0) {
+        owned.lastLufsFrame = null;
+        owned.analysisStarted = window.performance.now();
         report('Muted');
         return;
       }
       const now = window.performance.now();
-      const dt = (now - owned.lastSample) / 1000;
-      owned.lastSample = now;
-      if (owned.lastLufsFrame == null || now - owned.lastLufsFrame > 500) {
-        if (owned.lastLufsFrame != null) {
-          owned.lufs?.dispose();
-          owned.lufs = null;
-          owned.lastLufsFrame = null;
-          owned.tracker = createLoudnessTracker(owned.gain);
-        }
-        owned.analysers.forEach((analyser, channel) => analyser.getFloatTimeDomainData(owned.samples[channel]));
-        owned.gain = owned.tracker.update(owned.samples, dt, 100 / Math.max(1, owned.preferred));
+      if (owned.lastLufsFrame == null) {
+        if (now - owned.analysisStarted > 3000) { unavailable(owned); return; }
+        report('Starting audio analysis');
+        return;
       }
+      if (now - owned.lastLufsFrame > 500) { unavailable(owned); return; }
       writeOutput(owned, owned.preferred * owned.gain);
       // A quiet measurement does not mean the live capture source disappeared.
       report(owned.applied === 100 && owned.gain > 1 ? 'Active — at volume limit' : 'Active');
@@ -285,8 +210,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     }
     const preferred = clampVolume(getVolume(video));
     const owned = session = {
-      video, preferred, applied: preferred, gain: 1, tracker: createLoudnessTracker(),
-      lastSample: window.performance.now(), blocked: false
+      video, preferred, applied: preferred, gain: 1, blocked: false
     };
     owned.reset = () => {
       restore(owned);

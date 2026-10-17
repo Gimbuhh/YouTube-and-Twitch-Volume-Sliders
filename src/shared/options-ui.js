@@ -320,7 +320,6 @@ export function createOptionsUi(dependencies) {
         help.className = 'tm-volume-options-help';
         help.textContent = 'Keeps sources closer in loudness. Your slider sets the listening level. Increases are limited to normal player volume.';
         help.hidden = true;
-        toggle.title = help.textContent;
         section.appendChild(help);
         const feedback = document.createElement('div');
         feedback.className = 'tm-volume-options-normalization-feedback';

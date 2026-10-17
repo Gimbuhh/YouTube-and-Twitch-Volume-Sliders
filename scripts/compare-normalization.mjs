@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createLoudnessTracker } from '../src/shared/normalization.js';
+import { createLoudnessTracker } from '../tests/fixtures/normalization-rms.js';
 import { createLufsMeter, createLufsGainController } from '../src/shared/lufs-meter.js';
 
 // Optional developer comparison: FFmpeg is the independent meter, never a

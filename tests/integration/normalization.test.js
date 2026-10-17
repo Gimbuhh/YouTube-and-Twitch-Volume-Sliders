@@ -42,9 +42,11 @@ async function prepare(config, t, { saved = false, blockedStorage = false } = {}
     return originalSetInterval(callback, delay, ...args);
   };
   runtime.window.clearInterval = id => { ticks.delete(id); originalClearInterval(id); };
-  const advance = () => {
+  const advance = async () => {
+    await new Promise(resolve => setImmediate(resolve));
     for (let i = 0; i < 140; i++) {
       now += 50;
+      await new Promise(resolve => setImmediate(resolve));
       for (const tick of ticks.values()) {
         if (now < tick.next) continue;
         tick.next += tick.delay;
@@ -60,12 +62,20 @@ async function prepare(config, t, { saved = false, blockedStorage = false } = {}
 }
 
 for (const config of platforms) {
+  test(`${config.file}: the standalone artifact contains only the LUFS normalization path`, async () => {
+    const artifact = await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`, import.meta.url), 'utf8');
+    assert.match(artifact, /tm-lufs-analysis/);
+    for (const removed of ['createLoudnessTracker', 'TARGET_RMS', 'createAnalyser', 'createChannelSplitter', 'getFloatTimeDomainData']) {
+      assert.ok(!artifact.includes(removed), `${removed} is absent from the production bundle`);
+    }
+  });
+
   test(`${config.file}: normalization icon stays static through output, mute and fallback and hides when disabled`, async t => {
     const f = await prepare(config, t, { saved: true });
     const indicator = f.document.querySelector('.tm-normalization-icon');
     const icon = f.document.querySelector('.tm-volume-icon-cell');
     const slider = f.document.getElementById('tm-volume-slider-range');
-    f.advance();
+    await f.advance();
     assert.equal(indicator.hidden, false);
     assert.equal(indicator.textContent, '');
     assert.equal(indicator.title, 'Auto-normalize volume is on');
@@ -73,16 +83,16 @@ for (const config of platforms) {
     assert.equal(slider.value, '50');
     assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
     f.audio.amplitude = 0.02;
-    for (let i = 0; i < 6 && f.rawVolume() < 100; i++) f.advance();
+    for (let i = 0; i < 6 && f.rawVolume() < 100; i++) await f.advance();
     assert.equal(indicator.innerHTML, artwork);
     assert.match(f.document.getElementById('tm-volume-options-normalization-details').textContent, /Output 100%/);
     assert.equal(slider.value, '50');
     if (config.file === 'youtube') f.api.mute(); else f.api.setMuted(true);
-    f.advance(); assert.equal(indicator.innerHTML, artwork);
+    await f.advance(); assert.equal(indicator.innerHTML, artwork);
     assert.equal(indicator.hidden, false);
     if (config.file === 'youtube') f.api.unMute(); else f.api.setMuted(false);
     f.audio.streams[0].getAudioTracks()[0].muted = true;
-    f.advance(); assert.equal(indicator.innerHTML, artwork);
+    await f.advance(); assert.equal(indicator.innerHTML, artwork);
     assert.equal(indicator.hidden, false);
     assert.equal(indicator.title, 'Auto-normalize volume is on');
     assert.match(f.document.getElementById('tm-volume-options-normalization-status').textContent, /Waiting for accessible audio/);
@@ -95,11 +105,11 @@ for (const config of platforms) {
 
   test(`${config.file}: quiet continuous audio does not cycle the source status or rebuild capture`, async t => {
     const f = await prepare(config, t, { saved: true });
-    f.advance();
+    await f.advance();
     const status = f.document.getElementById('tm-volume-options-normalization-status');
     const details = f.document.getElementById('tm-volume-options-normalization-details');
     for (const amplitude of [0.005, 0.025, 0.005, 0.025, 0]) {
-      f.audio.amplitude = amplitude; f.advance();
+      f.audio.amplitude = amplitude; await f.advance();
       assert.ok(status.textContent.startsWith('Active'));
       assert.equal(details.hidden, false);
       assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
@@ -113,7 +123,7 @@ for (const config of platforms) {
     const f = await prepare(config, t);
     assert.equal(f.toggle.getAttribute('aria-checked'), 'false');
     assert.equal(f.audio.captures, 0);
-    f.toggle.click(); f.advance();
+    f.toggle.click(); await f.advance();
     assert.equal(f.toggle.getAttribute('aria-checked'), 'true');
     assert.equal(f.window.localStorage.getItem(f.optionKey), 'true');
     assert.ok(f.rawVolume() < 20);
@@ -138,7 +148,7 @@ for (const config of platforms) {
 
   test(`${config.file}: saved opt-in starts automatically; mode Off releases capture and retains opt-in`, async t => {
     const f = await prepare(config, t, { saved: true });
-    f.advance(); assert.equal(f.audio.captures, 1); assert.ok(f.rawVolume() < 20);
+    await f.advance(); assert.equal(f.audio.captures, 1); assert.ok(f.rawVolume() < 20);
     const offSelect = f.document.getElementById('tm-volume-options-mode');
     offSelect.value = 'off';
     offSelect.dispatchEvent(new f.window.Event('change', { bubbles: true }));
@@ -149,22 +159,22 @@ for (const config of platforms) {
     const onSelect = f.document.getElementById('tm-volume-options-mode');
     onSelect.value = 'on';
     onSelect.dispatchEvent(new f.window.Event('change', { bubbles: true }));
-    f.advance(); assert.equal(f.audio.captures, 2); assert.ok(f.rawVolume() < 20);
+    await f.advance(); assert.equal(f.audio.captures, 2); assert.ok(f.rawVolume() < 20);
     assert.equal(f.document.querySelector('.tm-normalization-icon').hidden, false);
   });
 
   test(`${config.file}: opt-in works for the session when settings storage is blocked`, async t => {
     const f = await prepare(config, t, { blockedStorage: true });
-    f.toggle.click(); f.advance();
+    f.toggle.click(); await f.advance();
     assert.equal(f.toggle.getAttribute('aria-checked'), 'true'); assert.ok(f.rawVolume() < 20);
     f.toggle.click(); assert.equal(f.rawVolume(), 50);
   });
 
   test(`${config.file}: inaccessible capture restores volume and mute remains user-controlled`, async t => {
     const f = await prepare(config, t, { saved: true });
-    f.advance();
+    await f.advance();
     f.audio.streams[0].getAudioTracks()[0].muted = true;
-    f.advance(); assert.equal(f.rawVolume(), 50);
+    await f.advance(); assert.equal(f.rawVolume(), 50);
     // Restore must never unmute a user-muted player.
     if (config.file === 'youtube') f.api.mute(); else f.api.setMuted(true);
     f.toggle.click(); assert.equal(f.state.muted, true); assert.equal(f.rawVolume(), 50);
@@ -173,19 +183,19 @@ for (const config of platforms) {
 
   test(`${config.file}: reusing the video for a new source resets correction and capture`, async t => {
     const f = await prepare(config, t, { saved: true });
-    f.advance(); assert.ok(f.rawVolume() < 20);
+    await f.advance(); assert.ok(f.rawVolume() < 20);
     f.video.dispatchEvent(new f.window.Event('emptied'));
     assert.equal(f.rawVolume(), 50); assert.equal(f.audio.contexts[0].closed, true);
     f.audio.amplitude = 0.08;
     f.video.dispatchEvent(new f.window.Event('playing'));
-    f.advance(); assert.ok(f.rawVolume() > 50);
+    await f.advance(); assert.ok(f.rawVolume() > 50);
     assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
     assert.equal(f.audio.captures, 2);
   });
 
   test(`${config.file}: replacing the player releases outgoing capture and normalizes the incoming video`, async t => {
     const f = await prepare(config, t, { saved: true });
-    f.advance(); assert.ok(f.rawVolume() < 20);
+    await f.advance(); assert.ok(f.rawVolume() < 20);
     const incoming = config.fixture(f.document);
     const audio = mockAudioCapture(f.window, incoming.video);
     audio.amplitude = 0.08;
@@ -195,7 +205,7 @@ for (const config of platforms) {
       // Twitch's attachment observer discovers a new video under the body.
       await new Promise(resolve => f.window.setTimeout(resolve, 1100));
     }
-    f.advance();
+    await f.advance();
     assert.equal(f.audio.contexts[0].closed, true);
     assert.equal(audio.captures, 1);
     const raw = config.file === 'youtube' ? incoming.state.volume : incoming.state.volume * 100;

@@ -43,7 +43,7 @@ try {
       await page.evaluate(({ mock, prefix, youtube }) => {
         const video = document.querySelector('video');
         window.__iconAudio = (0, eval)(`(${mock})`)(window, video);
-        window.__iconAudio.amplitude = 0.18;
+        window.__iconAudio.amplitude = 0.17;
         video.volume = 0.3;
         const api = { getVolume: () => video.volume * (youtube ? 100 : 1), setVolume: value => { video.volume = value / (youtube ? 100 : 1); }, isMuted: () => video.muted, mute: () => { video.muted = true; }, unMute: () => { video.muted = false; }, setMuted: value => { video.muted = value; } };
         if (youtube) Object.assign(video.parentElement, api);

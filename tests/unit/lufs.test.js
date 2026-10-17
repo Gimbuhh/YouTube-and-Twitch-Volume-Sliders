@@ -97,3 +97,25 @@ test('temporary spike protection releases without holding the programme at the t
   assert.ok(gain > 0.85, 'normal audio recovers within one second instead of staying at the spike gain');
   assert.ok(gain < 1, 'the programme history still limits recovery conservatively');
 });
+
+test('quiet word endings and speech gaps do not drive LUFS gain upward', () => {
+  const controller = createLufsGainController();
+  const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: 0.05 });
+  let before;
+  for (let i = 0; i < 80; i++) before = update(0.12);
+  let gain;
+  for (let i = 0; i < 100; i++) gain = update(i % 5 < 3 ? 0.12 : i % 5 === 3 ? 0.0012 : 0);
+  assert.ok(Math.abs(20 * Math.log10(gain / before)) < 0.2);
+});
+
+test('an established LUFS source keeps cautious recovery after a long quiet passage', () => {
+  const controller = createLufsGainController();
+  const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: 0.05 }, 5);
+  let gain;
+  for (let i = 0; i < 80; i++) gain = update(0.32);
+  for (let i = 0; i < 100; i++) {
+    const before = gain;
+    gain = update(0.0032);
+    if (i >= 80) assert.ok(20 * Math.log10(gain / before) < 0.35, 'quiet periods do not re-enter the faster startup ramp');
+  }
+});
