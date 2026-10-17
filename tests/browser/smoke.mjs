@@ -112,7 +112,7 @@ async function assertOptionsButtonAlignmentAtZoomLevels(page, platform){
       assert.equal(measurements.every(item=>!item.clipped),true,`${platform} options button labels remain unclipped at ${zoom*100}% browser zoom`);
       assert.equal(measurements.every(item=>item.fontSize==='14px'&&item.fontWeight==='400'),true,`${platform} options buttons preserve the reference typography at ${zoom*100}% browser zoom`);
       assert.equal(measurements.filter(item=>item.selectedShadow!==null).every(item=>item.selectedShadow!=='none'),true,`${platform} selected buttons preserve the reference shadow at ${zoom*100}% browser zoom`);
-      const behaviorOffsets=await page.locator('#tm-volume-options-popup .tm-volume-options-checklist .tm-volume-options-button-label').evaluateAll(labels=>{
+      const behaviorOffsets=await page.locator('#tm-volume-options-popup .tm-volume-options-checklist:visible .tm-volume-options-button-label').evaluateAll(labels=>{
         const sectionLabel=labels[0]?.closest('.tm-volume-options-section')?.querySelector('.tm-volume-options-section-label');
         const sectionLeft=sectionLabel?.getBoundingClientRect().left??0;
         return labels.map(label=>Math.abs(label.getBoundingClientRect().left-sectionLeft)*devicePixelRatio);
@@ -164,6 +164,9 @@ async function youtubeSmoke(browser){
     await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,0)));
     assert.equal(await page.locator('#tm-volume-options-popup').isVisible(),true,'YouTube volume options remain open after closing native settings');
     await assertOptionsButtonAlignmentAtZoomLevels(page,'YouTube');
+    await page.locator('#tm-volume-options-tab-appearance').click();
+    await assertOptionsButtonAlignmentAtZoomLevels(page,'YouTube Appearance');
+    await page.locator('#tm-volume-options-tab-general').click();
     const stepLayout=await stepGroup.evaluate(group=>{
       const groupRect=group.getBoundingClientRect();
       const buttons=Array.from(group.querySelectorAll('[role="radio"]')).map(button=>button.getBoundingClientRect());
@@ -247,6 +250,9 @@ async function twitchSmoke(browser){
     await page.locator('#tm-volume-options-button').click();
     await page.locator('#tm-volume-options-popup').waitFor({state:'visible'});
     await assertOptionsButtonAlignmentAtZoomLevels(page,'Twitch');
+    await page.locator('#tm-volume-options-tab-appearance').click();
+    await assertOptionsButtonAlignmentAtZoomLevels(page,'Twitch Appearance');
+    await page.locator('#tm-volume-options-tab-general').click();
     await page.keyboard.press('Escape');
 
     await page.evaluate(()=>{const controls=document.querySelector('[data-a-target="player-controls"]');controls.setAttribute('data-a-visible','false');controls.setAttribute('aria-hidden','true');window.scrollTo(0,0);});
@@ -379,6 +385,7 @@ async function wheelSmoke(browser, platform) {
       await page.keyboard.up('Control');
     }
     await page.locator('#tm-volume-options-button').click();
+    await page.locator('#tm-volume-options-tab-appearance').click();
     const thickness = page.locator('#tm-volume-options-thickness-section input');
     const startPreview = async () => {
       await thickness.scrollIntoViewIfNeeded();

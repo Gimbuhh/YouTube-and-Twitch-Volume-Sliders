@@ -7,7 +7,7 @@ import { mockAudioCapture } from '../helpers/audio.js';
 
 const updateDocs = process.argv.includes('--update-docs');
 const screenshotDirectory = updateDocs ? fileURLToPath(new URL('../../docs/images/', import.meta.url)) : process.env.VOLUME_SLIDER_SCREENSHOTS;
-const docScreenshots = { expanded: 'volume-slider-expanded', classic: 'volume-slider-classic', settings: 'settings-menu', audio: 'normalization-settings' };
+const docScreenshots = { expanded: 'volume-slider-expanded', classic: 'volume-slider-classic', settings: 'settings-menu', audio: 'normalization-settings', appearance: 'appearance-settings' };
 
 let executablePath;
 for (const candidate of [process.env.VOLUME_SLIDER_CHROME,
@@ -131,22 +131,42 @@ try {
       }
       if (updateDocs) {
         // Give the documentation preview room for the complete real menu.
-        await page.setViewportSize({ width: 1280, height: 1600 });
+        await page.setViewportSize({ width: 1280, height: 1000 });
         await page.locator('#movie_player, .video-player').evaluate(player => {
-          player.style.height = '1300px';
-          player.querySelector('video').style.height = '1260px';
+          player.style.height = '760px';
+          player.querySelector('video').style.height = '720px';
         });
       }
       await page.locator('#tm-volume-options-button').click();
-      await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-details')?.textContent.includes('Output 17% for your 30% setting'));
+      await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-details')?.textContent.includes('Output 17% · Selected 30%'));
+      const statusSession = await context.newCDPSession(page);
+      try {
+        for (const zoom of [0.5, 0.67, 1, 1.25, 1.5, 2]) {
+          await statusSession.send('Emulation.setDeviceMetricsOverride', { width: Math.round(1280 / zoom), height: Math.round(800 / zoom), deviceScaleFactor: zoom, mobile: false });
+          const layout = await page.locator('#tm-volume-options-normalization-details').evaluate(details => {
+            const range = document.createRange();
+            range.selectNodeContents(details);
+            const lines = [...range.getClientRects()].filter(rect => rect.width > 0);
+            const card = details.parentElement.getBoundingClientRect();
+            const status = details.previousElementSibling.getBoundingClientRect();
+            return { lines: lines.length, contained: lines.every(rect => rect.left >= card.left && rect.right <= card.right && rect.bottom <= card.bottom), separated: lines.length === 2 && lines[0].top >= status.bottom && lines[1].top >= lines[0].bottom };
+          });
+          assert.deepEqual(layout, { lines: 2, contained: true, separated: true }, `${platform}: audio details use two clear lines without overlap at ${zoom * 100}% zoom`);
+        }
+      } finally { await statusSession.send('Emulation.clearDeviceMetricsOverride'); await statusSession.detach(); }
       await screenshot('settings', null, page.locator('#tm-volume-options-popup'));
       await screenshot('audio', null, page.locator('.tm-volume-options-section').filter({ has: page.locator('#tm-volume-options-normalization') }));
+      await page.locator('#tm-volume-options-tab-appearance').click();
+      await screenshot('appearance', null, page.locator('#tm-volume-options-popup'));
       await page.locator('#tm-volume-options-appearance-classic').click();
       await page.waitForTimeout(260); await assertGeometry(); await screenshot('classic');
+      await page.locator('#tm-volume-options-tab-general').click();
       await page.locator('#tm-volume-options-location-video').click();
+      await page.locator('#tm-volume-options-tab-appearance').click();
       await page.locator('#tm-volume-options-size-section input').evaluate(element => { element.value = '200'; element.dispatchEvent(new Event('input', { bubbles: true })); });
       await page.waitForTimeout(260); await assertGeometry(); await screenshot('on-video');
       await page.locator('#tm-volume-options-appearance-new').click();
+      await page.locator('#tm-volume-options-tab-general').click();
       await page.locator('#tm-volume-options-location-video').click();
       await page.keyboard.press('Escape'); await mute.focus(); await page.keyboard.press('Space');
       await page.waitForFunction(() => document.querySelector('video').muted);

@@ -144,7 +144,8 @@
       if (!session || !status.startsWith("Active")) return "";
       const { preferred, applied } = session;
       const action = applied < preferred ? "Reducing loud audio" : applied > preferred ? "Raising quiet audio" : "Near target";
-      return `${action} \xB7 Output ${applied}% for your ${preferred}% setting`;
+      return `${action}
+Output ${applied}% \xB7 Selected ${preferred}%`;
     }
     function report(next) {
       const changed = status !== next;
@@ -912,6 +913,9 @@
       const normalizationStatus = popup.querySelector("#tm-volume-options-normalization-status");
       const status = getNormalizationStatus();
       if (normalizationStatus && normalizationStatus.textContent !== status) normalizationStatus.textContent = status;
+      if (normalizationStatus) normalizationStatus.dataset.state = status.startsWith("Active") ? "active" : "idle";
+      const feedback = popup.querySelector(".tm-volume-options-normalization-feedback");
+      if (feedback) feedback.hidden = !isNormalizationEnabled();
       const normalizationDetails = popup.querySelector("#tm-volume-options-normalization-details");
       const details = getNormalizationDetails();
       if (normalizationDetails) {
@@ -928,9 +932,8 @@
       const onVideo = isSliderOnVideo();
       popup.querySelector("#tm-volume-options-normalization")?.setAttribute("aria-checked", isNormalizationEnabled() ? "true" : "false");
       syncNormalizationStatus(popup);
-      ["on", "off", "replace-native"].forEach((mode) => {
-        popup.querySelector(`#tm-volume-options-mode-${mode}`)?.setAttribute("aria-checked", selectedMode === mode ? "true" : "false");
-      });
+      const modeSelect = popup.querySelector("#tm-volume-options-mode");
+      if (modeSelect) modeSelect.value = selectedMode;
       const placementSection = popup.querySelector("#tm-volume-options-placement-section");
       const placementEnabled = selectedMode === "replace-native";
       if (placementSection) {
@@ -955,6 +958,8 @@
       if (opacitySection) opacitySection.style.display = onVideoDisplay;
       const sizeSection = popup.querySelector("#tm-volume-options-size-section");
       if (sizeSection) sizeSection.style.display = onVideoDisplay;
+      const appearanceHint = popup.querySelector(".tm-volume-options-appearance-hint");
+      if (appearanceHint) appearanceHint.hidden = onVideo;
       syncOptionsRadioGroups(popup);
     }
     function handleRadioNavigation(event) {
@@ -1043,42 +1048,32 @@
     }
     function createModeSection() {
       const section = document2.createElement("div");
-      section.className = "tm-volume-options-section";
-      section.appendChild(createOptionsSectionLabel("Mode"));
-      const stack = document2.createElement("div");
-      stack.className = "tm-volume-options-segment-stack";
-      stack.setAttribute("role", "radiogroup");
-      stack.setAttribute("aria-label", "Mode");
-      stack.appendChild(createOptionsSegment([
-        createOptionsRadio(
-          "tm-volume-options-mode-on",
-          "On",
-          getVolumeSliderMode() === "on",
-          () => setVolumeSliderMode("on")
-        ),
-        createOptionsRadio(
-          "tm-volume-options-mode-off",
-          "Off",
-          getVolumeSliderMode() === "off",
-          () => setVolumeSliderMode("off")
-        )
-      ]));
-      stack.appendChild(createOptionsSegment([
-        createOptionsRadio(
-          "tm-volume-options-mode-replace-native",
-          "Replace native",
-          getVolumeSliderMode() === "replace-native",
-          () => setVolumeSliderMode("replace-native")
-        )
-      ]));
-      section.appendChild(stack);
+      section.className = "tm-volume-options-mode";
+      const label = document2.createElement("label");
+      label.htmlFor = "tm-volume-options-mode";
+      label.textContent = "Mode";
+      const select = document2.createElement("select");
+      select.id = label.htmlFor;
+      for (const [value, text] of [["on", "On"], ["off", "Off"], ["replace-native", "Replace native"]]) {
+        const option = document2.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        select.appendChild(option);
+      }
+      select.value = getVolumeSliderMode();
+      select.addEventListener("change", () => {
+        setVolumeSliderMode(select.value);
+        refreshOptionsPopupState();
+      });
+      select.addEventListener("keydown", (event) => event.stopPropagation());
+      section.append(label, select);
       return section;
     }
     function createPlacementSection() {
       const section = document2.createElement("div");
       section.className = "tm-volume-options-section";
       section.id = "tm-volume-options-placement-section";
-      section.appendChild(createOptionsSectionLabel("Position when replacing native"));
+      section.appendChild(createOptionsSectionLabel("Placement"));
       const segment = createOptionsSegment([
         createOptionsRadio(
           "tm-volume-options-placement-native",
@@ -1096,32 +1091,29 @@
       segment.setAttribute("role", "radiogroup");
       segment.setAttribute("aria-label", "Position when replacing native");
       section.appendChild(segment);
+      section.appendChild(createBehaviorRows());
       return section;
     }
-    function createBehaviorSection() {
-      const section = document2.createElement("div");
-      section.className = "tm-volume-options-section";
-      section.appendChild(createOptionsSectionLabel("Slider behavior"));
+    function createBehaviorRows() {
       const list = document2.createElement("div");
       list.className = "tm-volume-options-checklist";
-      list.appendChild(createOptionsCheckboxRow(
-        "tm-volume-options-always-expanded",
-        "Always expanded",
-        isAlwaysExpandedEnabled(),
-        (next) => setAlwaysExpandedEnabled(next)
-      ));
       list.appendChild(createOptionsCheckboxRow(
         "tm-volume-options-location-video",
         "Show on video",
         isSliderOnVideo(),
         (next) => setSliderLocation(next ? "video" : "controls")
       ));
-      section.appendChild(list);
-      return section;
+      list.appendChild(createOptionsCheckboxRow(
+        "tm-volume-options-always-expanded",
+        "Always expanded",
+        isAlwaysExpandedEnabled(),
+        (next) => setAlwaysExpandedEnabled(next)
+      ));
+      return list;
     }
     function createVolumeStepSection() {
       const section = document2.createElement("div");
-      section.className = "tm-volume-options-section";
+      section.className = "tm-volume-options-step-setting";
       section.id = "tm-volume-options-step-section";
       section.appendChild(createOptionsSectionLabel("Adjustment step"));
       const segment = createOptionsSegment(VOLUME_STEPS.map(
@@ -1156,20 +1148,26 @@
       help.id = "tm-volume-options-normalization-help";
       help.className = "tm-volume-options-help";
       help.textContent = "Keeps sources closer in loudness. Your slider sets the listening level. Increases are limited to normal player volume.";
+      help.hidden = true;
+      toggle.title = help.textContent;
       section.appendChild(help);
+      const feedback = document2.createElement("div");
+      feedback.className = "tm-volume-options-normalization-feedback";
       const status = document2.createElement("p");
       status.id = "tm-volume-options-normalization-status";
       status.className = "tm-volume-options-help";
       status.setAttribute("role", "status");
       status.textContent = getNormalizationStatus();
-      section.appendChild(status);
+      feedback.appendChild(status);
       const details = document2.createElement("p");
       details.id = "tm-volume-options-normalization-details";
       details.className = "tm-volume-options-help";
       details.setAttribute("aria-live", "off");
       details.textContent = getNormalizationDetails();
       details.hidden = !details.textContent;
-      section.appendChild(details);
+      feedback.appendChild(details);
+      section.appendChild(feedback);
+      section.appendChild(createVolumeStepSection());
       return section;
     }
     function createAppearanceSection() {
@@ -1372,16 +1370,61 @@
       header.appendChild(title);
       const body = document2.createElement("div");
       body.className = "tm-volume-options-body";
-      body.appendChild(createModeSection());
-      body.appendChild(createPlacementSection());
-      body.appendChild(createAppearanceSection());
-      body.appendChild(createVolumeStepSection());
-      body.appendChild(createBehaviorSection());
-      body.appendChild(createNormalizationSection());
-      body.appendChild(createThicknessSection());
-      body.appendChild(createOpacitySection());
-      body.appendChild(createSizeSection());
+      const tabList = document2.createElement("div");
+      tabList.className = "tm-volume-options-tabs";
+      tabList.setAttribute("role", "tablist");
+      tabList.setAttribute("aria-label", "Volume settings");
+      const panels = ["general", "appearance"].map((name) => {
+        const panel = document2.createElement("div");
+        panel.id = `tm-volume-options-panel-${name}`;
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-labelledby", `tm-volume-options-tab-${name}`);
+        body.appendChild(panel);
+        return panel;
+      });
+      const tabs = panels.map((panel, index) => {
+        const tab = document2.createElement("button");
+        tab.type = "button";
+        tab.id = panel.getAttribute("aria-labelledby");
+        tab.className = "tm-volume-options-tab";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-controls", panel.id);
+        tab.appendChild(createOptionsButtonLabel(index ? "Appearance" : "General"));
+        tab.addEventListener("click", () => selectTab(index));
+        tab.addEventListener("keydown", (event) => {
+          let next;
+          if (event.key === "ArrowLeft") next = (index + panels.length - 1) % panels.length;
+          else if (event.key === "ArrowRight") next = (index + 1) % panels.length;
+          else if (event.key === "Home") next = 0;
+          else if (event.key === "End") next = panels.length - 1;
+          else return;
+          event.preventDefault();
+          event.stopPropagation();
+          selectTab(next);
+          tabs[next].focus();
+        });
+        tabList.appendChild(tab);
+        return tab;
+      });
+      function selectTab(index) {
+        stopOptionsPreview();
+        tabs.forEach((tab, i) => {
+          tab.setAttribute("aria-selected", i === index ? "true" : "false");
+          tab.tabIndex = i === index ? 0 : -1;
+          panels[i].hidden = i !== index;
+        });
+        body.scrollTop = 0;
+      }
+      panels[0].append(createNormalizationSection(), createPlacementSection());
+      panels[1].append(createAppearanceSection(), createThicknessSection(), createSizeSection(), createOpacitySection());
+      const hint = document2.createElement("p");
+      hint.className = "tm-volume-options-help tm-volume-options-appearance-hint";
+      hint.append("To adjust size and opacity,", document2.createElement("br"), "enable \u201CShow on video\u201D in General.");
+      panels[1].appendChild(hint);
+      selectTab(0);
       popup.appendChild(header);
+      popup.appendChild(createModeSection());
+      popup.appendChild(tabList);
       popup.appendChild(body);
       popup.addEventListener("click", (event) => event.stopPropagation());
       return popup;
@@ -1937,12 +1980,12 @@
                 font-size: 14px;
                 line-height: 1;
                 max-height: 70vh;
-                max-width: 320px;
+                max-width: calc(100vw - 16px);
                 min-width: 288px;
                 overflow: hidden;
                 position: absolute;
                 user-select: none;
-                width: 288px;
+                width: 320px;
                 z-index: 10001;
             }
             #{{optionsPopupId}},
@@ -1966,18 +2009,110 @@
             #{{optionsPopupId}}[hidden] {
                 display: none;
             }
+            #{{optionsPopupId}} [hidden] {
+                display: none !important;
+            }
+            #{{optionsPopupId}} .tm-volume-options-mode {
+                align-items: center;
+                display: flex;
+                flex-shrink: 0;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 8px 16px 10px;
+                line-height: 20px;
+            }
+            #{{optionsPopupId}} select {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.18);
+                border-radius: 6px;
+                color: #fff;
+                color-scheme: dark;
+                cursor: pointer;
+                font: inherit;
+                line-height: 20px;
+                padding: 6px 10px;
+                width: 176px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tabs {
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                display: grid;
+                flex-shrink: 0;
+                grid-template-columns: 1fr 1fr;
+                padding: 0 16px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab {
+                background: transparent;
+                border: 0;
+                color: rgba(255, 255, 255, 0.65);
+                cursor: pointer;
+                display: grid;
+                padding: 11px 0;
+                place-items: center;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab[aria-selected="true"] {
+                box-shadow: inset 0 -2px {{accentDark}};
+                color: #fff;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab:hover {
+                color: #fff;
+            }
+            #{{optionsPopupId}} :is(button, select, input):focus-visible {
+                outline: 2px solid {{accentDark}};
+                outline-offset: -2px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-normalization-feedback {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.09);
+                border-radius: 6px;
+                margin-top: 6px;
+                padding: 8px 10px;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status {
+                color: rgba(255, 255, 255, 0.9);
+                margin: 0;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status::before {
+                background: rgba(255, 255, 255, 0.45);
+                border-radius: 50%;
+                content: '';
+                display: inline-block;
+                height: 6px;
+                margin-right: 7px;
+                vertical-align: 1px;
+                width: 6px;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status[data-state="active"]::before {
+                background: #60cf83;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-details {
+                white-space: pre-line;
+            }
+            #{{optionsPopupId}} .tm-volume-options-step-setting {
+                margin-top: 14px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-step-setting .tm-volume-options-section-label {
+                color: rgba(255, 255, 255, 0.75);
+                font-size: 12px;
+                font-weight: 400;
+                margin-bottom: 8px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-appearance-hint {
+                padding: 8px 16px 0;
+            }
+            #{{optionsPopupId}} #tm-volume-options-placement-section > .tm-volume-options-checklist {
+                margin-top: 8px;
+            }
 {{platformOptionsCss}}
             .tm-volume-options-header {
                 align-items: center;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
                 display: flex;
                 flex-shrink: 0;
-                padding: 12px 16px;
+                padding: 10px 16px 4px;
             }
             .tm-volume-options-title {
                 color: #fff;
-                font-size: 14px;
-                font-weight: 500;
+                font-size: 15px;
+                font-weight: 600;
                 line-height: 20px;
             }
             .tm-volume-options-body {
@@ -2021,13 +2156,11 @@
                 padding-top: 12px;
             }
             .tm-volume-options-section-label {
-                color: rgba(255, 255, 255, 0.55);
-                font-size: 11px;
-                font-weight: 500;
-                letter-spacing: 0.04em;
-                line-height: 14px;
+                color: #fff;
+                font-size: 14px;
+                font-weight: 600;
+                line-height: 20px;
                 margin: 0 0 10px;
-                text-transform: uppercase;
             }
             .tm-volume-options-checklist {
                 display: flex;
@@ -2044,10 +2177,10 @@
                 align-items: center;
                 column-gap: 12px;
                 display: grid;
-                grid-template-columns: 1fr 18px;
+                grid-template-columns: 1fr 32px;
                 justify-content: stretch;
                 margin: 0 -8px;
-                min-height: 32px;
+                min-height: 36px;
                 padding: 5px 8px;
                 width: calc(100% + 16px);
             }
@@ -2088,33 +2221,30 @@
                 opacity: 0.45;
             }
             .tm-volume-options-checkbox {
-                background: transparent;
-                border: 1.5px solid rgba(255, 255, 255, 0.45);
-                border-radius: 3px;
-                display: grid;
+                background: rgba(255, 255, 255, 0.22);
+                border: 0;
+                border-radius: 10px;
+                display: block;
                 flex-shrink: 0;
                 height: 18px;
-                place-items: center;
-                transition: all 0.12s ease;
-                width: 18px;
+                position: relative;
+                width: 32px;
+            }
+            .tm-volume-options-checkbox::after {
+                background: #fff;
+                border-radius: 50%;
+                content: '';
+                height: 14px;
+                left: 2px;
+                position: absolute;
+                top: 2px;
+                width: 14px;
             }
             .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox {
                 background: {{accentDark}};
-                border-color: {{accentDark}};
             }
             .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox::after {
-                border: solid #fff;
-                border-width: 0 0 3px 3px;
-                box-sizing: border-box;
-                content: '';
-                height: 6px;
-                transform: translateY(-1px) rotate(-45deg);
-                width: 10px;
-            }
-            .tm-volume-options-segment-stack {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
+                left: 16px;
             }
             .tm-volume-options-section-label + * {
                 padding-top: 2px;
@@ -3996,7 +4126,7 @@
       positionOptionsPopup(popup, true);
       startOptionsControlsHold();
       document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute("aria-expanded", "true");
-      const initialFocus = popup.querySelector('[id^="tm-volume-options-mode-"][role="radio"][aria-checked="true"]:not(:disabled)') || getOptionsPopupFocusable(popup)[0];
+      const initialFocus = getOptionsPopupFocusable(popup)[0];
       initialFocus?.focus();
       if (!optionsPopupOutsideHandler) {
         optionsPopupOutsideHandler = (event) => {

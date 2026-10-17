@@ -4,7 +4,9 @@
 
 Shared UI modules are dependency-injected factories. They receive platform callbacks, theme values, storage keys, and constants instead of branching on a site name. Shared style installers keep the common CSS authoritative while applying small platform variants for colors, compact Twitch controls, and host-specific visibility rules. Lifecycle state owns each overlay generation independently of DOM lookup, so detached host subtrees can be disposed and reattached. Platform modules keep YouTube and Twitch API differences explicit.
 
-The shared overlay factory owns the initial element styles, and the shared options keyboard binding owns Escape and Tab behavior. Options previews register page-level release listeners only while a preview is active. Completing the gesture, closing or replacing the popup, or disposing the overlay releases the listeners and ends the preview.
+The shared overlay factory owns the initial element styles, and the shared options keyboard binding owns Escape and Tab behavior. The options builder owns the General/Appearance tablist, arrow-key navigation, and hidden panels; the shared focus helper excludes inactive panels from the focus loop. Mode and tab controls remain outside the scrolling body. Tab selection belongs to the popup instance and is not saved in storage.
+
+Options previews register page-level release listeners only while a preview is active. Completing the gesture, changing tabs, closing or replacing the popup, or disposing the overlay releases the listeners and ends the preview.
 
 The platform files remain substantial because each contains its site-specific DOM placement, player integration, controls behavior, and navigation timing. Shared code is imported by both production entry graphs; there is no parallel scaffold implementation.
 

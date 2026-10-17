@@ -82,6 +82,19 @@ Latest published version, 2.8.3: [YouTube userscript](https://github.com/Gimbuhh
 - Keyboard and screen-reader accessible mute and options controls
 - Site-specific YouTube and Twitch adapters backed by shared UI and lifecycle code
 
+## Settings
+
+Open **Volume Slider Options** beside the player’s native settings button. **Mode** stays above the tabs: choose On, Off, or Replace native. **General** contains audio normalization, adjustment step, placement, and behavior. **Appearance** contains icon style and bar thickness, plus size and opacity when **General → Show on video** is enabled.
+
+With a tab focused, Left/Right Arrow switches tabs; Home/End selects the first/last tab. Tab moves through the visible controls, and Escape closes Options.
+
+<table>
+  <tr>
+    <td align="center"><strong>YouTube · Appearance</strong><br><img src="docs/images/demo-youtube-appearance-settings.png" alt="YouTube Appearance tab with icon style, bar thickness, and the on-video settings hint" width="288"></td>
+    <td align="center"><strong>Twitch · Appearance</strong><br><img src="docs/images/demo-twitch-appearance-settings.png" alt="Twitch Appearance tab with icon style, bar thickness, and the on-video settings hint" width="288"></td>
+  </tr>
+</table>
+
 ## Volume adjustment
 
 The **Adjustment step** option controls slider dragging and scrolling on the circular volume control. The selected value is saved separately for YouTube and Twitch.
@@ -99,11 +112,11 @@ With the 1% or 2% setting, pressing on or close to a taller mark selects that 10
 
 ## Loudness normalization (2.9)
 
-Open **Volume Slider Options → Audio → Auto-normalize volume** to enable it. It starts off and is saved separately for YouTube and Twitch. The slider continues to set your preferred listening level; automatic corrections do not move it or replace the saved percentage.
+Open **Volume Slider Options → General → Audio → Auto-normalize volume** to enable it. It starts off and is saved separately for YouTube and Twitch. The slider continues to set your preferred listening level; automatic corrections do not move it or replace the saved percentage.
 
 The mode measures a local copy of the playing audio and adjusts the native player volume. It reacts quickly to loud passages, raises quieter sources gradually, ignores silence and very low background levels, and relearns after a source change. Quiet sources can use the full remaining range up to the player's normal 100% maximum. Channels are measured separately so stereo cancellation does not hide audible sound, while recent active audio keeps speech pauses and quiet word endings from driving increases. This is approximate RMS leveling, rather than broadcast-grade loudness matching or a peak limiter; the first moments of a new source can still differ in loudness.
 
-The status below the toggle shows whether normalization is active, waiting, or unavailable. While active, it also shows whether audio is being raised or reduced and the adjusted output percentage alongside your selected percentage. Browser audio capture support and stream restrictions vary. If capture fails or becomes inaccessible, ordinary playback continues at your chosen volume. You may need to click the player to activate analysis after a reload. Turning normalization off, or setting the slider mode to **Off**, releases analysis and restores your chosen volume while preserving mute. The opt-in remains saved when slider mode is Off.
+The status below the toggle shows whether normalization is active, waiting, or unavailable. While active, it also shows whether audio is being raised or reduced. **Output** is the volume currently applied to the player; **Selected** is your chosen slider percentage. Browser audio capture support and stream restrictions vary. If capture fails or becomes inaccessible, ordinary playback continues at your chosen volume. You may need to click the player to activate analysis after a reload. Turning normalization off, or setting the slider mode to **Off**, releases analysis and restores your chosen volume while preserving mute. The opt-in remains saved when slider mode is Off.
 
 While normalization is on, a small, static waveform icon tucked into the volume ring's upper-right edge indicates that the option is enabled. It slightly overlaps the outer arc while leaving the volume number clear. Hover it for an explanation. It hides when normalization is off and keeps the control's original size and round background. The main number remains your chosen volume; current status and adjusted output remain available under Audio in Volume Slider Options.
 

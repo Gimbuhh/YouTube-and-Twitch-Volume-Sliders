@@ -93,7 +93,7 @@ test('options button labels use zoom-stable centering rules', () => {
     const options = document.getElementById('tm-volume-options-style').textContent;
 
     assert.match(options, /#tm-volume-options-popup button\s*{[\s\S]*font-family:\s*inherit;[\s\S]*margin:\s*0;/);
-    assert.doesNotMatch(options, /#tm-volume-options-popup button\s*{[\s\S]*font:\s*inherit;/);
+    assert.doesNotMatch(options, /#tm-volume-options-popup button\s*{[^}]*font:\s*inherit;/);
     assert.match(options, /\.tm-volume-options-button-label\s*{[^}]*font-size:\s*14px;[^}]*font-weight:\s*400;/);
     assert.doesNotMatch(options, /\.tm-volume-options-button-label\s*{[^}]*transform:/);
     assert.match(options, /#tm-volume-options-popup \.tm-volume-options-checklist \.tm-volume-options-row\s*{[^}]*margin:\s*0 -8px;/);

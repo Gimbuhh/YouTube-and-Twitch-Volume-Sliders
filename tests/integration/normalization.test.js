@@ -121,7 +121,7 @@ for (const config of platforms) {
     assert.equal(slider.value, '50');
     assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
     assert.equal(f.document.getElementById('tm-volume-options-normalization-status').textContent, 'Active');
-    assert.match(f.document.getElementById('tm-volume-options-normalization-details').textContent, /Reducing loud audio.*your 50% setting/);
+    assert.match(f.document.getElementById('tm-volume-options-normalization-details').textContent, /^Reducing loud audio\nOutput \d+% · Selected 50%$/);
     // Custom slider intent survives synchronous unmute notifications.
     if (config.file === 'youtube') f.api.mute(); else f.api.setMuted(true);
     slider.value = '40'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
@@ -139,12 +139,16 @@ for (const config of platforms) {
   test(`${config.file}: saved opt-in starts automatically; mode Off releases capture and retains opt-in`, async t => {
     const f = await prepare(config, t, { saved: true });
     f.advance(); assert.equal(f.audio.captures, 1); assert.ok(f.rawVolume() < 20);
-    f.document.getElementById('tm-volume-options-mode-off').click();
+    const offSelect = f.document.getElementById('tm-volume-options-mode');
+    offSelect.value = 'off';
+    offSelect.dispatchEvent(new f.window.Event('change', { bubbles: true }));
     assert.equal(f.rawVolume(), 50);
     assert.equal(f.audio.contexts[0].closed, true);
     assert.equal(f.document.getElementById('tm-volume-slider-overlay'), null);
     assert.equal(f.window.localStorage.getItem(f.optionKey), 'true');
-    f.document.getElementById('tm-volume-options-mode-on').click();
+    const onSelect = f.document.getElementById('tm-volume-options-mode');
+    onSelect.value = 'on';
+    onSelect.dispatchEvent(new f.window.Event('change', { bubbles: true }));
     f.advance(); assert.equal(f.audio.captures, 2); assert.ok(f.rawVolume() < 20);
     assert.equal(f.document.querySelector('.tm-normalization-icon').hidden, false);
   });

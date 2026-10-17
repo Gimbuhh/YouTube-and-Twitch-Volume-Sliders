@@ -169,7 +169,7 @@ test('default off allocates nothing; enabling adjusts output without changing th
   assert.ok(f.raw < 20);
   assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 50);
   assert.equal(f.normalizer.getStatus(), 'Active');
-  assert.match(f.normalizer.getDetails(), /Reducing loud audio.*your 50% setting/);
+  assert.match(f.normalizer.getDetails(), /^Reducing loud audio\nOutput \d+% · Selected 50%$/);
   assert.ok(f.writes.every(write => write.options.preserveMute));
   assert.equal(f.audio.streams[0].getVideoTracks()[0].readyState, 'ended');
   f.normalizer.setEnabled(false);

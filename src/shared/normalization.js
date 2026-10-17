@@ -83,7 +83,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     if (!session || !status.startsWith('Active')) return '';
     const { preferred, applied } = session;
     const action = applied < preferred ? 'Reducing loud audio' : applied > preferred ? 'Raising quiet audio' : 'Near target';
-    return `${action} · Output ${applied}% for your ${preferred}% setting`;
+    return `${action}\nOutput ${applied}% · Selected ${preferred}%`;
   }
 
   function report(next) {

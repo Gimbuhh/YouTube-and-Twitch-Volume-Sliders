@@ -1013,7 +1013,7 @@ export function startTwitchVolumeSlider() {
         positionOptionsPopup(popup, true);
         startOptionsControlsHold();
         document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute('aria-expanded', 'true');
-        const initialFocus = popup.querySelector('[id^="tm-volume-options-mode-"][role="radio"][aria-checked="true"]:not(:disabled)') || getOptionsPopupFocusable(popup)[0];
+        const initialFocus = getOptionsPopupFocusable(popup)[0];
         initialFocus?.focus();
 
         if (!optionsPopupOutsideHandler) {
