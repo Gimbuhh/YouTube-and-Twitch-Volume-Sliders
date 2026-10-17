@@ -208,9 +208,11 @@ export function startTwitchVolumeSlider() {
     }
 
     function isTwitchPreviewPlayer(player = getPlayerContainer()) {
+        // Narrow channel/VOD players are still full players at high page zoom.
+        const isBrowsePage = /^\/(?:$|(?:directory|following|search)(?:\/|$))/.test(window.location.pathname);
         const rect = player?.getBoundingClientRect?.();
         const width = Number(rect?.width);
-        return Number.isFinite(width) && width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
+        return isBrowsePage && Number.isFinite(width) && width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
     }
 
     function getTwitchControlsHost(player = getPlayerContainer()) {

@@ -640,9 +640,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!btn || !player || !popup) return;
         const playerRect = player.getBoundingClientRect();
         const btnRect = btn.getBoundingClientRect();
-        const progressBar = document.querySelector('.ytp-progress-bar-padding');
-        const barEl = progressBar ? (progressBar.closest('.ytp-progress-bar') || progressBar.parentElement) : null;
-        const barRect = barEl?.getBoundingClientRect?.();
+        // YouTube can retain hidden progress bars before the active controls.
+        const barRect = Array.from(player.querySelectorAll('.ytp-progress-bar-padding'))
+            .map((bar) => (bar.closest('.ytp-progress-bar') || bar.parentElement)?.getBoundingClientRect())
+            .find((rect) => rect && rect.width > 0 && rect.height > 0);
         const bottomPx = barRect
             ? playerRect.bottom - barRect.top + 8
             : playerRect.bottom - btnRect.top + 8;

@@ -3320,9 +3320,10 @@
       return video?.closest?.(".video-player__container") || player;
     }
     function isTwitchPreviewPlayer(player = getPlayerContainer()) {
+      const isBrowsePage = /^\/(?:$|(?:directory|following|search)(?:\/|$))/.test(window.location.pathname);
       const rect = player?.getBoundingClientRect?.();
       const width = Number(rect?.width);
-      return Number.isFinite(width) && width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
+      return isBrowsePage && Number.isFinite(width) && width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
     }
     function getTwitchControlsHost(player = getPlayerContainer()) {
       return player?.querySelector?.(".player-controls__left-control-group") || document.querySelector("#channel-player .player-controls__left-control-group") || document.querySelector('[aria-label="Player Controls"] .player-controls__left-control-group') || document.querySelector(".player-controls__left-control-group");

@@ -274,6 +274,51 @@ async function twitchSmoke(browser){
   }finally{await context.close();}
 }
 
+async function twitchZoomSmoke(browser) {
+  const html = twitchPreviewHtml.replace('width:533px', 'width:calc(100vw - 390px)');
+  const {context, page} = await preparedPage(browser, {
+    platform: 'twitch', url: 'https://www.twitch.tv/test', html,
+    storage: {'tm-twitch-volume-slider-mode':'replace-native'}
+  });
+  try {
+    await page.locator('#tm-volume-options-button').click();
+    const session = await context.newCDPSession(page);
+    for (const zoom of [1, 1.333333, 1.4, 1.5, 1.75, 2, 1]) {
+      await session.send('Emulation.setDeviceMetricsOverride', {
+        width: Math.round(1530 / zoom), height: Math.round(1220 / zoom), deviceScaleFactor: zoom, mobile: false
+      });
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      // Chat and other page updates also trigger native-volume visibility checks.
+      await page.evaluate(() => { const update = document.createElement('span'); document.querySelector('#outside').appendChild(update); update.remove(); });
+      const state = await page.evaluate(() => {
+        const overlay = document.getElementById('tm-volume-slider-overlay');
+        const button = document.getElementById('tm-volume-options-button');
+        const popup = document.getElementById('tm-volume-options-popup');
+        const rect = popup?.getBoundingClientRect();
+        return {
+          overlay: !!overlay, button: !!button,
+          nativeDisplay: getComputedStyle(document.querySelector('.native-volume-group')).display,
+          popupOpen: !!popup && !popup.hidden,
+          popupHit: !!rect && popup.contains(document.elementFromPoint(rect.left + 20, rect.top + 20))
+        };
+      });
+      assert.equal(state.overlay, true, `Twitch ${zoom}: zoom keeps the custom slider`);
+      assert.equal(state.button, true, `Twitch ${zoom}: zoom keeps the options button`);
+      assert.equal(state.nativeDisplay, 'none', `Twitch ${zoom}: native volume stays replaced`);
+      assert.equal(state.popupOpen, true, `Twitch ${zoom}: options remain open`);
+      assert.equal(state.popupHit, true, `Twitch ${zoom}: options remain visible and receive pointer input`);
+    }
+    await session.send('Emulation.clearDeviceMetricsOverride');
+    await page.keyboard.press('Escape');
+    await page.locator('#tm-volume-options-popup').waitFor({state:'hidden'});
+    await page.locator('#tm-volume-options-button').click();
+    await page.locator('#tm-volume-options-popup').waitFor({state:'visible'});
+    console.log('browser smoke: Twitch zoom preserves replacement controls and usable settings from 100% through 200%');
+  } finally {
+    await context.close();
+  }
+}
+
 async function twitchPreviewSmoke(browser){
   const {context,page}=await preparedPage(browser,{platform:'twitch',url:'https://www.twitch.tv/directory',html:twitchPreviewHtml,storage:{'tm-twitch-volume':'40','tm-twitch-muted':'false','tm-twitch-volume-slider-mode':'replace-native'},expectOverlay:false});
   try{
@@ -359,8 +404,56 @@ async function wheelSmoke(browser, platform) {
   }
 }
 
+async function youtubeOptionsPositionSmoke(browser) {
+  const hiddenBar = '<div style="display:none"><div class="ytp-progress-bar"><div class="ytp-progress-bar-padding"></div></div></div>';
+  const visibleBar = '<div class="ytp-progress-bar" style="position:absolute;left:12px;right:12px;bottom:40px;height:6px"><div class="ytp-progress-bar-padding"></div></div>';
+  const unrelatedBar = '<div class="ytp-progress-bar" style="position:absolute;top:0;height:6px;width:500px"><div class="ytp-progress-bar-padding"></div></div>';
+  for (const [label, bars, outside] of [
+    ['hidden duplicate', hiddenBar + visibleBar, ''],
+    ['hidden bars only', hiddenBar, ''],
+    ['unrelated player', visibleBar, unrelatedBar]
+  ]) {
+    const html = youtubeHtml.replace('<body>', `<body>${outside}`)
+      .replace('<video class="html5-main-video">', `${bars}<video class="html5-main-video">`);
+    const { context, page } = await preparedPage(browser, {
+      platform: 'youtube', url: 'https://www.youtube.com/watch?v=smoke', html,
+      storage: { 'tm-yt-volume-slider-mode': 'replace-native' }
+    });
+    try {
+      for (const width of [1280, 1100]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.locator('#tm-volume-options-button').click();
+        const geometry = await page.locator('#tm-volume-options-popup').evaluate(popup => {
+          const player = document.getElementById('movie_player');
+          const bars = Array.from(player.querySelectorAll('.ytp-progress-bar')).map(bar => bar.getBoundingClientRect());
+          const anchor = bars.find(rect => rect.width > 0 && rect.height > 0)
+            || document.getElementById('tm-volume-options-button').getBoundingClientRect();
+          const rect = popup.getBoundingClientRect();
+          const playerRect = player.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + 20;
+          return {
+            top: rect.top, bottom: rect.bottom, expectedBottom: anchor.top - 8,
+            playerTop: playerRect.top, hit: popup.contains(document.elementFromPoint(x, y))
+          };
+        });
+        assert.ok(geometry.top >= geometry.playerTop, `YouTube ${label}: options stay inside the player: ${JSON.stringify(geometry)}`);
+        assert.ok(Math.abs(geometry.bottom - geometry.expectedBottom) < 1, `YouTube ${label}: options use the rendered player anchor`);
+        assert.equal(geometry.hit, true, `YouTube ${label}: options are visible and receive pointer input`);
+        await page.keyboard.press('Escape');
+        await page.locator('#tm-volume-options-popup').waitFor({ state: 'hidden' });
+      }
+    } finally {
+      await context.close();
+    }
+  }
+  console.log('browser smoke: YouTube options ignore hidden and unrelated progress bars, with button fallback');
+}
+
 const browser=await chromium.launch({headless:true,executablePath,args:['--disable-background-networking','--disable-component-update','--no-first-run']});
 try{
+  await youtubeOptionsPositionSmoke(browser);
+  await twitchZoomSmoke(browser);
   await youtubeSmoke(browser);
   await twitchSmoke(browser);
   await twitchPreviewSmoke(browser);

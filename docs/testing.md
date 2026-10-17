@@ -20,6 +20,10 @@ The suite uses deterministic local YouTube and Twitch player contracts while rou
 
 The regular `npm run check` remains browser-independent and deterministic.
 
+YouTube popup-positioning regressions cover a hidden duplicate progress bar, no rendered progress bar, and an unrelated progress bar outside the current player. At two viewport widths, the suite opens and closes Options and checks that the popup stays inside the player, uses the rendered bar or button fallback, and receives pointer input.
+
+Twitch regressions distinguish narrow channel, video, and clip players from compact browsing previews. Browser checks cross the old 720-pixel boundary at zoom levels from 100% through 200% and back, with Options open and page mutations between resizes. They verify that replacement mode keeps native controls hidden, retains the custom slider and Options button, and leaves the popup visible and interactive.
+
 The browser suite also checks the static normalization icon in both themes and icon styles, at enlarged on-video sizes, and through output changes, mute, unavailable capture, and disabled states. It verifies the original circular layout, inset upper-right placement with overlap limited to the outer ring, unclipped center and perimeter at ten zoom levels from 50% through 200%, unobscured selected values through 100%, and thumb clearance at zero volume. It preserves the slider's preferred volume, accessible descriptions, and existing mute interaction. The waveform stays unchanged while enabled. These UI checks use a controlled capture fixture; the separate normalization suite below covers real audio capture.
 
 For normalization changes, also run `npm run test:normalization-browser`. It exercises real Web Audio capture with synthetic local WAV sources for both platform adapters, including loud/quiet transitions, mute and preferred-volume preservation, and cross-origin fallback. See [normalization](normalization.md) for its scope and limitations.

@@ -13,6 +13,11 @@ All notable changes to the maintained userscripts are documented here. Historica
   - A small, static waveform icon tucked into the volume ring's upper-right edge indicates that normalization is enabled, with a slight overlap on the outer arc and a clear volume number. The original layout and round background stay unchanged. It hides when the option is off; current status and adjusted output remain available in Audio settings.
   - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.
 
+### Fixed
+
+- **YouTube:** Volume Slider Options stays visible when YouTube retains a hidden progress bar before the active controls. The popup anchors to a rendered progress bar in the current player, falling back to its own button when none is available.
+- **Twitch:** Narrow channel, video, and clip players keep the custom slider and Options button when zooming or resizing. Compact preview detection applies only on browsing pages, preventing native volume controls from appearing beside or replacing the custom slider.
+
 ### Known limitations
 
 - **Both:** Normalization requires supported browser audio capture and an accessible stream. Approximate loudness leveling cannot anticipate a new source's first loud moment or eliminate all perceived differences.

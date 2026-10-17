@@ -505,7 +505,7 @@ test('Twitch: options button mounts when native controls appear before video',as
 
 test('Twitch: compact preview remains native and attaches after expanding to a main player',async()=>{
   const config=platforms[1];
-  const runtime=await startBuiltArtifact(config);
+  const runtime=await startBuiltArtifact({...config,url:'https://www.twitch.tv/directory'});
   runtime.window.localStorage.setItem(config.volumeKey,'40');
   runtime.window.localStorage.setItem(config.modeKey,'replace-native');
   runtime.window.localStorage.setItem(config.locationKey,'video');
@@ -544,6 +544,27 @@ test('Twitch: compact preview remains native and attaches after expanding to a m
   assert.equal(volume,.4);
   runtime.close();
 });
+
+for (const path of ['/test', '/videos/12345', '/test/clip/example']) {
+  test(`Twitch: a narrow watch player keeps custom controls on ${path}`, async () => {
+    const config = {...platforms[1], url: `https://www.twitch.tv${path}`};
+    const {runtime, fixture} = await loadPlatform(config, (current, {player}) => {
+      current.window.localStorage.setItem(config.modeKey, 'replace-native');
+      player.getBoundingClientRect = () => ({left:0, top:0, right:533, bottom:300, width:533, height:300});
+    });
+    try {
+      assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+      assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+      runtime.window.dispatchEvent(new runtime.window.Event('resize'));
+      fixture.player.appendChild(runtime.document.createElement('span'));
+      await waitForTimers(runtime, 60);
+      assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+      assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+    } finally {
+      runtime.close();
+    }
+  });
+}
 
 test('Twitch: volume mouse interactions do not keep keyboard focus',async()=>{
   const config=platforms[1];
