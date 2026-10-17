@@ -4,7 +4,7 @@ import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
 import { clampVolume, createVolumePersistence, snapToStep, stepVolume } from '../shared/volume.js';
-import { bindOptionsPopupKeyboard, createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
+import { bindOptionsPopupKeyboard, createOptionsButtonIconSvg } from '../shared/options.js';
 import { createCleanupRegistry, createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
 import { installOptionsStyles } from '../shared/options-styles.js';
 import { installVolumeSliderStyles } from '../shared/slider-styles.js';
@@ -1013,8 +1013,7 @@ export function startTwitchVolumeSlider() {
         positionOptionsPopup(popup, true);
         startOptionsControlsHold();
         document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute('aria-expanded', 'true');
-        const initialFocus = getOptionsPopupFocusable(popup)[0];
-        initialFocus?.focus();
+        popup.focus({ preventScroll: true });
 
         if (!optionsPopupOutsideHandler) {
             optionsPopupOutsideHandler = (event) => {

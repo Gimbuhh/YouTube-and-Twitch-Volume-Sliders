@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
@@ -70,6 +70,66 @@ async function preparedPage(browser,{platform,url,html,storage,expectOverlay=tru
     assert.equal(pageErrors.length,0,`${platform} preview has no page errors`);
   }
   return {context,page};
+}
+
+async function assertModeDropdown(page, platform) {
+  // A native light menu must not leave inherited white text unreadable.
+  await page.addStyleTag({ content: 'select option { background-color: #fff; }' });
+  const initial = await page.locator('#tm-volume-options-mode').evaluate(select => {
+    const luminance = color => color.match(/[\d.]+/g).slice(0, 3).map(Number)
+      .map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+      .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+    return {
+      focused: select === document.activeElement,
+      outlined: getComputedStyle(select).outlineStyle !== 'none',
+      borderless: ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'].every(side => getComputedStyle(select)[side] === '0px'),
+      labels: [...select.options].map(option => option.textContent),
+      readable: [...select.options].every(option => {
+        const style = getComputedStyle(option), text = luminance(style.color), background = luminance(style.backgroundColor);
+        return (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05) >= 4.5;
+      })
+    };
+  });
+  assert.deepEqual(initial, { focused: false, outlined: false, borderless: true, labels: ['On', 'Off', 'Replace native'], readable: true }, `${platform}: opening Options leaves Mode borderless and every dropdown choice readable`);
+  const mode = page.locator('#tm-volume-options-mode');
+  const closed = await mode.evaluate(element => ({ arrow: getComputedStyle(element).backgroundImage, background: getComputedStyle(element).backgroundColor }));
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.locator('#tm-volume-options-always-expanded').evaluate(element => element === document.activeElement), true, `${platform}: reverse Tab enters the last setting from the dialog`);
+  await page.keyboard.press('Tab');
+  const focused = await mode.evaluate(element => ({ focused: element === document.activeElement && element.matches(':focus-visible'), background: getComputedStyle(element).backgroundColor, outlined: getComputedStyle(element).outlineStyle !== 'none' }));
+  assert.equal(focused.focused, true, `${platform}: Tab focuses Mode`);
+  assert.notEqual(focused.background, closed.background, `${platform}: background indicates keyboard focus`);
+  assert.equal(focused.outlined, false, `${platform}: keyboard focus adds no border`);
+  for (const close of ['Escape', 'Enter', 'outside']) {
+    if (close === 'Enter') await mode.press('Space');
+    else await mode.click();
+    await page.waitForFunction(() => document.querySelector('#tm-volume-options-mode').matches(':open'));
+    assert.notEqual(await mode.evaluate(element => getComputedStyle(element).backgroundImage), closed.arrow, `${platform}: open picker shows the up arrow`);
+    if (close === 'Escape' && process.env.VOLUME_SLIDER_SCREENSHOTS) {
+      await mkdir(process.env.VOLUME_SLIDER_SCREENSHOTS, { recursive: true });
+      await page.screenshot({ path: join(process.env.VOLUME_SLIDER_SCREENSHOTS, `${platform}-mode-open.png`) });
+    }
+    if (close === 'outside') await page.locator('.tm-volume-options-title').click();
+    else await page.keyboard.press(close);
+    await page.waitForFunction(() => !document.querySelector('#tm-volume-options-mode').matches(':open'));
+    assert.equal(await mode.evaluate(element => getComputedStyle(element).backgroundImage), closed.arrow, `${platform}: ${close} restores the down arrow`);
+    assert.equal(await page.locator('#tm-volume-options-popup').isVisible(), true, `${platform}: dismissing the picker keeps Options open`);
+  }
+}
+
+async function modeDropdownSmoke(browser, platform) {
+  const youtube = platform === 'youtube';
+  const { context, page } = await preparedPage(browser, {
+    platform,
+    url: youtube ? 'https://www.youtube.com/watch?v=mode' : 'https://www.twitch.tv/mode',
+    html: youtube ? youtubeHtml : twitchHtml,
+    storage: { [`tm-${youtube ? 'yt' : 'twitch'}-volume-slider-mode`]: 'replace-native' }
+  });
+  try {
+    await page.locator('#tm-volume-options-button').click();
+    await assertModeDropdown(page, platform);
+    console.log(`browser smoke: ${platform} borderless Mode, option contrast, keyboard focus and native picker arrow on open/Escape/Enter/outside click passed`);
+  } finally { await context.close(); }
 }
 
 async function assertOptionsButtonAlignmentAtZoomLevels(page, platform){
@@ -461,6 +521,8 @@ const browser=await chromium.launch({headless:true,executablePath,args:['--disab
 try{
   await youtubeOptionsPositionSmoke(browser);
   await twitchZoomSmoke(browser);
+  await modeDropdownSmoke(browser, 'youtube');
+  await modeDropdownSmoke(browser, 'twitch');
   await youtubeSmoke(browser);
   await twitchSmoke(browser);
   await twitchPreviewSmoke(browser);

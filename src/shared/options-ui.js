@@ -553,6 +553,7 @@ export function createOptionsUi(dependencies) {
         popup.id = OPTIONS_POPUP_ID;
         popup.setAttribute('role', 'dialog');
         popup.setAttribute('aria-label', 'Volume Slider Options');
+        popup.tabIndex = -1;
         popup.toggleAttribute('hidden', true);
 
         const header = document.createElement('div');

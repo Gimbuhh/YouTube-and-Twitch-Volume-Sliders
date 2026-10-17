@@ -31,6 +31,7 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 max-height: 70vh;
                 max-width: calc(100vw - 16px);
                 min-width: 288px;
+                outline: none;
                 overflow: hidden;
                 position: absolute;
                 user-select: none;
@@ -71,16 +72,33 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 line-height: 20px;
             }
             #{{optionsPopupId}} select {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.18);
+                -webkit-appearance: none;
+                appearance: none;
+                background-color: rgba(255, 255, 255, 0.08);
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+                background-position: right 12px center;
+                background-repeat: no-repeat;
+                background-size: 12px 12px;
+                border: 0;
                 border-radius: 6px;
                 color: #fff;
                 color-scheme: dark;
                 cursor: pointer;
                 font: inherit;
                 line-height: 20px;
-                padding: 6px 10px;
+                outline: none;
+                padding: 7px 32px 7px 10px;
                 width: 176px;
+            }
+            #{{optionsPopupId}} select:open {
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 7.5 3-3 3 3' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            }
+            #{{optionsPopupId}} select:focus-visible {
+                background-color: rgba(255, 255, 255, 0.16);
+            }
+            #{{optionsPopupId}} select option {
+                background-color: #242424;
+                color: #fff;
             }
             #{{optionsPopupId}} .tm-volume-options-tabs {
                 border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -105,7 +123,7 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
             #{{optionsPopupId}} .tm-volume-options-tab:hover {
                 color: #fff;
             }
-            #{{optionsPopupId}} :is(button, select, input):focus-visible {
+            #{{optionsPopupId}} :is(button, input):focus-visible {
                 outline: 2px solid {{accentDark}};
                 outline-offset: -2px;
             }

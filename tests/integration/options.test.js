@@ -184,6 +184,9 @@ function hideAndRevealControls(runtime, config) {
 for (const config of platforms) test(`${config.name}: options dialog contains focus and restores it on Escape`,async()=>{
   const {runtime,button,popup}=await openOptions(config);
   assert.equal(popup.hidden,false); assert.equal(popup.contains(runtime.document.activeElement),true);
+  assert.equal(runtime.document.activeElement,popup,'opening focuses the dialog without selecting a setting');
+  runtime.document.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));
+  assert.equal(runtime.document.activeElement.id,'tm-volume-options-mode','Tab enters the first setting');
 
   const hiddenOpacity=popup.querySelector('#tm-volume-options-opacity-section');
   assert.equal(hiddenOpacity.style.display,'none');
@@ -496,7 +499,7 @@ for (const config of platforms) test(`${config.name}: on-video size option is ac
 for (const config of platforms) test(`${config.name}: tabs hide inactive controls and wrap keyboard selection`, async (t) => {
   const {runtime,popup}=await openOptions(config,'off');
   t.after(()=>runtime.close());
-  assert.equal(runtime.document.activeElement.id,'tm-volume-options-mode');
+  assert.equal(runtime.document.activeElement.id,'tm-volume-options-popup');
   const tabs=[...popup.querySelectorAll('[role="tab"]')];
   const panels=[...popup.querySelectorAll('[role="tabpanel"]')];
   assert.deepEqual(tabs.map(tab=>tab.tabIndex),[0,-1]);

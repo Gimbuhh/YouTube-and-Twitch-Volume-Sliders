@@ -84,9 +84,9 @@ Latest published version, 2.8.3: [YouTube userscript](https://github.com/Gimbuhh
 
 ## Settings
 
-Open **Volume Slider Options** beside the player’s native settings button. **Mode** stays above the tabs: choose On, Off, or Replace native. **General** contains audio normalization, adjustment step, placement, and behavior. **Appearance** contains icon style and bar thickness, plus size and opacity when **General → Show on video** is enabled.
+Open **Volume Slider Options** beside the player’s native settings button. **Mode** stays above the tabs: choose On, Off, or Replace native. Its arrow points up while choices are open and down when closed. **General** contains audio normalization, adjustment step, placement, and behavior. **Appearance** contains icon style and bar thickness, plus size and opacity when **General → Show on video** is enabled.
 
-With a tab focused, Left/Right Arrow switches tabs; Home/End selects the first/last tab. Tab moves through the visible controls, and Escape closes Options.
+Options opens with the menu focused. Press Tab to enter the first setting, or Shift+Tab to enter the last. With a tab focused, Left/Right Arrow switches tabs; Home/End selects the first/last tab. Tab moves through the visible controls, and Escape closes Options.
 
 <table>
   <tr>

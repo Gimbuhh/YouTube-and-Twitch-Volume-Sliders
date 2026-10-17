@@ -15,7 +15,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Changed
 
-- **Both:** Volume Slider Options groups audio, adjustment step, and placement in **General**, with visual controls in **Appearance**. A Mode dropdown stays above both tabs; clearer toggles, compact audio feedback, and an on-video settings hint make the menu easier to scan.
+- **Both:** Volume Slider Options groups listening and placement settings in **General**, with visual controls in **Appearance**, clearer toggles, and compact audio feedback. The borderless Mode dropdown stays above both tabs, keeps choices readable across browser themes, and points its arrow up while open and down when closed.
 
 ### Fixed
 
