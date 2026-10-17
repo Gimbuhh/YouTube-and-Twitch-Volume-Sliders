@@ -31,6 +31,7 @@ function wav(amplitude, channels = 1) {
 }
 
 const loud = wav(0.7), quiet = wav(0.06), stereo = wav(0.7, 2);
+const burst = wav(time => time < 4 ? 0.06 : 0.7);
 // Continuous audible tone with a changing envelope, never digital silence.
 const soft = wav(time => 0.016 + 0.012 * Math.sin(2 * Math.PI * time));
 const browser = await chromium.launch({ headless: true, executablePath, args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--no-first-run'] });
@@ -65,7 +66,7 @@ try {
     </script><script>${artifact.replaceAll('</script>', '<\\/script>')}</script></body></html>`;
     await page.route('**/*', route => {
       const path = new URL(route.request().url()).pathname;
-      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : loud });
+      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : loud });
       return route.fulfill({ status: 200, contentType: 'text/html', body: html });
     });
     try {
@@ -78,7 +79,7 @@ try {
       await toggle.click();
       await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred, { timeout: 3000 });
       assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
-      await page.waitForTimeout(300);
+      await page.waitForFunction(() => /Reducing loud audio/.test(document.querySelector('#tm-volume-options-normalization-details').textContent));
       assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
       assert.equal(await page.locator('#tm-volume-options-normalization-status').textContent(), 'Active');
       const loudOutput = await page.evaluate(() => document.querySelector('video').volume);
@@ -109,6 +110,24 @@ try {
         await mkdir(process.env.VOLUME_SLIDER_SCREENSHOTS, { recursive: true });
         await page.locator('#tm-volume-options-popup').screenshot({ path: join(process.env.VOLUME_SLIDER_SCREENSHOTS, `${platform}-normalization.png`) });
       }
+      // A loud return within the same source retains the preceding quiet boost.
+      // Source replacement alone cannot reproduce that gain-transition bug.
+      await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/burst.wav'; await v.play(); });
+      await page.waitForFunction(() => document.querySelector('video').currentTime >= 3.5);
+      assert.ok(await page.evaluate(() => document.querySelector('video').volume) > preferred / 100 * 1.5, 'the quiet lead-in has a meaningful boost');
+      const burstTrace = await page.evaluate(() => new Promise(resolve => {
+        const video = document.querySelector('video');
+        const rows = [];
+        const timer = setInterval(() => rows.push({ time: video.currentTime, volume: video.volume }), 10);
+        setTimeout(() => { clearInterval(timer); resolve(rows); }, 1300);
+      }));
+      const afterAttack = burstTrace.filter(row => row.time >= 4.25 && row.time <= 4.7);
+      assert.ok(afterAttack.length > 0, 'the captured trace includes the loud return');
+      const worstBurstDb = Math.max(...afterAttack.map(row => 20 * Math.log10((0.7 / Math.sqrt(2) * row.volume) / (0.1 * preferred / 100))));
+      assert.ok(worstBurstDb < 2, `loud return settles within 250 ms: ${worstBurstDb.toFixed(2)} dB above target`);
+      assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+      assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
+      console.log(`${platform} at ${preferred}%: same-source loud return is ${worstBurstDb.toFixed(2)} dB above target after 250 ms`);
       // The old mono analyser reads this audible stereo source as silence.
       await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/stereo.wav'; await v.play(); });
       await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred, { timeout: 3000 });

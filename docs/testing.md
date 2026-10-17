@@ -26,7 +26,7 @@ Twitch regressions distinguish narrow channel, video, and clip players from comp
 
 The browser suite also checks the static normalization icon in both themes and icon styles, at enlarged on-video sizes, and through output changes, mute, unavailable capture, and disabled states. It verifies the original circular layout, inset upper-right placement with overlap limited to the outer ring, unclipped center and perimeter at ten zoom levels from 50% through 200%, unobscured selected values through 100%, and thumb clearance at zero volume. It preserves the slider's preferred volume, accessible descriptions, and existing mute interaction. The waveform stays unchanged while enabled. These UI checks use a controlled capture fixture; the separate normalization suite below covers real audio capture.
 
-For normalization changes, also run `npm run test:normalization-browser`. It exercises real Web Audio capture with synthetic local WAV sources for both platform adapters, including loud/quiet transitions, mute and preferred-volume preservation, and cross-origin fallback. See [normalization](normalization.md) for its scope and limitations.
+For normalization changes, also run `npm run test:normalization-browser`. It exercises real Web Audio capture with synthetic local WAV sources for both platform adapters, including loud/quiet transitions, mute and preferred-volume preservation, and cross-origin fallback. A same-source quiet-to-loud transition checks attenuation of an existing boost within 250 ms, with the custom slider and saved preference unchanged. Unit tests also cover the first louder measurement and short quiet introductions. See [normalization](normalization.md) for its scope and limitations.
 
 ## Documentation screenshots
 

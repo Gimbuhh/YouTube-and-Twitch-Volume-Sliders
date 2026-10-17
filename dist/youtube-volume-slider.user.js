@@ -122,9 +122,13 @@
         const power = gatedEnergy / duration;
         const reference = Math.max(power, measuredPower);
         let desired = Math.min(maxGain, Math.max(0.1, TARGET_RMS / Math.sqrt(reference)));
-        if (audibleSeconds < 0.4) desired = Math.min(1, desired);
-        const seconds = desired < gain ? 0.12 : audibleSeconds < 3 ? 0.9 : 1.8;
-        gain = Math.exp(Math.log(gain) + (Math.log(desired) - Math.log(gain)) * (1 - Math.exp(-dt / seconds)));
+        if (audibleSeconds < 1) desired = Math.min(1, desired);
+        if (desired < gain) {
+          gain = desired;
+        } else {
+          const seconds = time < 3 ? 0.9 : 3;
+          gain = Math.exp(Math.log(gain) + (Math.log(desired) - Math.log(gain)) * (1 - Math.exp(-dt / seconds)));
+        }
         return gain;
       }
     };
@@ -255,7 +259,7 @@
           owned.splitter = owned.context.createChannelSplitter(6);
           owned.analysers = Array.from({ length: 6 }, (_, channel) => {
             const analyser = owned.context.createAnalyser();
-            analyser.fftSize = Math.min(32768, 2 ** Math.ceil(Math.log2((owned.context.sampleRate || 48e3) * 0.15)));
+            analyser.fftSize = Math.min(32768, 2 ** Math.ceil(Math.log2((owned.context.sampleRate || 48e3) * 0.05)));
             owned.splitter.connect(analyser, channel);
             return analyser;
           });
@@ -343,7 +347,7 @@
       for (const type of ["playing", "loadedmetadata"]) video.addEventListener(type, owned.retry);
       window2.document.addEventListener("pointerdown", owned.gesture, true);
       window2.document.addEventListener("keydown", owned.gesture, true);
-      owned.timer = window2.setInterval(tick, 100);
+      owned.timer = window2.setInterval(tick, 50);
       tick();
     }
     return {

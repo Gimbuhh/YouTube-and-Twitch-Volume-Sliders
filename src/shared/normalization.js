@@ -54,10 +54,15 @@ export function createLoudnessTracker() {
       // the three-second history to catch up. Quiet passages recover slowly.
       const reference = Math.max(power, measuredPower);
       let desired = Math.min(maxGain, Math.max(0.1, TARGET_RMS / Math.sqrt(reference)));
-      if (audibleSeconds < 0.4) desired = Math.min(1, desired);
-      const seconds = desired < gain ? 0.12 : audibleSeconds < 3 ? 0.9 : 1.8;
-      // Smooth in dB rather than linear amplitude for predictable relative steps.
-      gain = Math.exp(Math.log(gain) + (Math.log(desired) - Math.log(gain)) * (1 - Math.exp(-dt / seconds)));
+      if (audibleSeconds < 1) desired = Math.min(1, desired);
+      if (desired < gain) {
+        // Once louder audio is measured, remove the boost without another ramp.
+        gain = desired;
+      } else {
+        // Recover cautiously between phrases; sustained quiet sources still match.
+        const seconds = time < 3 ? 0.9 : 3;
+        gain = Math.exp(Math.log(gain) + (Math.log(desired) - Math.log(gain)) * (1 - Math.exp(-dt / seconds)));
+      }
       return gain;
     }
   };
@@ -187,8 +192,8 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         owned.splitter = owned.context.createChannelSplitter(6);
         owned.analysers = Array.from({ length: 6 }, (_, channel) => {
           const analyser = owned.context.createAnalyser();
-          // Overlapping windows cover the space between 100 ms polling ticks.
-          analyser.fftSize = Math.min(32768, 2 ** Math.ceil(Math.log2((owned.context.sampleRate || 48000) * 0.15)));
+          // Cover each 50 ms tick without retaining a long pre-spike average.
+          analyser.fftSize = Math.min(32768, 2 ** Math.ceil(Math.log2((owned.context.sampleRate || 48000) * 0.05)));
           owned.splitter.connect(analyser, channel);
           return analyser;
         });
@@ -264,7 +269,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     for (const type of ['playing', 'loadedmetadata']) video.addEventListener(type, owned.retry);
     window.document.addEventListener('pointerdown', owned.gesture, true);
     window.document.addEventListener('keydown', owned.gesture, true);
-    owned.timer = window.setInterval(tick, 100);
+    owned.timer = window.setInterval(tick, 50);
     tick();
   }
 

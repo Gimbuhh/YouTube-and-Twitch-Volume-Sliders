@@ -72,6 +72,39 @@ test('sudden loud passages attenuate before the history window fills', () => {
   assert.ok(0.9 * gain < 0.115, 'new loud level is close to target after 500 ms');
 });
 
+test('a loud return after boosted quiet audio cuts gain on the first measurement', () => {
+  for (const dt of [0.05, 0.1, 0.2]) {
+    const tracker = createLoudnessTracker();
+    let gain;
+    for (let time = 0; time < 5; time += dt) gain = tracker.update(new Float32Array(64).fill(0.04), dt, 5);
+    assert.ok(gain > 2, 'sustained quiet sources still receive useful normalization');
+    gain = tracker.update(new Float32Array(64).fill(0.8), dt, 5);
+    assert.ok(0.8 * gain <= 0.101, `the first loud measurement has no smoothed overshoot at ${dt}s`);
+  }
+});
+
+test('a brief quiet introduction does not receive a volume boost', () => {
+  const tracker = createLoudnessTracker();
+  let gain;
+  for (let i = 0; i < 15; i++) {
+    gain = tracker.update(new Float32Array(64).fill(0.03), 0.05);
+    assert.equal(gain, 1, 'wait for sustained measurable audio before increasing volume');
+  }
+  for (let i = 0; i < 300; i++) gain = tracker.update(new Float32Array(64).fill(0.03), 0.05);
+  assert.ok(0.03 * gain > 0.095, 'a sustained quieter source can still reach the target');
+});
+
+test('an established source recovers cautiously after a long quiet passage', () => {
+  const tracker = createLoudnessTracker();
+  let gain;
+  for (let i = 0; i < 80; i++) gain = tracker.update(new Float32Array(64).fill(0.4), 0.05, 5);
+  for (let i = 0; i < 100; i++) {
+    const before = gain;
+    gain = tracker.update(new Float32Array(64).fill(0.04), 0.05, 5);
+    if (i >= 80) assert.ok(20 * Math.log10(gain / before) < 0.35, 'quiet periods do not re-enter the faster startup ramp');
+  }
+});
+
 function fixture() {
   let now = 0;
   const timers = new Map();

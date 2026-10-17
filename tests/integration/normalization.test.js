@@ -30,13 +30,28 @@ async function prepare(config, t, { saved = false, blockedStorage = false } = {}
   }
   let now = 0;
   Object.defineProperty(runtime.window.performance, 'now', { value: () => now });
-  const ticks = [];
+  const ticks = new Map();
   const originalSetInterval = runtime.window.setInterval.bind(runtime.window);
+  const originalClearInterval = runtime.window.clearInterval.bind(runtime.window);
   runtime.window.setInterval = (callback, delay, ...args) => {
-    if (delay === 100) { ticks.push(callback); return originalSetInterval(() => {}, 100000); }
+    if (delay <= 100) {
+      const id = originalSetInterval(() => {}, 100000);
+      ticks.set(id, { callback: () => callback(...args), delay, next: now + delay });
+      return id;
+    }
     return originalSetInterval(callback, delay, ...args);
   };
-  const advance = () => { for (let i = 0; i < 70; i++) { now += 100; for (const tick of ticks) tick(); } };
+  runtime.window.clearInterval = id => { ticks.delete(id); originalClearInterval(id); };
+  const advance = () => {
+    for (let i = 0; i < 140; i++) {
+      now += 50;
+      for (const tick of ticks.values()) {
+        if (now < tick.next) continue;
+        tick.next += tick.delay;
+        tick.callback();
+      }
+    }
+  };
   runtime.window.eval(await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`, import.meta.url), 'utf8'));
   runtime.document.getElementById('tm-volume-options-button').click();
   const toggle = runtime.document.getElementById('tm-volume-options-normalization');
@@ -57,7 +72,8 @@ for (const config of platforms) {
     const artwork = indicator.innerHTML;
     assert.equal(slider.value, '50');
     assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
-    f.audio.amplitude = 0.02; f.advance(); f.advance(); f.advance();
+    f.audio.amplitude = 0.02;
+    for (let i = 0; i < 6 && f.rawVolume() < 100; i++) f.advance();
     assert.equal(indicator.innerHTML, artwork);
     assert.match(f.document.getElementById('tm-volume-options-normalization-details').textContent, /Output 100%/);
     assert.equal(slider.value, '50');
