@@ -124,7 +124,7 @@ export function startYouTubeVolumeSlider() {
     });
     const normalizer = createVolumeNormalizer({
         window, getVolume: getRawVolume, setVolume: setRawVolume, isMuted,
-        onStatusChanged: () => syncNormalizationStatus(getOptionsPopup())
+        onStatusChanged: () => { syncNormalizationStatus(getOptionsPopup()); syncNormalizationIcon(); }
     });
 
     function syncNormalization() {
@@ -132,7 +132,11 @@ export function startYouTubeVolumeSlider() {
         normalizer.setEnabled(enabled);
         normalizer.bind(overlayLifecycle.active?.root?._tmVolumeVideo || null);
         refreshOptionsPopupState();
-        updateNormalizationIcon(document.getElementById(OVERLAY_ID), enabled);
+        syncNormalizationIcon();
+    }
+
+    function syncNormalizationIcon() {
+        updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus().startsWith('Active'));
     }
 
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({

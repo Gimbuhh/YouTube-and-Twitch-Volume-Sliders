@@ -46,6 +46,9 @@ export function createLufsAnalysis({ window, context, track, onFrame, onFailure 
     node = null;
   }
   const owned = {
+    // Native frames do not use the context's processing graph. Only a pending
+    // or connected worklet needs that context to run before it can analyze.
+    get needsActivation() { return !reader && context.state !== 'running'; },
     dispose() {
       disposed = true;
       if (reader) reader.cancel().catch(() => {});

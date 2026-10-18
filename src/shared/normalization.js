@@ -84,10 +84,14 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     }
   }
 
-  function unavailable(owned) {
+  function unavailable(owned, retry = true) {
     try { restore(owned); } catch { /* the site's outgoing player may already be unavailable */ }
     releaseCapture(owned);
     owned.blocked = true;
+    // A capture created during player startup can fail before audio is ready.
+    // Reconnect on the existing timer, with backoff for inaccessible streams.
+    owned.retryAt = retry ? window.performance.now() + owned.retryDelay : 0;
+    if (retry) owned.retryDelay = Math.min(30000, owned.retryDelay * 2);
     report('Audio unavailable — normal volume');
   }
 
@@ -106,7 +110,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         if (session !== owned || !owned.video.isConnected || owned.blocked) return;
         owned.lastLufsFrame = window.performance.now();
         owned.catchUpAfter = 0;
-        if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== 'live' || owned.preferred === 0 || owned.context.state !== 'running') return;
+        if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== 'live' || owned.preferred === 0 || owned.lufs?.needsActivation) return;
         try {
           owned.lufsTracker ||= createLufsGainController();
           // Most fast measurements cannot change gain. Skip player API reads
@@ -131,7 +135,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
   }
 
   function resume(owned) {
-    if (!owned.context || owned.context.state !== 'suspended' || owned.resuming) return;
+    if (!owned.context || !owned.lufs?.needsActivation || owned.context.state !== 'suspended' || owned.resuming) return;
     owned.resuming = true;
     owned.context.resume().catch(() => {}).finally(() => { owned.resuming = false; });
   }
@@ -144,8 +148,12 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     owned.lastTick = now;
     const video = owned.video;
     if (!video.isConnected) { bind(null); return; }
-    if (owned.blocked) return;
-    if (video.mediaKeys) { unavailable(owned); return; }
+    if (owned.blocked) {
+      if (!owned.retryAt || now < owned.retryAt || video.paused || video.ended || video.readyState < 2) return;
+      owned.blocked = false;
+      owned.retryAt = 0;
+    }
+    if (video.mediaKeys) { unavailable(owned, false); return; }
     if (video.paused || video.ended || video.readyState < 2) {
       owned.lastLufsFrame = null;
       owned.analysisStarted = window.performance.now();
@@ -177,7 +185,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       if (!owned.track || owned.track.readyState !== 'live') connectTrack(owned);
       if (owned.blocked) return;
       readPreferred(owned);
-      if (owned.context.state !== 'running') {
+      if (owned.lufs?.needsActivation) {
         restore(owned);
         report('Click the player to activate');
         return;
@@ -207,6 +215,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         return;
       }
       writeOutput(owned, owned.preferred * owned.gain);
+      if (now - owned.analysisStarted >= 3000) owned.retryDelay = 1000;
       // A quiet measurement does not mean the live capture source disappeared.
       report(owned.applied === 100 && owned.gain > 1 ? 'Active — at volume limit' : 'Active');
     } catch {
@@ -235,17 +244,22 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     }
     const preferred = clampVolume(getVolume(video));
     const owned = session = {
-      video, preferred, applied: preferred, gain: 1, blocked: false
+      video, preferred, applied: preferred, gain: 1, blocked: false, retryAt: 0, retryDelay: 1000
     };
     owned.reset = () => {
       try { restore(owned); }
       catch { /* the source can become inaccessible before its load event */ }
       releaseCapture(owned);
       owned.blocked = false;
+      owned.retryAt = 0;
+      owned.retryDelay = 1000;
       report('Waiting for playback');
     };
-    owned.retry = () => { owned.blocked = false; tick(); };
-    owned.gesture = () => { resume(owned); tick(); };
+    owned.retry = () => { owned.blocked = false; owned.retryAt = 0; tick(); };
+    owned.gesture = () => {
+      if (owned.blocked && owned.retryAt) owned.retry();
+      else { resume(owned); tick(); }
+    };
     for (const type of ['emptied', 'loadstart']) video.addEventListener(type, owned.reset);
     for (const type of ['playing', 'loadedmetadata']) video.addEventListener(type, owned.retry);
     window.document.addEventListener('pointerdown', owned.gesture, true);

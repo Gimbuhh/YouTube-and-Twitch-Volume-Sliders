@@ -120,7 +120,7 @@ The source reference is −18 LUFS before your selected volume: 30% gives a nomi
 
 The status below the toggle shows whether normalization is active, waiting, or unavailable. While active, it also shows whether audio is being raised or reduced. **Output** is the volume currently applied to the player; **Selected** is your chosen slider percentage. Browser audio capture support and stream restrictions vary. If capture fails or becomes inaccessible, ordinary playback continues at your chosen volume. You may need to click the player to activate analysis after a reload. Turning normalization off, or setting the slider mode to **Off**, releases analysis and restores your chosen volume while preserving mute. The opt-in remains saved when slider mode is Off.
 
-While normalization is on, a small, static waveform icon tucked into the volume ring's upper-right edge indicates that the option is enabled. It slightly overlaps the outer arc while leaving the volume number clear. Hover it for an explanation. It hides when normalization is off and keeps the control's original size and round background. The main number remains your chosen volume; current status and adjusted output remain available under Audio in Volume Slider Options.
+A small, static waveform icon tucked into the volume ring's upper-right edge shows when normalization is active. It hides during startup, pause, mute, or unavailable audio, and when the option is off. It slightly overlaps the outer arc while leaving the volume number clear and keeps the control's original size and round background. The main number remains your chosen volume; current status and adjusted output are available under Audio in Volume Slider Options. Temporary audio access failures retry automatically.
 
 <table>
   <tr>

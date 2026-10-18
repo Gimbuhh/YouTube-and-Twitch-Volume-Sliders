@@ -41,9 +41,13 @@ const attackResults = [];
 try {
   const cases = ['youtube', 'twitch'].flatMap(platform => [30, 40].map(preferred => [platform, preferred, 'lufs']));
   cases.push(['youtube', 30, 'csp'], ['twitch', 40, 'native'], ['twitch', 40, 'unsupported']);
+  cases.push(['youtube', 30, 'csp-suspended'], ['twitch', 40, 'native-suspended'], ['youtube', 30, 'worklet-suspended']);
+  cases.push(['youtube', 30, 'lufs-retry'], ['twitch', 40, 'native-retry']);
   const selectedCases = process.env.VOLUME_SLIDER_NORMALIZATION_CASES?.split(',');
   for (const [platform, preferred, engine] of cases.filter(parts => !selectedCases || selectedCases.includes(parts.join('/')))) {
     const youtube = platform === 'youtube';
+    const suspended = engine.endsWith('-suspended');
+    const retrying = engine.endsWith('-retry');
     const prefix = youtube ? 'yt' : 'twitch';
     const origin = youtube ? 'https://www.youtube.com' : 'https://www.twitch.tv';
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -67,10 +71,14 @@ try {
       const api = {getVolume:()=>video.volume * ${youtube ? 100 : 1},setVolume:v=>{video.volume=v / ${youtube ? 100 : 1}},isMuted:()=>video.muted,mute:()=>{video.muted=true},unMute:()=>{video.muted=false},setMuted:v=>{video.muted=v}};
       ${youtube ? 'Object.assign(player,api);' : 'player.__reactFiber$fixture={return:{memoizedProps:{mediaPlayerInstance:api},return:null}};'}
       localStorage.setItem('tm-${prefix}-volume','${preferred}');
+      if (${suspended || retrying}) localStorage.setItem('tm-${prefix}-volume-slider-normalization','true');
       AudioContext.prototype.createMediaElementSource = () => {throw new Error('Must never reroute original playback')};
       window.__normalizationCaptures = 0;
+      window.__retryPlaybackEvents = 0;
+      for (const type of ['playing', 'loadedmetadata']) video.addEventListener(type, () => window.__retryPlaybackEvents++);
       window.__normalizationStreams = [];
       window.__normalizationContexts = [];
+      window.__normalizationTracks = [];
       window.__lufsSeconds = 0;
       window.__nativeFrames = 0;
       window.__lufsOutputs = [];
@@ -87,6 +95,7 @@ try {
       if (NativeProcessor) window.MediaStreamTrackProcessor = class extends NativeProcessor {
         constructor(...args) {
           super(...args);
+          window.__normalizationTracks.push(args[0].track);
           const getReader = this.readable.getReader.bind(this.readable);
           this.readable.getReader = (...args) => {
             const reader = getReader(...args), read = reader.read.bind(reader);
@@ -102,18 +111,29 @@ try {
           };
         }
       };
-      if (['native', 'unsupported'].includes(${JSON.stringify(engine)})) window.AudioWorkletNode = undefined;
+      if (${engine.startsWith('native') || engine === 'unsupported'}) window.AudioWorkletNode = undefined;
       if (${JSON.stringify(engine)} === 'unsupported') window.MediaStreamTrackProcessor = undefined;
       const NativeContext = window.AudioContext;
       window.AudioContext = class extends NativeContext {
         constructor(...args) {
           super(...args);
           window.__normalizationContexts.push(this);
+          if (${suspended}) this.suspend();
+        }
+        resume() {
+          // Keep real native capture separate from blocked Web Audio activation.
+          if (${suspended} && !window.__allowAudioResume) return Promise.resolve();
+          return super.resume();
+        }
+        createMediaStreamSource(stream) {
+          window.__normalizationTracks.push(...stream.getAudioTracks());
+          return super.createMediaStreamSource(stream);
         }
       };
       const originalCapture = HTMLMediaElement.prototype.captureStream;
       HTMLMediaElement.prototype.captureStream = function(...args) {
         window.__normalizationCaptures++;
+        if (${retrying} && !window.__captureReady) throw new DOMException('Player capture is not ready', 'InvalidStateError');
         const stream = originalCapture.apply(this,args);
         window.__normalizationStreams.push(stream);
         return stream;
@@ -124,11 +144,111 @@ try {
       if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('speech-return') ? speechReturn : path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
       // YouTube can send a policy without blob: in script-src. Reproduce the
       // actual module rejection, rather than mocking addModule's return value.
-      const headers = engine === 'csp' ? { 'Content-Security-Policy': "script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none'" } : {};
+      const headers = engine.startsWith('csp') ? { 'Content-Security-Policy': "script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none'" } : {};
       return route.fulfill({ status: 200, contentType: 'text/html', headers, body: html });
     });
     try {
       await page.goto(`${origin}/${youtube ? 'watch?v=normalization' : 'normalization'}`);
+      if (retrying) {
+        const cdp = await context.newCDPSession(page);
+        const evaluate = async expression => {
+          const result = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: false });
+          assert.ok(!result.exceptionDetails, result.exceptionDetails?.text);
+          return result.result.value;
+        };
+        await evaluate(`document.querySelector('video').play()`);
+        const wait = async expression => evaluate(`(async () => {
+          const deadline = performance.now() + 6000;
+          while (!(${expression})) {
+            if (performance.now() > deadline) throw new Error('Automatic recovery condition timed out');
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+        })()`);
+        await wait(`window.__normalizationCaptures > 0 && document.querySelector('video').currentTime > .2`);
+        assert.equal(await evaluate(`navigator.userActivation.hasBeenActive`), false);
+        const failedIconVisible = await evaluate(`!document.querySelector('.tm-normalization-icon').hidden`);
+        const attempts = await evaluate(`window.__normalizationCaptures`);
+        const playbackEvents = await evaluate(`window.__retryPlaybackEvents`);
+        await evaluate(`window.__captureReady = true`);
+        // No toggle, playback event, or trusted gesture triggers reconnection.
+        await wait(`window.__lufsSeconds > .2 && document.querySelector('video').volume < ${preferred / 100 * .25}`);
+        assert.equal(await evaluate(`navigator.userActivation.hasBeenActive`), false);
+        assert.equal(await evaluate(`window.__normalizationCaptures`), attempts + 1);
+        assert.equal(await evaluate(`window.__retryPlaybackEvents`), playbackEvents, 'recovery does not depend on a playback event');
+        assert.equal(failedIconVisible, false, 'the failure hides the icon before recovery');
+        assert.equal(await evaluate(`window.__nativeFrames > 0`), engine === 'native-retry');
+        await page.locator('.tm-normalization-icon').waitFor({ state: 'visible' });
+        assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+        assert.equal(await evaluate(`localStorage.getItem('tm-${prefix}-volume')`), String(preferred));
+        await page.locator('#tm-volume-options-button').click();
+        assert.equal(await page.locator('#tm-volume-options-normalization').getAttribute('aria-checked'), 'true');
+        await page.locator('#tm-volume-options-normalization').click();
+        assert.equal(await page.locator('.tm-normalization-icon').isVisible(), false);
+        await page.waitForFunction(() => window.__normalizationContexts.every(context => context.state === 'closed'));
+        assert.ok(await evaluate(`window.__normalizationTracks.length > 0 && window.__normalizationTracks.every(track => track.readyState === 'ended')`));
+        assert.equal(await evaluate(`document.querySelector('video').volume`), preferred / 100);
+        assert.deepEqual(errors, []);
+        console.log(`${platform} (${engine}): transient startup failure retries without input; active-only icon, preference and cleanup passed`);
+        continue;
+      }
+      if (suspended) {
+        // Playwright evaluations carry a user gesture. Use explicit CDP calls
+        // for the pre-activation proof so the harness cannot activate the tab.
+        const cdp = await context.newCDPSession(page);
+        const read = async (fn, argument) => {
+          const result = await cdp.send('Runtime.evaluate', { expression: `(${fn})(${JSON.stringify(argument)})`, userGesture: false, awaitPromise: true, returnByValue: true });
+          assert.ok(!result.exceptionDetails, result.exceptionDetails?.text);
+          return result.result.value;
+        };
+        const wait = async (fn, argument) => read(async ({ source, argument }) => {
+          const condition = (0, eval)(`(${source})`), deadline = performance.now() + 5000;
+          while (!condition(argument)) {
+            if (performance.now() > deadline) throw new Error('Pre-activation condition timed out');
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+        }, { source: fn.toString(), argument });
+        await wait(() => !!document.querySelector('#tm-volume-options-button'));
+        await read(() => document.querySelector('video').play());
+        await wait(() => window.__normalizationContexts.length > 0 && window.__normalizationContexts.every(context => context.state === 'suspended'));
+        assert.equal(await read(() => navigator.userActivation.hasBeenActive), false, 'no trusted input has activated this tab');
+        if (engine === 'worklet-suspended') {
+          await wait(() => window.__lufsOutputs.length > 0);
+          assert.equal(await read(() => window.__lufsSeconds), 0);
+          assert.equal(await read(() => document.querySelector('video').volume), preferred / 100);
+        } else {
+          await wait(preference => window.__nativeFrames > 0 && document.querySelector('video').volume < preference / 100 * .25, preferred);
+          assert.equal(await read(() => navigator.userActivation.hasBeenActive), false, 'native analysis needs no extra activation click');
+        }
+        await page.evaluate(() => document.querySelector('#tm-volume-options-button').click());
+        const toggle = page.locator('#tm-volume-options-normalization');
+        assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+        if (engine === 'worklet-suspended') {
+          await page.waitForFunction(() => /Click the player/.test(document.querySelector('#tm-volume-options-normalization-status').textContent));
+          await page.evaluate(() => { window.__allowAudioResume = true; });
+          await page.locator('video').click();
+          await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred);
+          await page.evaluate(() => document.querySelector('#tm-volume-options-button').click());
+        }
+        await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent.startsWith('Active'));
+        assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+        assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
+        if (engine !== 'worklet-suspended') {
+          await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/quiet.wav'; await v.play(); });
+          await page.waitForFunction(preference => document.querySelector('video').volume > preference / 100 * 1.1, preferred, { timeout: 5000 });
+          assert.ok(await page.evaluate(() => window.__normalizationContexts.every(context => ['closed', 'suspended'].includes(context.state))), 'source replacement does not activate the unused context');
+        }
+        await page.evaluate(() => { document.querySelector('video').muted = true; });
+        await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent === 'Muted');
+        await toggle.click();
+        await page.waitForFunction(() => window.__normalizationContexts.every(context => context.state === 'closed'));
+        // A retained capture stream can receive new tracks after a source
+        // replacement. Check every track actually consumed by our analysis.
+        assert.ok(await page.evaluate(() => window.__normalizationTracks.length > 0 && window.__normalizationTracks.every(track => track.readyState === 'ended')));
+        assert.deepEqual(await page.evaluate(() => ({ volume: document.querySelector('video').volume, muted: document.querySelector('video').muted })), { volume: preferred / 100, muted: true });
+        assert.deepEqual(errors, []);
+        console.log(`${platform} (${engine}): ${engine === 'worklet-suspended' ? 'worklet waits for genuine activation and then recovers' : 'native LUFS starts before any trusted input while its unused context stays suspended'}; preference, mute, source cleanup and disable passed`);
+        continue;
+      }
       await page.waitForSelector('#tm-volume-options-button');
       await page.evaluate(() => document.querySelector('video').play());
       await page.locator('#tm-volume-options-button').click();
@@ -289,6 +409,7 @@ try {
         nativeFrames: window.__nativeFrames,
         captures: window.__normalizationCaptures,
         contexts: window.__normalizationContexts.map(context => context.state),
+        streams: window.__normalizationStreams.map(stream => stream.getTracks().map(track => `${track.kind}/${track.readyState}`)),
         status: document.querySelector('#tm-volume-options-normalization-status')?.textContent,
         details: document.querySelector('#tm-volume-options-normalization-details')?.textContent
       })));

@@ -42,9 +42,9 @@ async function prepare(config, t, { saved = false, blockedStorage = false } = {}
     return originalSetInterval(callback, delay, ...args);
   };
   runtime.window.clearInterval = id => { ticks.delete(id); originalClearInterval(id); };
-  const advance = async () => {
+  const advance = async (seconds = 7) => {
     await new Promise(resolve => setImmediate(resolve));
-    for (let i = 0; i < 140; i++) {
+    for (let i = 0; i < seconds * 20; i++) {
       now += 50;
       await new Promise(resolve => setImmediate(resolve));
       for (const tick of ticks.values()) {
@@ -92,15 +92,16 @@ for (const config of platforms) {
     }
   });
 
-  test(`${config.file}: normalization icon stays static through output, mute and fallback and hides when disabled`, async t => {
+  test(`${config.file}: normalization icon appears only while active and keeps its artwork through recovery`, async t => {
     const f = await prepare(config, t, { saved: true });
     const indicator = f.document.querySelector('.tm-normalization-icon');
     const icon = f.document.querySelector('.tm-volume-icon-cell');
     const slider = f.document.getElementById('tm-volume-slider-range');
+    assert.equal(indicator.hidden, true, 'starting analysis is not yet active');
     await f.advance();
     assert.equal(indicator.hidden, false);
     assert.equal(indicator.textContent, '');
-    assert.equal(indicator.title, 'Auto-normalize volume is on');
+    assert.equal(indicator.title, 'Auto-normalize volume is active');
     const artwork = indicator.innerHTML;
     assert.equal(slider.value, '50');
     assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
@@ -113,13 +114,26 @@ for (const config of platforms) {
     assert.equal(slider.value, '50');
     if (config.file === 'youtube') f.api.mute(); else f.api.setMuted(true);
     await f.advance(); assert.equal(indicator.innerHTML, artwork);
-    assert.equal(indicator.hidden, false);
+    assert.equal(indicator.hidden, true);
+    assert.equal(icon.getAttribute('aria-describedby'), null);
     if (config.file === 'youtube') f.api.unMute(); else f.api.setMuted(false);
+    await f.advance(.2); assert.equal(indicator.hidden, false);
+    f.audio.paused = true; await f.advance(.2); assert.equal(indicator.hidden, true);
+    f.audio.paused = false; await f.advance(.2); assert.equal(indicator.hidden, false);
     f.audio.streams[0].getAudioTracks()[0].muted = true;
     await f.advance(); assert.equal(indicator.innerHTML, artwork);
-    assert.equal(indicator.hidden, false);
-    assert.equal(indicator.title, 'Auto-normalize volume is on');
+    assert.equal(indicator.hidden, true);
+    assert.equal(indicator.title, 'Auto-normalize volume is active');
     assert.match(f.document.getElementById('tm-volume-options-normalization-status').textContent, /Waiting for accessible audio/);
+    f.audio.streams[0].getAudioTracks()[0].muted = false;
+    await f.advance(.2); assert.equal(indicator.hidden, false);
+    f.audio.stalled = true; await f.advance(.7);
+    assert.match(f.document.getElementById('tm-volume-options-normalization-status').textContent, /unavailable/i);
+    assert.equal(indicator.hidden, true);
+    f.audio.stalled = false; await f.advance(1.2);
+    assert.equal(indicator.hidden, false, 'automatic recovery updates the icon without toggling');
+    assert.equal(indicator.innerHTML, artwork);
+    assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
     f.toggle.click();
     assert.equal(indicator.hidden, true);
     assert.equal(icon.getAttribute('aria-describedby'), null);

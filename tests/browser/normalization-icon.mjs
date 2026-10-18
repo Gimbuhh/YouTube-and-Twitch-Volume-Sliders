@@ -60,7 +60,7 @@ try {
       await page.waitForFunction(() => document.querySelector('video').volume < 0.2);
       const artwork = await indicator.innerHTML();
       assert.equal(await indicator.textContent(), '');
-      assert.equal(await indicator.getAttribute('title'), 'Auto-normalize volume is on');
+      assert.equal(await indicator.getAttribute('title'), 'Auto-normalize volume is active');
       assert.equal(await indicator.locator('text, animate, animateTransform').count(), 0);
       assert.match(await mute.getAttribute('aria-describedby'), /normalization-description/);
 
@@ -125,6 +125,12 @@ try {
       await page.waitForTimeout(260); await screenshot('expanded');
       for (const value of ['0', '100', '30']) {
         await slider.evaluate((element, value) => { element.value = value; element.dispatchEvent(new Event('input', { bubbles: true })); element.dispatchEvent(new Event('change', { bubbles: true })); }, value);
+        if (value === '0') {
+          await indicator.waitFor({ state: 'hidden' });
+          assert.equal(await slider.inputValue(), '0');
+          continue;
+        }
+        await indicator.waitFor({ state: 'visible' });
         const boxes = await assertGeometry();
         assert.ok(boxes.icon.right < boxes.slider.x, `${platform}: icon clears the slider thumb at ${value}%`);
         assert.equal(await indicator.innerHTML(), artwork);
@@ -170,13 +176,20 @@ try {
       await page.locator('#tm-volume-options-location-video').click();
       await page.keyboard.press('Escape'); await mute.focus(); await page.keyboard.press('Space');
       await page.waitForFunction(() => document.querySelector('video').muted);
+      await indicator.waitFor({ state: 'hidden' });
       assert.equal(await indicator.innerHTML(), artwork);
-      await indicator.click();
+      await mute.click();
       assert.equal(await page.locator('video').evaluate(video => video.muted), false);
+      await indicator.waitFor({ state: 'visible' });
+      await indicator.click();
+      await indicator.waitFor({ state: 'hidden' });
+      assert.equal(await page.locator('video').evaluate(video => video.muted), true, 'the active waveform retains mute interaction');
+      await mute.click();
+      await indicator.waitFor({ state: 'visible' });
       await page.evaluate(() => { window.__iconAudio.amplitude = 0.02; window.__iconAudio.streams.at(-1).getAudioTracks()[0].muted = true; });
       await page.locator('#tm-volume-options-button').click();
       await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent.includes('Waiting for accessible audio'));
-      assert.equal(await indicator.isVisible(), true);
+      assert.equal(await indicator.isVisible(), false);
       assert.equal(await indicator.innerHTML(), artwork);
       await page.locator('#tm-volume-options-normalization').click();
       assert.equal(await indicator.isVisible(), false);
@@ -187,7 +200,7 @@ try {
       await page.waitForTimeout(260);
       assert.equal((await overlay.boundingBox()).width, 40);
       assert.deepEqual(errors, []);
-      console.log(`${platform}: inset upper-right waveform with limited arc overlap, unclipped center/perimeter, unchanged layout, 50–200% zoom, 0–100% selected volume, Classic/on-video, mute, fallback, accessibility and Off passed`);
+      console.log(`${platform}: active-only waveform, unchanged layout, 50–200% zoom, Classic/on-video, mute, waiting, accessibility and Off passed`);
     } finally { await context.close(); }
   }
 } finally { await browser.close(); }

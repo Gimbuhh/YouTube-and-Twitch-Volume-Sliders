@@ -34,6 +34,143 @@ function fixture() {
   return { window, video, audio, normalizer, timers, writes, statuses, errors, advance, start, jump(seconds) { now += seconds * 1000; }, get raw() { return raw; }, nativeVolume(value) { raw = value; } };
 }
 
+function nativeCaptureWithSuspendedContext(f, blockedWorklet = false) {
+  const Context = f.window.AudioContext, readers = [];
+  f.window.AudioContext = class extends Context {
+    constructor() { super(); this.state = 'suspended'; }
+    resume() { return Promise.resolve(); } // Activation remains unavailable.
+  };
+  if (blockedWorklet) f.audio.loadError = true;
+  else delete f.window.AudioWorkletNode;
+  f.window.MediaStreamTrackProcessor = class {
+    constructor() {
+      let input;
+      const capture = { cancelled: 0, frames: [], send() {
+        const frame = { sampleRate: 48000, numberOfFrames: 4800, numberOfChannels: 1, closed: 0,
+          copyTo(destination) { for (let i = 0; i < destination.length; i++) destination[i] = .5 * Math.sin(2 * Math.PI * 1000 * i / 48000); },
+          close() { this.closed++; } };
+        this.frames.push(frame); input.enqueue(frame);
+      } };
+      this.readable = new ReadableStream({ start(controller) { input = controller; }, cancel() { capture.cancelled++; } });
+      readers.push(capture);
+    }
+  };
+  return readers;
+}
+
+test('a temporary capture failure recovers automatically without a toggle or playback event', async () => {
+  const f = fixture();
+  f.audio.captureError = new Error('Player capture not ready');
+  await f.start();
+  assert.match(f.normalizer.getStatus(), /unavailable/i);
+  f.audio.captureError = null;
+  await f.advance(.9);
+  assert.equal(f.audio.captures, 1, 'do not retry on every output tick');
+  await f.advance(.3);
+  assert.equal(f.audio.captures, 2);
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.ok(f.raw < 20);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 50);
+  f.normalizer.setEnabled(false);
+  assert.equal(f.raw, 50); assert.equal(f.timers.size, 0);
+});
+
+test('native startup and stalled-frame failures reconnect and use fresh frames without a toggle', async () => {
+  for (const started of [false, true]) {
+    const f = fixture(), readers = nativeCaptureWithSuspendedContext(f);
+    await f.start();
+    if (started) { readers[0].send(); await f.advance(.1); }
+    await f.advance(started ? .7 : 3.2);
+    assert.match(f.normalizer.getStatus(), /unavailable/i);
+    assert.equal(f.raw, 50); assert.equal(readers[0].cancelled, 1);
+    await f.advance(1);
+    assert.equal(readers.length, 2);
+    readers[1].send(); await f.advance(.1);
+    assert.equal(f.normalizer.getStatus(), 'Active'); assert.ok(f.raw < 20);
+    f.normalizer.setEnabled(false);
+    assert.ok(f.audio.contexts.every(context => context.closed));
+    assert.ok(readers.every(reader => reader.cancelled === 1));
+    assert.equal(f.timers.size, 0);
+  }
+});
+
+test('repeated failures back off to 30 seconds and pause or disable prevents reconnection', async () => {
+  const f = fixture(); f.audio.captureError = new Error('Capture unavailable');
+  await f.start();
+  for (const delay of [1, 2, 4, 8, 16, 30, 30]) {
+    const captures = f.audio.captures;
+    await f.advance(delay - .1); assert.equal(f.audio.captures, captures);
+    await f.advance(.1); assert.equal(f.audio.captures, captures + 1);
+  }
+  f.audio.paused = true; const captures = f.audio.captures;
+  await f.advance(35); assert.equal(f.audio.captures, captures);
+  f.audio.captureError = null; f.audio.paused = false;
+  await f.advance(.2); assert.equal(f.normalizer.getStatus(), 'Active');
+  f.audio.processorError = true; await f.advance(.1);
+  assert.match(f.normalizer.getStatus(), /unavailable/i);
+  f.normalizer.setEnabled(false); await f.advance(35);
+  assert.equal(f.audio.captures, captures + 1); assert.equal(f.timers.size, 0);
+});
+
+test('a player gesture retries a transient failure immediately and stable capture resets backoff', async () => {
+  const f = fixture(); f.audio.captureError = new Error('Not ready');
+  await f.start(); await f.advance(1);
+  assert.equal(f.audio.captures, 2);
+  f.audio.captureError = null;
+  f.window.document.dispatchEvent(new Event('pointerdown'));
+  await f.advance(3.2);
+  assert.equal(f.audio.captures, 3); assert.equal(f.normalizer.getStatus(), 'Active');
+  f.audio.processorError = true; await f.advance(.1);
+  f.audio.processorError = false; await f.advance(1.1);
+  assert.equal(f.audio.captures, 4, 'stable analysis resets the retry delay to one second');
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  f.normalizer.setEnabled(false);
+});
+
+test('native analysis works with a suspended context through mute, pause, source reset and disable', async () => {
+  for (const blockedWorklet of [false, true]) {
+    const f = fixture(), readers = nativeCaptureWithSuspendedContext(f, blockedWorklet);
+    await f.start(); readers[0].send(); await f.advance(.1);
+    assert.equal(f.audio.contexts[0].state, 'suspended');
+    assert.equal(f.normalizer.getStatus(), 'Active');
+    assert.ok(f.raw < 20, 'native samples normalize without activating the unused context');
+    const output = f.raw;
+    f.video.muted = true; readers[0].send(); await f.advance(.1);
+    assert.equal(f.normalizer.getStatus(), 'Muted'); assert.equal(f.raw, output);
+    f.video.muted = false; f.audio.paused = true; readers[0].send(); await f.advance(.1);
+    assert.equal(f.normalizer.getStatus(), 'Waiting for playback'); assert.equal(f.raw, output);
+    f.audio.paused = false; f.normalizer.setPreferredVolume(f.video, 0, { preserveMute: true });
+    readers[0].send(); await f.advance(.1);
+    assert.equal(f.raw, 0); assert.equal(f.normalizer.getStatus(), 'Muted');
+    f.normalizer.setPreferredVolume(f.video, 50, { preserveMute: true });
+    f.video.dispatchEvent(new Event('emptied')); await f.advance(.05);
+    await new Promise(resolve => setImmediate(resolve)); // Allow a rejected module to hand off to native frames.
+    assert.equal(readers[0].cancelled, 1); assert.equal(f.audio.contexts[0].closed, true);
+    readers[1].send(); await f.advance(.1);
+    assert.equal(f.audio.contexts[1].state, 'suspended');
+    assert.equal(f.normalizer.getStatus(), 'Active'); assert.ok(f.raw < 20);
+    assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 50);
+    f.video.muted = true; f.normalizer.setEnabled(false); await f.advance(.05);
+    assert.equal(f.raw, 50); assert.equal(f.video.muted, true);
+    assert.ok(f.audio.contexts.every(context => context.closed));
+    assert.ok(readers.every(reader => reader.cancelled === 1 && reader.frames.every(frame => frame.closed === 1)));
+    assert.equal(f.timers.size, 0);
+  }
+});
+
+test('missing native frames still time out when the unused audio context is suspended', async () => {
+  for (const started of [false, true]) {
+    const f = fixture(), readers = nativeCaptureWithSuspendedContext(f);
+    await f.start();
+    if (started) { readers[0].send(); await f.advance(.1); assert.equal(f.normalizer.getStatus(), 'Active'); }
+    await f.advance(started ? .7 : 3.2);
+    assert.match(f.normalizer.getStatus(), /unavailable/i);
+    assert.equal(f.raw, 50); assert.equal(f.audio.contexts[0].closed, true);
+    assert.equal(readers[0].cancelled, 1);
+    f.normalizer.setEnabled(false);
+  }
+});
+
 test('continuous audio crossing the noise floor stays Active without rebuilding capture', async () => {
   const f = fixture(); await f.start(); await f.advance(1);
   f.statuses.length = 0;
@@ -299,7 +436,7 @@ test('unsupported or blocked LUFS restores ordinary volume and releases capture'
     assert.match(f.normalizer.getStatus(), /unavailable/i);
     assert.ok(f.audio.contexts.every(context => context.closed));
     assert.ok(f.audio.streams.every(stream => stream.getTracks().every(track => track.readyState === 'ended')));
-    assert.equal(f.audio.captures, mode === 'unsupported' ? 0 : 1, 'failed analysis is not retried on every tick');
+    assert.equal(f.audio.captures, mode === 'unsupported' ? 0 : 3, 'unsupported APIs allocate nothing; blocked analysis retries with backoff');
     f.normalizer.setEnabled(false);
     assert.equal(f.timers.size, 0);
   }

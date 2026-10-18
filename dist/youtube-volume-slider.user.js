@@ -305,6 +305,11 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
       node = null;
     }
     const owned = {
+      // Native frames do not use the context's processing graph. Only a pending
+      // or connected worklet needs that context to run before it can analyze.
+      get needsActivation() {
+        return !reader && context.state !== "running";
+      },
       dispose() {
         disposed = true;
         if (reader) reader.cancel().catch(() => {
@@ -471,13 +476,15 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         owned.context = null;
       }
     }
-    function unavailable(owned) {
+    function unavailable(owned, retry = true) {
       try {
         restore(owned);
       } catch {
       }
       releaseCapture(owned);
       owned.blocked = true;
+      owned.retryAt = retry ? window2.performance.now() + owned.retryDelay : 0;
+      if (retry) owned.retryDelay = Math.min(3e4, owned.retryDelay * 2);
       report("Audio unavailable \u2014 normal volume");
     }
     function connectTrack(owned) {
@@ -498,7 +505,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           if (session !== owned || !owned.video.isConnected || owned.blocked) return;
           owned.lastLufsFrame = window2.performance.now();
           owned.catchUpAfter = 0;
-          if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || owned.preferred === 0 || owned.context.state !== "running") return;
+          if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || owned.preferred === 0 || owned.lufs?.needsActivation) return;
           try {
             owned.lufsTracker || (owned.lufsTracker = createLufsGainController());
             if (frame.attackPower != null && !owned.lufsTracker.wantsAttack(frame.attackPower)) return;
@@ -522,7 +529,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       } else if (!owned.lufs) unavailable(owned);
     }
     function resume(owned) {
-      if (!owned.context || owned.context.state !== "suspended" || owned.resuming) return;
+      if (!owned.context || !owned.lufs?.needsActivation || owned.context.state !== "suspended" || owned.resuming) return;
       owned.resuming = true;
       owned.context.resume().catch(() => {
       }).finally(() => {
@@ -540,9 +547,13 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         bind(null);
         return;
       }
-      if (owned.blocked) return;
+      if (owned.blocked) {
+        if (!owned.retryAt || now < owned.retryAt || video.paused || video.ended || video.readyState < 2) return;
+        owned.blocked = false;
+        owned.retryAt = 0;
+      }
       if (video.mediaKeys) {
-        unavailable(owned);
+        unavailable(owned, false);
         return;
       }
       if (video.paused || video.ended || video.readyState < 2) {
@@ -578,7 +589,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         if (!owned.track || owned.track.readyState !== "live") connectTrack(owned);
         if (owned.blocked) return;
         readPreferred(owned);
-        if (owned.context.state !== "running") {
+        if (owned.lufs?.needsActivation) {
           restore(owned);
           report("Click the player to activate");
           return;
@@ -606,6 +617,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           return;
         }
         writeOutput(owned, owned.preferred * owned.gain);
+        if (now - owned.analysisStarted >= 3e3) owned.retryDelay = 1e3;
         report(owned.applied === 100 && owned.gain > 1 ? "Active \u2014 at volume limit" : "Active");
       } catch {
         unavailable(owned);
@@ -637,7 +649,9 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         preferred,
         applied: preferred,
         gain: 1,
-        blocked: false
+        blocked: false,
+        retryAt: 0,
+        retryDelay: 1e3
       };
       owned.reset = () => {
         try {
@@ -646,15 +660,21 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         }
         releaseCapture(owned);
         owned.blocked = false;
+        owned.retryAt = 0;
+        owned.retryDelay = 1e3;
         report("Waiting for playback");
       };
       owned.retry = () => {
         owned.blocked = false;
+        owned.retryAt = 0;
         tick();
       };
       owned.gesture = () => {
-        resume(owned);
-        tick();
+        if (owned.blocked && owned.retryAt) owned.retry();
+        else {
+          resume(owned);
+          tick();
+        }
       };
       for (const type of ["emptied", "loadstart"]) video.addEventListener(type, owned.reset);
       for (const type of ["playing", "loadedmetadata"]) video.addEventListener(type, owned.retry);
@@ -698,7 +718,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     const icon = document2.createElement("span");
     icon.className = "tm-normalization-icon";
     icon.hidden = true;
-    icon.title = "Auto-normalize volume is on";
+    icon.title = "Auto-normalize volume is active";
     icon.setAttribute("aria-hidden", "true");
     const ns = "http://www.w3.org/2000/svg";
     const svg = document2.createElementNS(ns, "svg");
@@ -714,16 +734,16 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     icon.append(svg);
     return icon;
   }
-  function updateNormalizationIcon(overlay, enabled) {
+  function updateNormalizationIcon(overlay, active) {
     if (!overlay) return;
     const icon = overlay.querySelector(".tm-normalization-icon");
     const description = overlay.querySelector(".tm-normalization-description");
-    if (!icon || !description) return;
-    overlay.classList.toggle("tm-normalization-enabled", enabled);
-    icon.hidden = !enabled;
+    if (!icon || !description || icon.hidden === !active) return;
+    overlay.classList.toggle("tm-normalization-active", active);
+    icon.hidden = !active;
     for (const control of overlay.querySelectorAll('.tm-volume-icon-cell, input[type="range"]')) {
       const ids = (control.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== description.id);
-      if (enabled) ids.push(description.id);
+      if (active) ids.push(description.id);
       if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
       else control.removeAttribute("aria-describedby");
     }
@@ -2964,7 +2984,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
   border-radius: 50%;
 }
 
-#{{overlayId}}.tm-normalization-enabled {
+#{{overlayId}}.tm-normalization-active {
   /* Keep the inset waveform visible at the pill's rounded edge. */
   overflow: clip !important;
   overflow-clip-margin: 8px;
@@ -3620,14 +3640,20 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       getVolume: getRawVolume,
       setVolume: setRawVolume,
       isMuted,
-      onStatusChanged: () => syncNormalizationStatus(getOptionsPopup())
+      onStatusChanged: () => {
+        syncNormalizationStatus(getOptionsPopup());
+        syncNormalizationIcon();
+      }
     });
     function syncNormalization() {
       const enabled = isNormalizationEnabled() && isOverlayEnabled();
       normalizer.setEnabled(enabled);
       normalizer.bind(overlayLifecycle.active?.root?._tmVolumeVideo || null);
       refreshOptionsPopupState();
-      updateNormalizationIcon(document.getElementById(OVERLAY_ID), enabled);
+      syncNormalizationIcon();
+    }
+    function syncNormalizationIcon() {
+      updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus().startsWith("Active"));
     }
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
       window,
