@@ -83,7 +83,9 @@ for (const config of platforms) {
     assert.equal(slider.value, '50');
     assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
     f.audio.amplitude = 0.02;
-    for (let i = 0; i < 6 && f.rawVolume() < 100; i++) await f.advance();
+    // This follows an established loud source. Allow the cautious background
+    // hold to release before checking the icon at the exact headroom limit.
+    for (let i = 0; i < 10 && f.rawVolume() < 100; i++) await f.advance();
     assert.equal(indicator.innerHTML, artwork);
     assert.match(f.document.getElementById('tm-volume-options-normalization-details').textContent, /Output 100%/);
     assert.equal(slider.value, '50');

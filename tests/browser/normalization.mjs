@@ -32,6 +32,7 @@ function wav(amplitude, channels = 1, frequency = 440) {
 
 const loud = wav(0.7), quiet = wav(0.06), stereo = wav(0.7, 2);
 const burst = wav(time => time < 4 ? 0.06 : 0.7);
+const speechReturn = wav(time => time < 4 || time >= 9 ? .2 : .02);
 // Continuous audible tone with a changing envelope, never digital silence.
 const soft = wav(time => 0.016 + 0.012 * Math.sin(2 * Math.PI * time));
 const bass = wav(0.2, 1, 80), high = wav(0.2, 1, 4000);
@@ -119,7 +120,7 @@ try {
     </script><script>${artifact.replaceAll('</script>', '<\\/script>')}</script></body></html>`;
     await page.route('**/*', route => {
       const path = new URL(route.request().url()).pathname;
-      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
+      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('speech-return') ? speechReturn : path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
       // YouTube can send a policy without blob: in script-src. Reproduce the
       // actual module rejection, rather than mocking addModule's return value.
       const headers = engine === 'csp' ? { 'Content-Security-Policy': "script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none'" } : {};
@@ -150,6 +151,25 @@ try {
       await page.waitForFunction(() => window.__lufsSeconds >= .2);
       assert.equal(await page.evaluate(() => window.__nativeFrames > 0), engine !== 'lufs', 'the expected LUFS input path is used');
       assert.ok((await page.evaluate(() => window.__lufsOutputs)).every(outputs => outputs === 0), 'continuous LUFS analysis has no speaker output');
+      let speechReturnExcessDb;
+      if (preferred === 30 || engine === 'native') {
+        await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/speech-return.wav'; await v.play(); });
+        await page.waitForFunction(() => document.querySelector('video').currentTime >= 3.5);
+        const speechVolume = await page.evaluate(() => document.querySelector('video').volume);
+        // Inspect the gain while background audio is still playing, before
+        // the detector can react to the returning word at nine seconds.
+        await page.waitForFunction(() => document.querySelector('video').currentTime >= 8.5);
+        const beforeWord = await page.evaluate(() => document.querySelector('video').volume);
+        speechReturnExcessDb = 20 * Math.log10(beforeWord / speechVolume);
+        assert.ok(speechReturnExcessDb < 2, `background must not leave speech overboosted: ${speechReturnExcessDb.toFixed(2)} dB`);
+        await page.waitForFunction(() => document.querySelector('video').currentTime >= 9.2);
+        const returned = await page.evaluate(() => document.querySelector('video').volume);
+        assert.ok(20 * Math.log10(returned / speechVolume) < 2, 'returning speech stays near its established level');
+        assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+        assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
+        console.log(`${platform} (${engine}): ${speechReturnExcessDb.toFixed(2)} dB excess gain before speech returns after background audio`);
+        await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/loud.wav'; await v.play(); });
+      }
       // Capture ramps in over its first frames. Compare the settled output,
       // rather than the first coarse attenuation during that startup window.
       await page.waitForFunction(preference => {
@@ -208,7 +228,7 @@ try {
       const settledIndex = burstTrace.findIndex((row, index) => row.time >= 4 && withinTarget(row) && burstTrace.slice(index).filter(next => next.time <= 4.7).every(withinTarget));
       assert.ok(settledIndex >= 0, 'the loud return has a stable correction');
       const reactionMs = (burstTrace[settledIndex].time - 4) * 1000;
-      attackResults.push({ platform, preferred, engine, reactionMs, worstBurstDb });
+      attackResults.push({ platform, preferred, engine, reactionMs, worstBurstDb, speechReturnExcessDb });
       assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
       assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
       console.log(`${platform} (${engine}) at ${preferred}%: loud-return correction after ${reactionMs.toFixed(1)} ms; ${worstBurstDb.toFixed(2)} dB above target after 250 ms`);

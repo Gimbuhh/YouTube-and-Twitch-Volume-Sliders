@@ -64,6 +64,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     writeOutput(owned, preferred);
     owned.lufsTracker = null;
     owned.lastLufsFrame = null;
+    owned.catchUpAfter = 0;
     owned.analysisStarted = window.performance.now();
   }
 
@@ -71,8 +72,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     owned.lufs?.dispose();
     owned.lufs = null;
     owned.lastLufsFrame = null;
-    owned.source?.disconnect();
-    owned.source = owned.track = null;
+    owned.track = null;
     if (owned.stream) {
       owned.stream.removeEventListener('addtrack', owned.onTrack);
       for (const track of owned.stream.getTracks()) track.stop();
@@ -98,17 +98,21 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     if (owned.track) restore(owned);
     owned.lufs?.dispose();
     owned.lastLufsFrame = null;
-    owned.source?.disconnect();
-    owned.source = owned.context.createMediaStreamSource(new window.MediaStream([track]));
     owned.track = track;
     owned.lufsTracker = null;
     owned.analysisStarted = window.performance.now();
-    owned.lufs = createLufsAnalysis({ window, context: owned.context, source: owned.source, track,
+    owned.lufs = createLufsAnalysis({ window, context: owned.context, track,
       onFrame: frame => {
         if (session !== owned || !owned.video.isConnected || owned.blocked) return;
         owned.lastLufsFrame = window.performance.now();
-        if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== 'live' || isMuted(owned.video) || owned.preferred === 0 || owned.context.state !== 'running') return;
+        owned.catchUpAfter = 0;
+        if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== 'live' || owned.preferred === 0 || owned.context.state !== 'running') return;
         try {
+          owned.lufsTracker ||= createLufsGainController();
+          // Most fast measurements cannot change gain. Skip player API reads
+          // for those; the ordinary frames/timer still track native intent.
+          if (frame.attackPower != null && !owned.lufsTracker.wantsAttack(frame.attackPower)) return;
+          if (isMuted(owned.video)) return;
           // Respect native input before a fast cut, just as the polling path
           // does. Increases still wait for its regular 50 ms output tick.
           readPreferred(owned);
@@ -135,6 +139,9 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
   function tick() {
     const owned = session;
     if (!owned) return;
+    const now = window.performance.now();
+    const delayed = owned.lastTick != null && now - owned.lastTick > 500;
+    owned.lastTick = now;
     const video = owned.video;
     if (!video.isConnected) { bind(null); return; }
     if (owned.blocked) return;
@@ -165,7 +172,9 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         if (owned.blocked) return;
         resume(owned);
       }
-      connectTrack(owned);
+      // Track additions are handled by onTrack. A healthy existing track does
+      // not need fresh audio/video track arrays on every output timer tick.
+      if (!owned.track || owned.track.readyState !== 'live') connectTrack(owned);
       if (owned.blocked) return;
       readPreferred(owned);
       if (owned.context.state !== 'running') {
@@ -184,13 +193,19 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         report('Muted');
         return;
       }
-      const now = window.performance.now();
-      if (owned.lastLufsFrame == null) {
-        if (now - owned.analysisStarted > 3000) { unavailable(owned); return; }
+      const starting = owned.lastLufsFrame == null;
+      if (now - (starting ? owned.analysisStarted : owned.lastLufsFrame) > (starting ? 3000 : 500)) {
+        // A long page task can run this overdue timer before queued audio.
+        // Hold the correction for one bounded catch-up; genuine stalls still
+        // fail if no fresh frame arrives, even if subsequent ticks are late.
+        if (delayed && !owned.catchUpAfter) owned.catchUpAfter = now + 100;
+        if (now < (owned.catchUpAfter || 0)) return;
+        unavailable(owned); return;
+      }
+      if (starting) {
         report('Starting audio analysis');
         return;
       }
-      if (now - owned.lastLufsFrame > 500) { unavailable(owned); return; }
       writeOutput(owned, owned.preferred * owned.gain);
       // A quiet measurement does not mean the live capture source disappeared.
       report(owned.applied === 100 && owned.gain > 1 ? 'Active — at volume limit' : 'Active');

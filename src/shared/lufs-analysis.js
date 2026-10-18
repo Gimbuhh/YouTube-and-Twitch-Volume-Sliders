@@ -28,13 +28,16 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
   return loaded;
 }
 
-export function createLufsAnalysis({ window, context, source, track, onFrame, onFailure }) {
+export function createLufsAnalysis({ window, context, track, onFrame, onFailure }) {
   const hasWorklet = context.audioWorklet && window.AudioWorkletNode && window.URL?.createObjectURL && window.Blob;
   if (!hasWorklet && !window.MediaStreamTrackProcessor) return null;
-  let disposed = false, node = null, reader = null;
+  let disposed = false, node = null, reader = null, source = null;
   function releaseNode() {
+    if (source) {
+      try { source.disconnect(); } catch { /* input creation or connection can fail */ }
+      source = null;
+    }
     if (!node) return;
-    try { source.disconnect(node); } catch { /* construction can fail before connection */ }
     node.disconnect();
     node.port.onmessage = null;
     node.onprocessorerror = null;
@@ -59,8 +62,11 @@ export function createLufsAnalysis({ window, context, source, track, onFrame, on
       // Some sites disallow Blob worklet modules. Read the captured copy's
       // AudioData directly, using the same LUFS meter and no audio output.
       reader = new window.MediaStreamTrackProcessor({ track, maxBufferSize: 1 }).readable.getReader();
-      let meter, rate, channels = [], stereo = [];
-      const onAttack = power => onFrame({ attackPower: power });
+      let meter, rate, channels = [], input = [];
+      // A callback can dispose this owner while one AudioData still contains
+      // more measurements. Do not deliver those into a replacement source.
+      const send = frame => { if (!disposed) onFrame(frame); };
+      const onAttack = power => send({ attackPower: power });
       while (!disposed) {
         const { value: frame, done } = await reader.read();
         if (done) break;
@@ -72,18 +78,21 @@ export function createLufsAnalysis({ window, context, source, track, onFrame, on
           }
           if (channels.length !== frame.numberOfChannels || channels[0]?.length !== frame.numberOfFrames) {
             channels = Array.from({ length: frame.numberOfChannels }, () => new Float32Array(frame.numberOfFrames));
-            stereo = Array.from({ length: 2 }, () => new Float32Array(frame.numberOfFrames));
+            input = channels.length === 1 ? [channels[0], channels[0]]
+              : channels.length === 4 || channels.length === 6
+                ? Array.from({ length: 2 }, () => new Float32Array(frame.numberOfFrames)) : channels.slice(0, 2);
           }
-          channels.forEach((channel, planeIndex) => frame.copyTo(channel, { planeIndex, format: 'f32-planar' }));
+          for (let planeIndex = 0; planeIndex < channels.length; planeIndex++) {
+            frame.copyTo(channels[planeIndex], { planeIndex, format: 'f32-planar' });
+          }
           // Match the worklet's explicit stereo speaker downmix (Web Audio).
-          if (channels.length === 1) meter.process([channels[0], channels[0]], onFrame, onAttack);
-          else if (channels.length === 4 || channels.length === 6) {
+          if (channels.length === 4 || channels.length === 6) {
             for (let i = 0; i < frame.numberOfFrames; i++) {
-              stereo[0][i] = channels.length === 4 ? 0.5 * (channels[0][i] + channels[2][i]) : channels[0][i] + Math.SQRT1_2 * (channels[2][i] + channels[4][i]);
-              stereo[1][i] = channels.length === 4 ? 0.5 * (channels[1][i] + channels[3][i]) : channels[1][i] + Math.SQRT1_2 * (channels[2][i] + channels[5][i]);
+              input[0][i] = channels.length === 4 ? 0.5 * (channels[0][i] + channels[2][i]) : channels[0][i] + Math.SQRT1_2 * (channels[2][i] + channels[4][i]);
+              input[1][i] = channels.length === 4 ? 0.5 * (channels[1][i] + channels[3][i]) : channels[1][i] + Math.SQRT1_2 * (channels[2][i] + channels[5][i]);
             }
-            meter.process(stereo, onFrame, onAttack);
-          } else meter.process(channels.slice(0, 2), onFrame, onAttack);
+          }
+          meter.process(input, send, onAttack);
         } finally { frame.close(); }
       }
     } catch { fail(); }
@@ -105,6 +114,8 @@ export function createLufsAnalysis({ window, context, source, track, onFrame, on
         else onFrame(event.data);
       };
       node.onprocessorerror = fail;
+      // Native AudioData does not need a parallel Web Audio input graph.
+      source = context.createMediaStreamSource(new window.MediaStream([track]));
       source.connect(node);
     }).catch(readTrack);
   } catch { readTrack(); }

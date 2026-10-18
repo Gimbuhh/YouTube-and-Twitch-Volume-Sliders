@@ -33,6 +33,30 @@ test('meter results do not depend on audio callback chunk boundaries', () => {
   assert.deepEqual(measure([signal, signal], 48000, 127), measure([signal, signal], 48000, signal.length));
 });
 
+test('changing chunk sizes preserves multichannel measurements at every supported reference rate', () => {
+  for (const rate of [44100, 48000, 96000]) for (const count of [1, 2, 4, 5, 6]) {
+    const channels = Array.from({ length: count }, (_, channel) =>
+      Float32Array.from({ length: Math.round(rate * .63) }, (_, i) =>
+        i > rate * .4 ? 0 : .1 * Math.sin(2 * Math.PI * (83 + channel * 317) * i / rate) + .02));
+    assert.deepEqual(measure(channels, rate, 127), measure(channels, rate, 1920));
+  }
+});
+
+test('fast reporting stays at 50 Hz for steady audio and accelerates around a sharp rise', () => {
+  const rate = 48000, meter = createLufsMeter(rate), reports = [];
+  const warm = tone(rate, 1, .1);
+  meter.process([warm, warm], () => {}, () => {});
+  for (let ms = 0; ms < 1030; ms++) {
+    const signal = Float32Array.from({ length: 48 }, (_, i) => {
+      const time = 1 + ms / 1000 + i / rate;
+      return (ms >= 1007 ? .8 : .1) * Math.sin(2 * Math.PI * 1000 * time);
+    });
+    meter.process([signal, signal], () => {}, () => reports.push(ms + 1));
+  }
+  assert.equal(reports.filter(ms => ms <= 1000).length, 50);
+  assert.ok(reports.some(ms => ms >= 1008 && ms <= 1012), 'a sharp rise is reported before the next ordinary 20 ms update');
+});
+
 test('channel energy is summed without phase cancellation and LFE does not inflate loudness', () => {
   const signal = tone(48000, 3.2, 0.1), zero = new Float32Array(signal.length);
   const stereo = measure([signal, signal], 48000).at(-1).shortTermLufs;
@@ -84,7 +108,7 @@ test('LUFS gain waits before boosting, respects volume headroom, and cuts a loud
   }
 });
 
-test('a loud return reaches its safe correction within 40 ms across measurement phases', () => {
+test('a loud return reaches its safe correction within 15 ms across measurement phases', () => {
   const rate = 48000;
   for (let offsetMs = 0; offsetMs < 50; offsetMs++) {
     const onset = Math.round(rate * (4 + offsetMs / 1000));
@@ -104,7 +128,7 @@ test('a loud return reaches its safe correction within 40 ms across measurement 
       meter.process([chunk, chunk], update, attackPower => update({ attackPower }));
     }
     assert.ok(before > 2, 'the quiet lead-in is boosted');
-    assert.ok(firstSafe != null && firstSafe - onset / rate <= .040001, `${offsetMs} ms phase: ${firstSafe - onset / rate} s`);
+    assert.ok(firstSafe != null && firstSafe - onset / rate <= .015001, `${offsetMs} ms phase: ${firstSafe - onset / rate} s`);
   }
 });
 
@@ -159,4 +183,69 @@ test('an established LUFS source keeps cautious recovery after a long quiet pass
     gain = update(0.0032);
     if (i >= 80) assert.ok(20 * Math.log10(gain / before) < 0.35, 'quiet periods do not re-enter the faster startup ramp');
   }
+});
+
+test('quiet backgrounds do not erase established speech level before the next word', () => {
+  const target = 10 ** ((-18 + .691) / 10);
+  for (const preferred of [20, 30, 40]) for (const seconds of [1, 5, 10]) {
+    const controller = createLufsGainController();
+    const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: .05 }, 100 / preferred);
+    let gain;
+    for (let i = 0; i < 160; i++) gain = update(target * 2);
+    for (let i = 0; i < seconds * 20; i++) gain = update(target * .025);
+    // This is the gain already in effect when the next word starts, before
+    // any reactive detector or native-volume write can reduce it.
+    const onsetExcessDb = 10 * Math.log10(2 * gain * gain);
+    assert.ok(onsetExcessDb < 3, `${preferred}% after ${seconds}s background: ${onsetExcessDb.toFixed(2)} dB excess at speech onset`);
+    assert.ok(update(target * 2) <= Math.SQRT1_2 + 1e-9, 'a measured loud return still cuts immediately');
+  }
+});
+
+test('a cut recovers attenuation quickly but does not immediately restore a large boost', () => {
+  const target = 10 ** ((-18 + .691) / 10);
+  const controller = createLufsGainController();
+  const quiet = { power: target / 16, rawPower: target / 32, momentaryPower: target / 16, duration: .05 };
+  let gain;
+  for (let i = 0; i < 300; i++) gain = controller.update(quiet, 5);
+  assert.ok(gain > 3.8, 'a consistently quiet source can still use its native headroom');
+  assert.equal(controller.update({ attackPower: target * 16 }, 5), .25);
+  controller.update(quiet, 5);
+  gain = controller.update(quiet, 5);
+  assert.ok(gain < .5, `100 ms after the cut: ${gain}`);
+  for (let i = 0; i < 100; i++) gain = controller.update(quiet, 5);
+  assert.ok(gain > 2.5, 'sustained quiet audio gradually regains useful boost');
+});
+
+test('brief peak recovery remains smooth around unity gain', () => {
+  const target = 10 ** ((-18 + .691) / 10), recovered = [];
+  for (const desired of [.99, 1, 1.01]) {
+    const controller = createLufsGainController();
+    const frame = { power: target / desired ** 2, rawPower: .01, momentaryPower: target / desired ** 2, duration: .05 };
+    for (let i = 0; i < 160; i++) controller.update(frame);
+    controller.update({ attackPower: target * 16 });
+    let gain;
+    for (let i = 0; i < 20; i++) gain = controller.update(frame);
+    recovered.push(gain);
+    assert.ok(gain > .95, 'a small peak must not leave ordinary programme volume ducked');
+  }
+  assert.ok(20 * Math.log10(Math.max(...recovered) / Math.min(...recovered)) < .3);
+});
+
+test('silence does not erase speech reference before a quiet background starts', () => {
+  const target = 10 ** ((-18 + .691) / 10), controller = createLufsGainController();
+  const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: .05 }, 5);
+  let gain;
+  for (let i = 0; i < 160; i++) gain = update(target * 2);
+  const established = gain;
+  for (let i = 0; i < 400; i++) assert.equal(update(0), established);
+  for (let i = 0; i < 100; i++) gain = update(target * .025);
+  assert.ok(20 * Math.log10(gain / established) < 3);
+});
+
+test('one loud startup frame does not become a lasting reference for a quiet source', () => {
+  const target = 10 ** ((-18 + .691) / 10), controller = createLufsGainController();
+  controller.update({ power: target * 16, rawPower: target * 8, momentaryPower: target * 16, duration: .05 });
+  let gain;
+  for (let i = 0; i < 100; i++) gain = controller.update({ power: target / 4, rawPower: target / 8, momentaryPower: target / 4, duration: .05 }, 5);
+  assert.ok(gain > 1, 'a brief startup event must not keep a quieter recording attenuated');
 });

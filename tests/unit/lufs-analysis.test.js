@@ -7,9 +7,10 @@ function fixture() {
   let resolve, reject;
   const loaded = new Promise((yes, no) => { resolve = yes; reject = no; });
   const nodes = [], connected = new Set(), frames = [], failures = [];
-  let loads = 0, revoked = 0, moduleBlob;
+  let loads = 0, revoked = 0, sourceBuilds = 0, moduleBlob;
   const window = {
     Blob,
+    MediaStream: class { constructor(tracks) { this.tracks = tracks; } },
     URL: { createObjectURL: blob => { moduleBlob = blob; return 'blob:meter'; }, revokeObjectURL: () => revoked++ },
     AudioWorkletNode: class {
       constructor(context, name, options) {
@@ -21,12 +22,13 @@ function fixture() {
       }
     }
   };
-  const context = { state: 'running', audioWorklet: { addModule() { loads++; return loaded; } } };
-  const source = { connect(node) { connected.add(node); }, disconnect(node) { connected.delete(node); } };
+  const context = { state: 'running', audioWorklet: { addModule() { loads++; return loaded; } },
+    createMediaStreamSource() { sourceBuilds++; return source; } };
+  const source = { connect(node) { connected.add(node); }, disconnect() { connected.clear(); } };
   const track = {};
-  const create = () => createLufsAnalysis({ window, context, source, track, onFrame: frame => frames.push(frame), onFailure: () => failures.push(true) });
+  const create = () => createLufsAnalysis({ window, context, track, onFrame: frame => frames.push(frame), onFailure: () => failures.push(true) });
   return { window, context, nodes, connected, frames, failures, create, resolve, reject,
-    track, get loads() { return loads; }, get revoked() { return revoked; }, get moduleBlob() { return moduleBlob; } };
+    track, get loads() { return loads; }, get revoked() { return revoked; }, get sourceBuilds() { return sourceBuilds; }, get moduleBlob() { return moduleBlob; } };
 }
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -62,9 +64,10 @@ test('a blocked worklet reads native audio frames through the same LUFS meter', 
   f.reject(new Error('CSP blocked blob:')); await flush();
   capture.send([0.1, -0.1], 96000); await flush();
   assert.equal(f.frames.filter(frame => frame.power != null).length, 2);
-  assert.equal(f.frames.filter(frame => frame.attackPower != null).length, 5);
+  assert.equal(f.frames.filter(frame => frame.attackPower != null).length, 20);
   assert.ok(f.frames.filter(frame => frame.power != null).every(frame => frame.power > 0 && Math.abs(frame.rawPower - .005) < 1e-8));
   assert.equal(f.nodes.length, 0, 'direct analysis creates no audio output node');
+  assert.equal(f.sourceBuilds, 0, 'native frames allocate no unused Web Audio input graph');
   assert.equal(f.revoked, 1);
   assert.deepEqual(f.failures, []);
   owned.dispose(); await flush();
@@ -115,6 +118,19 @@ test('disposal during module loading does not start a late native reader', async
   assert.equal(capture.readable.locked, false);
   assert.deepEqual(f.failures, []);
   assert.equal(f.frames.length, 0);
+});
+
+test('disposing during a native audio frame suppresses its remaining callbacks', async () => {
+  const f = fixture(), capture = capturedFrames(f);
+  delete f.window.AudioWorkletNode;
+  let owned;
+  owned = createLufsAnalysis({ window: f.window, context: f.context, track: f.track,
+    onFrame: frame => { f.frames.push(frame); owned.dispose(); }, onFailure: () => f.failures.push(true) });
+  capture.send([.1, -.1]); await flush();
+  assert.equal(f.frames.length, 1, 'the disposed owner cannot deliver the rest of a large AudioData frame');
+  assert.equal(capture.frames[0].closed, 1);
+  assert.equal(capture.readable.locked, false);
+  assert.deepEqual(f.failures, []);
 });
 
 test('worklet is analysis-only, reuses its context module, and releases ports and connections', async () => {

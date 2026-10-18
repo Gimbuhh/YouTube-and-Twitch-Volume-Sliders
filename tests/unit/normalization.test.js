@@ -31,7 +31,7 @@ function fixture() {
     }
   };
   const start = async () => { normalizer.setEnabled(true); normalizer.bind(video); await new Promise(resolve => setImmediate(resolve)); };
-  return { window, video, audio, normalizer, timers, writes, statuses, errors, advance, start, get raw() { return raw; }, nativeVolume(value) { raw = value; } };
+  return { window, video, audio, normalizer, timers, writes, statuses, errors, advance, start, jump(seconds) { now += seconds * 1000; }, get raw() { return raw; }, nativeVolume(value) { raw = value; } };
 }
 
 test('continuous audio crossing the noise floor stays Active without rebuilding capture', async () => {
@@ -63,7 +63,9 @@ test('silent samples hold the correction while capture remains Active', async ()
 test('loud measurements cut output immediately while recovery waits for the output timer', async () => {
   const f = fixture(); await f.start();
   const frame = (power, rawPower = power / 2) => f.audio.nodes[0].port.onmessage({ data: { power, rawPower, momentaryPower: power, duration: .02 } });
-  frame(1);
+  // Keep this timer-ownership check independent of programme history: a fast
+  // spike cuts output without teaching the controller a new source level.
+  f.audio.nodes[0].port.onmessage({ data: { attackPower: 1 } });
   assert.ok(f.raw < 10, 'a cut does not wait for any polling timer');
   const reduced = f.raw;
   for (let i = 0; i < 200; i++) frame(.002);
@@ -84,6 +86,41 @@ test('fast cuts respect native volume intent before the next polling tick', asyn
   assert.ok(f.writes.every(write => write.options.preserveMute));
   f.normalizer.setEnabled(false);
   assert.equal(f.raw, 70);
+});
+
+test('ordinary fast measurements avoid player API reads without losing native intent on real cuts', async () => {
+  const f = fixture(); await f.start(); await f.advance(.1);
+  f.errors.read = new Error('This fast observation must not read the player');
+  const port = f.audio.nodes[0].port;
+  for (let i = 0; i < 100; i++) port.onmessage({ data: { attackPower: .0001 } });
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.equal(f.audio.contexts[0].closed, false);
+  delete f.errors.read;
+  f.nativeVolume(70);
+  port.onmessage({ data: { attackPower: 10 } });
+  assert.ok(f.raw < 20);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 70);
+  f.normalizer.setEnabled(false);
+});
+
+test('steady capture avoids repeated track scans and still picks up a replacement', async () => {
+  const f = fixture(); await f.start();
+  const stream = f.audio.streams[0];
+  let scans = 0;
+  for (const key of ['getAudioTracks', 'getVideoTracks']) {
+    const method = stream[key].bind(stream);
+    stream[key] = () => { scans++; return method(); };
+  }
+  await f.advance(3);
+  assert.equal(scans, 0);
+  const old = stream.getTracks().find(track => track.kind === 'audio');
+  old.stop();
+  stream.tracks.push(new old.constructor('audio'));
+  await f.advance(.1);
+  assert.ok(scans > 0, 'an ended track still triggers replacement detection without an addtrack event');
+  assert.equal(f.audio.nodes.length, 2);
+  assert.equal(f.audio.nodes[0].port.closed, true);
+  f.normalizer.setEnabled(false);
 });
 
 test('fast measurements leave paused, muted and detached players alone', async () => {
@@ -282,6 +319,30 @@ test('missing or stalled LUFS frames restore ordinary volume and close the proce
     f.normalizer.setEnabled(false);
     assert.equal(f.timers.size, 0);
   }
+});
+
+test('a long page task lets queued audio catch up without restoring louder ordinary volume', async () => {
+  const f = fixture(); await f.start(); await f.advance(1);
+  const output = f.raw;
+  f.jump(.65);
+  await f.advance(.05); // The overdue timer runs before the queued audio callback.
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.equal(f.raw, output);
+  assert.equal(f.audio.captures, 1);
+  assert.equal(f.audio.contexts[0].closed, false);
+  f.normalizer.setEnabled(false);
+});
+
+test('scheduling catch-up is bounded when the analyzer really stops reporting', async () => {
+  const f = fixture(); await f.start(); await f.advance(1);
+  f.audio.stalled = true;
+  f.jump(.65); await f.advance(.05);
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  f.jump(.65); await f.advance(.05);
+  assert.match(f.normalizer.getStatus(), /unavailable/i, 'another delayed timer cannot extend the grace without new audio');
+  assert.equal(f.raw, 50);
+  assert.equal(f.audio.contexts[0].closed, true);
+  f.normalizer.setEnabled(false);
 });
 
 test('long pauses and mute do not make a healthy processor time out on resuming', async () => {

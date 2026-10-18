@@ -103,18 +103,14 @@
       (1 - highPassK / 0.5003270373238773 + highPassK * highPassK) / highPassDenominator
     ];
     const frameLength = Math.round(sampleRate / 20);
-    const attackLength = Math.round(sampleRate / 50);
+    const attackLength = Math.round(sampleRate / 200);
     const powers = new Float64Array(60);
-    let states = [], weights = [], rawEnergy = [];
-    let frameSamples = 0, frameEnergy = 0, frameCount = 0;
-    let attackSamples = 0, attackEnergy = 0;
+    const [s0, s1, s2, sa1, sa2] = shelf;
+    const [h0, h1, h2, ha1, ha2] = highPass;
+    let states = [], weights = [], rawEnergy = [], frameEnergy = [], attackEnergy = [];
+    let frameSamples = 0, frameCount = 0, attackSamples = 0;
+    let previousAttack = 0, rapidSamples = 0, reportEnergy = 0, reportSamples = 0;
     const lufs = (power) => power > 0 ? -0.691 + 10 * Math.log10(power) : -Infinity;
-    function filter(value, coefficients, state, offset) {
-      const output = coefficients[0] * value + state[offset];
-      state[offset] = coefficients[1] * value - coefficients[3] * output + state[offset + 1];
-      state[offset + 1] = coefficients[2] * value - coefficients[4] * output;
-      return output;
-    }
     return {
       process(channels, onFrame, onAttack) {
         if (!channels.length || !channels[0]?.length) return;
@@ -123,25 +119,61 @@
           states = channels.map(() => new Float64Array(4));
           weights = channels.length === 6 ? [1, 1, 1, 0, 1.41, 1.41] : channels.length === 5 ? [1, 1, 1, 1.41, 1.41] : channels.length === 4 ? [1, 1, 1.41, 1.41] : channels.map(() => 1);
           rawEnergy = channels.map(() => 0);
+          frameEnergy = channels.map(() => 0);
+          attackEnergy = channels.map(() => 0);
           powers.fill(0);
-          frameSamples = frameEnergy = frameCount = 0;
-          attackSamples = attackEnergy = 0;
+          frameSamples = frameCount = attackSamples = 0;
+          previousAttack = rapidSamples = reportEnergy = reportSamples = 0;
         }
-        for (let index = 0; index < channels[0].length; index++) {
+        let offset = 0;
+        while (offset < channels[0].length) {
+          const count = Math.min(channels[0].length - offset, frameLength - frameSamples, attackLength - attackSamples);
+          const end = offset + count;
           for (let channel = 0; channel < channels.length; channel++) {
-            const value = channels[channel][index];
-            if (!Number.isFinite(value)) throw new RangeError("Invalid audio sample");
-            rawEnergy[channel] += value * value;
-            const weighted = filter(filter(value, shelf, states[channel], 0), highPass, states[channel], 2);
-            frameEnergy += weights[channel] * weighted * weighted;
-            attackEnergy += weights[channel] * weighted * weighted;
+            const input = channels[channel], state = states[channel], weight = weights[channel];
+            let z0 = state[0], z1 = state[1], z2 = state[2], z3 = state[3];
+            let raw = rawEnergy[channel], energy = frameEnergy[channel], attack = attackEnergy[channel];
+            for (let index = offset; index < end; index++) {
+              const value = input[index];
+              if (!Number.isFinite(value)) throw new RangeError("Invalid audio sample");
+              raw += value * value;
+              const filtered = s0 * value + z0;
+              z0 = s1 * value - sa1 * filtered + z1;
+              z1 = s2 * value - sa2 * filtered;
+              const weighted = h0 * filtered + z2;
+              z2 = h1 * filtered - ha1 * weighted + z3;
+              z3 = h2 * filtered - ha2 * weighted;
+              const power2 = weight * weighted * weighted;
+              energy += power2;
+              attack += power2;
+            }
+            state[0] = z0;
+            state[1] = z1;
+            state[2] = z2;
+            state[3] = z3;
+            rawEnergy[channel] = raw;
+            frameEnergy[channel] = energy;
+            attackEnergy[channel] = attack;
           }
-          if (++attackSamples === attackLength) {
-            onAttack?.(attackEnergy / attackLength);
-            attackSamples = attackEnergy = 0;
+          offset = end;
+          frameSamples += count;
+          attackSamples += count;
+          if (attackSamples === attackLength) {
+            const energy = attackEnergy.reduce((sum, value) => sum + value, 0);
+            const power2 = energy / attackLength;
+            if (power2 > 1e-8 && power2 > previousAttack * 2) rapidSamples = Math.round(sampleRate * 0.1);
+            previousAttack = power2;
+            reportEnergy += energy;
+            reportSamples += attackLength;
+            if (rapidSamples > 0) onAttack?.(power2);
+            else if (reportSamples >= attackLength * 4) onAttack?.(reportEnergy / reportSamples);
+            if (reportSamples >= attackLength * 4) reportEnergy = reportSamples = 0;
+            rapidSamples = Math.max(0, rapidSamples - attackLength);
+            attackSamples = 0;
+            attackEnergy.fill(0);
           }
-          if (++frameSamples !== frameLength) continue;
-          const power = frameEnergy / frameLength;
+          if (frameSamples !== frameLength) continue;
+          const power = frameEnergy.reduce((sum, value) => sum + value, 0) / frameLength;
           powers[frameCount % powers.length] = power;
           frameCount++;
           let momentary = 0, shortTerm = 0;
@@ -159,7 +191,8 @@
             shortTermLufs: frameCount >= 60 ? lufs(shortTerm / 60) : null
           });
           rawEnergy.fill(0);
-          frameSamples = frameEnergy = 0;
+          frameSamples = 0;
+          frameEnergy.fill(0);
         }
       }
     };
@@ -167,14 +200,17 @@
   function createLufsGainController() {
     const targetPower = 10 ** ((-18 + 0.691) / 10);
     const history2 = [];
-    let time = 0, gain = 1, programmeGain = 1, fastUntil = -Infinity;
+    let time = 0, gain = 1, programmeGain = 1, fastUntil = -Infinity, referenceHold = 0;
+    const attackState = (power) => !Number.isFinite(power) || power <= 0 ? 0 : power * programmeGain * programmeGain > targetPower * 10 ? 2 : time < fastUntil ? 1 : 0;
     return {
+      wantsAttack: (power) => attackState(power) !== 0,
       update(frame, maxGain = 100) {
         if (frame.attackPower != null) {
           const power = frame.attackPower;
-          if (!Number.isFinite(power) || power <= 0) return gain;
-          if (power * programmeGain * programmeGain > targetPower * 10) fastUntil = time + 0.1;
-          if (time < fastUntil) gain = Math.min(gain, Math.max(0.1, Math.sqrt(targetPower / power)));
+          const state = attackState(power);
+          if (!state) return gain;
+          if (state === 2) fastUntil = time + 0.1;
+          gain = Math.min(gain, Math.max(0.1, Math.sqrt(targetPower / power)));
           return gain;
         }
         const dt = Math.min(0.25, Math.max(0, frame.duration));
@@ -195,7 +231,10 @@
           activeDuration += item.duration;
           activeEnergy += item.power * item.duration;
         }
-        const reference = activeEnergy / activeDuration;
+        referenceHold *= 10 ** (-0.5 * dt / 10);
+        const rollingReference = activeEnergy / activeDuration;
+        if (duration >= 1) referenceHold = frame.power >= referenceHold * 0.1 ? rollingReference : Math.max(referenceHold, rollingReference);
+        const reference = Math.max(rollingReference, referenceHold);
         let desired = Math.min(maxGain, Math.max(0.1, Math.sqrt(targetPower / reference)));
         if (duration < 1) desired = Math.min(1, desired);
         if (desired < programmeGain) programmeGain = desired;
@@ -207,7 +246,12 @@
         const ceiling = Math.min(maxGain, Math.max(0.1, Math.sqrt(targetPower / safetyPower)));
         desired = Math.min(programmeGain, ceiling);
         if (desired < gain) gain = desired;
-        else gain = Math.exp(Math.log(gain) + (Math.log(desired) - Math.log(gain)) * (1 - Math.exp(-dt / 0.25)));
+        else {
+          const current = Math.log(gain), target = Math.log(desired);
+          const attenuation = Math.min(0, target) - Math.min(0, current);
+          const boost = Math.max(0, target) - Math.max(0, current);
+          gain = Math.exp(current + attenuation * (1 - Math.exp(-dt / 0.25)) + boost * (1 - Math.exp(-dt / 0.9)));
+        }
         return gain;
       }
     };
@@ -239,16 +283,19 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
     loaded.catch(() => modules.delete(context));
     return loaded;
   }
-  function createLufsAnalysis({ window: window2, context, source, track, onFrame, onFailure }) {
+  function createLufsAnalysis({ window: window2, context, track, onFrame, onFailure }) {
     const hasWorklet = context.audioWorklet && window2.AudioWorkletNode && window2.URL?.createObjectURL && window2.Blob;
     if (!hasWorklet && !window2.MediaStreamTrackProcessor) return null;
-    let disposed = false, node = null, reader = null;
+    let disposed = false, node = null, reader = null, source = null;
     function releaseNode() {
-      if (!node) return;
-      try {
-        source.disconnect(node);
-      } catch {
+      if (source) {
+        try {
+          source.disconnect();
+        } catch {
+        }
+        source = null;
       }
+      if (!node) return;
       node.disconnect();
       node.port.onmessage = null;
       node.onprocessorerror = null;
@@ -279,8 +326,11 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
       }
       try {
         reader = new window2.MediaStreamTrackProcessor({ track, maxBufferSize: 1 }).readable.getReader();
-        let meter, rate, channels = [], stereo = [];
-        const onAttack = (power) => onFrame({ attackPower: power });
+        let meter, rate, channels = [], input = [];
+        const send = (frame) => {
+          if (!disposed) onFrame(frame);
+        };
+        const onAttack = (power) => send({ attackPower: power });
         while (!disposed) {
           const { value: frame, done } = await reader.read();
           if (done) break;
@@ -292,17 +342,18 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
             }
             if (channels.length !== frame.numberOfChannels || channels[0]?.length !== frame.numberOfFrames) {
               channels = Array.from({ length: frame.numberOfChannels }, () => new Float32Array(frame.numberOfFrames));
-              stereo = Array.from({ length: 2 }, () => new Float32Array(frame.numberOfFrames));
+              input = channels.length === 1 ? [channels[0], channels[0]] : channels.length === 4 || channels.length === 6 ? Array.from({ length: 2 }, () => new Float32Array(frame.numberOfFrames)) : channels.slice(0, 2);
             }
-            channels.forEach((channel, planeIndex) => frame.copyTo(channel, { planeIndex, format: "f32-planar" }));
-            if (channels.length === 1) meter.process([channels[0], channels[0]], onFrame, onAttack);
-            else if (channels.length === 4 || channels.length === 6) {
+            for (let planeIndex = 0; planeIndex < channels.length; planeIndex++) {
+              frame.copyTo(channels[planeIndex], { planeIndex, format: "f32-planar" });
+            }
+            if (channels.length === 4 || channels.length === 6) {
               for (let i = 0; i < frame.numberOfFrames; i++) {
-                stereo[0][i] = channels.length === 4 ? 0.5 * (channels[0][i] + channels[2][i]) : channels[0][i] + Math.SQRT1_2 * (channels[2][i] + channels[4][i]);
-                stereo[1][i] = channels.length === 4 ? 0.5 * (channels[1][i] + channels[3][i]) : channels[1][i] + Math.SQRT1_2 * (channels[2][i] + channels[5][i]);
+                input[0][i] = channels.length === 4 ? 0.5 * (channels[0][i] + channels[2][i]) : channels[0][i] + Math.SQRT1_2 * (channels[2][i] + channels[4][i]);
+                input[1][i] = channels.length === 4 ? 0.5 * (channels[1][i] + channels[3][i]) : channels[1][i] + Math.SQRT1_2 * (channels[2][i] + channels[5][i]);
               }
-              meter.process(stereo, onFrame, onAttack);
-            } else meter.process(channels.slice(0, 2), onFrame, onAttack);
+            }
+            meter.process(input, send, onAttack);
           } finally {
             frame.close();
           }
@@ -333,6 +384,7 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
           else onFrame(event.data);
         };
         node.onprocessorerror = fail;
+        source = context.createMediaStreamSource(new window2.MediaStream([track]));
         source.connect(node);
       }).catch(readTrack);
     } catch {
@@ -399,14 +451,14 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       writeOutput(owned, preferred);
       owned.lufsTracker = null;
       owned.lastLufsFrame = null;
+      owned.catchUpAfter = 0;
       owned.analysisStarted = window2.performance.now();
     }
     function releaseCapture(owned) {
       owned.lufs?.dispose();
       owned.lufs = null;
       owned.lastLufsFrame = null;
-      owned.source?.disconnect();
-      owned.source = owned.track = null;
+      owned.track = null;
       if (owned.stream) {
         owned.stream.removeEventListener("addtrack", owned.onTrack);
         for (const track of owned.stream.getTracks()) track.stop();
@@ -434,21 +486,22 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       if (owned.track) restore(owned);
       owned.lufs?.dispose();
       owned.lastLufsFrame = null;
-      owned.source?.disconnect();
-      owned.source = owned.context.createMediaStreamSource(new window2.MediaStream([track]));
       owned.track = track;
       owned.lufsTracker = null;
       owned.analysisStarted = window2.performance.now();
       owned.lufs = createLufsAnalysis({
         window: window2,
         context: owned.context,
-        source: owned.source,
         track,
         onFrame: (frame) => {
           if (session !== owned || !owned.video.isConnected || owned.blocked) return;
           owned.lastLufsFrame = window2.performance.now();
-          if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || isMuted(owned.video) || owned.preferred === 0 || owned.context.state !== "running") return;
+          owned.catchUpAfter = 0;
+          if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || owned.preferred === 0 || owned.context.state !== "running") return;
           try {
+            owned.lufsTracker || (owned.lufsTracker = createLufsGainController());
+            if (frame.attackPower != null && !owned.lufsTracker.wantsAttack(frame.attackPower)) return;
+            if (isMuted(owned.video)) return;
             readPreferred(owned);
             owned.lufsTracker || (owned.lufsTracker = createLufsGainController());
             owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
@@ -478,6 +531,9 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     function tick() {
       const owned = session;
       if (!owned) return;
+      const now = window2.performance.now();
+      const delayed = owned.lastTick != null && now - owned.lastTick > 500;
+      owned.lastTick = now;
       const video = owned.video;
       if (!video.isConnected) {
         bind(null);
@@ -518,7 +574,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           if (owned.blocked) return;
           resume(owned);
         }
-        connectTrack(owned);
+        if (!owned.track || owned.track.readyState !== "live") connectTrack(owned);
         if (owned.blocked) return;
         readPreferred(owned);
         if (owned.context.state !== "running") {
@@ -537,17 +593,15 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           report("Muted");
           return;
         }
-        const now = window2.performance.now();
-        if (owned.lastLufsFrame == null) {
-          if (now - owned.analysisStarted > 3e3) {
-            unavailable(owned);
-            return;
-          }
-          report("Starting audio analysis");
+        const starting = owned.lastLufsFrame == null;
+        if (now - (starting ? owned.analysisStarted : owned.lastLufsFrame) > (starting ? 3e3 : 500)) {
+          if (delayed && !owned.catchUpAfter) owned.catchUpAfter = now + 100;
+          if (now < (owned.catchUpAfter || 0)) return;
+          unavailable(owned);
           return;
         }
-        if (now - owned.lastLufsFrame > 500) {
-          unavailable(owned);
+        if (starting) {
+          report("Starting audio analysis");
           return;
         }
         writeOutput(owned, owned.preferred * owned.gain);

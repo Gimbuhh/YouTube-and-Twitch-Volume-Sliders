@@ -55,9 +55,9 @@ function decode(file) {
 }
 
 function render(channels, preferred, engine) {
-  // A 10 ms render grid represents 20 ms spike decisions and 50 ms programme
+  // A 5 ms render grid represents fast spike decisions and 50 ms programme
   // frames/output ticks exactly. Preserve the frozen RMS engine's cadence.
-  const frameLength = rate / (engine === 'lufs' ? 100 : 20);
+  const frameLength = rate / (engine === 'lufs' ? 200 : 20);
   const output = new Float32Array(channels[0].length * 2);
   const meter = engine === 'lufs' ? createLufsMeter(rate) : null;
   const controller = meter ? createLufsGainController() : createLoudnessTracker();
