@@ -167,7 +167,7 @@ const SLIDER_STYLE_TEMPLATE = String.raw`
   border-radius: 50%;
 }
 
-#{{overlayId}}.tm-normalization-active {
+#{{overlayId}}.tm-normalization-enabled {
   /* Keep the inset waveform visible at the pill's rounded edge. */
   overflow: clip !important;
   overflow-clip-margin: 8px;

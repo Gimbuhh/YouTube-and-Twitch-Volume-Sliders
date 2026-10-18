@@ -270,6 +270,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
 
   return {
     bind,
+    isBoundTo: video => session?.video === video,
     setEnabled(value) {
       enabled = !!value;
       if (!enabled) bind(null);

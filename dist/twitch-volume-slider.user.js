@@ -685,6 +685,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     }
     return {
       bind,
+      isBoundTo: (video) => session?.video === video,
       setEnabled(value) {
         enabled = !!value;
         if (!enabled) bind(null);
@@ -718,7 +719,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     const icon = document2.createElement("span");
     icon.className = "tm-normalization-icon";
     icon.hidden = true;
-    icon.title = "Auto-normalize volume is active";
+    icon.title = "Auto-normalize volume is on";
     icon.setAttribute("aria-hidden", "true");
     const ns = "http://www.w3.org/2000/svg";
     const svg = document2.createElementNS(ns, "svg");
@@ -734,16 +735,17 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     icon.append(svg);
     return icon;
   }
-  function updateNormalizationIcon(overlay, active) {
+  function updateNormalizationIcon(overlay, status) {
     if (!overlay) return;
+    const visible = status.startsWith("Active") || status === "Waiting for playback" || status === "Starting audio analysis" || status === "Muted";
     const icon = overlay.querySelector(".tm-normalization-icon");
     const description = overlay.querySelector(".tm-normalization-description");
-    if (!icon || !description || icon.hidden === !active) return;
-    overlay.classList.toggle("tm-normalization-active", active);
-    icon.hidden = !active;
+    if (!icon || !description || icon.hidden === !visible) return;
+    overlay.classList.toggle("tm-normalization-enabled", visible);
+    icon.hidden = !visible;
     for (const control of overlay.querySelectorAll('.tm-volume-icon-cell, input[type="range"]')) {
       const ids = (control.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== description.id);
-      if (active) ids.push(description.id);
+      if (visible) ids.push(description.id);
       if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
       else control.removeAttribute("aria-describedby");
     }
@@ -2984,7 +2986,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
   border-radius: 50%;
 }
 
-#{{overlayId}}.tm-normalization-active {
+#{{overlayId}}.tm-normalization-enabled {
   /* Keep the inset waveform visible at the pill's rounded edge. */
   overflow: clip !important;
   overflow-clip-margin: 8px;
@@ -3769,15 +3771,15 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         syncNormalizationIcon();
       }
     });
-    function syncNormalization() {
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
       const enabled = isNormalizationEnabled() && isOverlayEnabled();
       normalizer.setEnabled(enabled);
-      normalizer.bind(overlayLifecycle.active?.root?._tmVolumeVideo || null);
+      normalizer.bind(video);
       refreshOptionsPopupState();
       syncNormalizationIcon();
     }
     function syncNormalizationIcon() {
-      updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus().startsWith("Active"));
+      updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
     }
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
       window,
@@ -4567,9 +4569,6 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       }
     }
     function createOverlay(video, player, controlsHost) {
-      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) {
-        disposeActiveOverlay();
-      }
       const existing = document.getElementById(OVERLAY_ID);
       if (existing) {
         return existing;
@@ -4874,13 +4873,15 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         injectVolumeOptionsButton();
         return !!document.getElementById(OPTIONS_BUTTON_ID);
       }
+      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) disposeActiveOverlay();
       let overlay = document.getElementById(OVERLAY_ID);
       if (overlay && overlay._tmVolumeVideo !== video) {
         disposeActiveOverlay();
         overlay = null;
       }
-      if (!overlay && video) {
+      if (!overlay && video && !normalizer.isBoundTo(video)) {
         restoreSavedVolumeBeforeControls(video);
+        if (isNormalizationEnabled()) syncNormalization(video);
       }
       if (!video || !player || !controlsHost) {
         injectVolumeOptionsButton();
@@ -4979,12 +4980,14 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       if (!window.MutationObserver) return;
       ensureAttachObserver();
       if (attachObserverTarget || attachBootstrapObserver) return;
+      const bootstrapRoot = document.body || document.documentElement;
+      if (!bootstrapRoot) return;
       attachBootstrapObserver = new MutationObserver(() => {
         if (!getAttachObserverRoot()) return;
         ensureAttachObserver();
         attachSliderIfPossible();
       });
-      attachBootstrapObserver.observe(document.body, { childList: true, subtree: true });
+      attachBootstrapObserver.observe(bootstrapRoot, { childList: true, subtree: true });
     }
     function setupInitialAttempts() {
       const maxAttempts = 20;
@@ -5095,11 +5098,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       setupNavigationHandler();
       setupNativeSettingsCloseHandler();
     }
-    if (document.readyState === "complete" || document.readyState === "interactive") {
-      init();
-    } else {
-      window.addEventListener("DOMContentLoaded", init, { once: true });
-    }
+    init();
   }
 
   // src/entries/twitch.user.js

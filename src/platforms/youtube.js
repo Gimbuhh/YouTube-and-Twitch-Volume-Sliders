@@ -127,16 +127,16 @@ export function startYouTubeVolumeSlider() {
         onStatusChanged: () => { syncNormalizationStatus(getOptionsPopup()); syncNormalizationIcon(); }
     });
 
-    function syncNormalization() {
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
         const enabled = isNormalizationEnabled() && isOverlayEnabled();
         normalizer.setEnabled(enabled);
-        normalizer.bind(overlayLifecycle.active?.root?._tmVolumeVideo || null);
+        normalizer.bind(video);
         refreshOptionsPopupState();
         syncNormalizationIcon();
     }
 
     function syncNormalizationIcon() {
-        updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus().startsWith('Active'));
+        updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
     }
 
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
@@ -843,9 +843,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function createOverlay(video, player, controlsHost) {
-        if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) {
-            disposeActiveOverlay();
-        }
         // Prevent duplicates
         const existing = document.getElementById(OVERLAY_ID);
         if (existing) {
@@ -1068,15 +1065,27 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             return !!document.getElementById(OPTIONS_BUTTON_ID);
         }
 
-        if (!video || !player || (!controlsHost && !isSliderOnVideo())) {
+        if (!video) {
             injectVolumeOptionsButton();
             return false;
         }
+        // Dispose the outgoing UI before starting analysis for the new video.
+        if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) disposeActiveOverlay();
         let existingOverlay = document.getElementById(OVERLAY_ID);
         if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
             disposeActiveOverlay();
             existingOverlay.remove();
             existingOverlay = null;
+        }
+        // A playing video can precede its controls. Restore intent once and
+        // analyze immediately; mounting the slider retains this same session.
+        if (!existingOverlay && isNormalizationEnabled() && !normalizer.isBoundTo(video)) {
+            restoreSavedVolume(video);
+            syncNormalization(video);
+        }
+        if (!controlsHost && !isSliderOnVideo()) {
+            injectVolumeOptionsButton();
+            return false;
         }
         if (existingOverlay) {
             placeOverlay(existingOverlay, player, controlsHost);

@@ -43,11 +43,13 @@ try {
   cases.push(['youtube', 30, 'csp'], ['twitch', 40, 'native'], ['twitch', 40, 'unsupported']);
   cases.push(['youtube', 30, 'csp-suspended'], ['twitch', 40, 'native-suspended'], ['youtube', 30, 'worklet-suspended']);
   cases.push(['youtube', 30, 'lufs-retry'], ['twitch', 40, 'native-retry']);
+  cases.push(['youtube', 30, 'csp-startup'], ['youtube', 30, 'lufs-startup'], ['twitch', 40, 'lufs-startup']);
   const selectedCases = process.env.VOLUME_SLIDER_NORMALIZATION_CASES?.split(',');
   for (const [platform, preferred, engine] of cases.filter(parts => !selectedCases || selectedCases.includes(parts.join('/')))) {
     const youtube = platform === 'youtube';
     const suspended = engine.endsWith('-suspended');
     const retrying = engine.endsWith('-retry');
+    const startup = engine.endsWith('-startup');
     const prefix = youtube ? 'yt' : 'twitch';
     const origin = youtube ? 'https://www.youtube.com' : 'https://www.twitch.tv';
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -60,6 +62,8 @@ try {
     const player = youtube
       ? '<div id="movie_player"><video class="html5-main-video" src="/loud.wav" loop></video><div class="ytp-left-controls"><div class="ytp-volume-area"></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">Settings</button></div></div>'
       : '<div class="video-player" data-a-target="player-overlay-click-handler"><video src="/loud.wav" loop></video><div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings">Settings</button></div></div></div>';
+    let completeDocument;
+    const documentGate = new Promise(resolve => { completeDocument = resolve; });
     const html = `<!doctype html><html><head><style>
       body{margin:20px;background:#111;color:white;font-family:Arial}#movie_player,.video-player{position:relative;width:900px;height:506px;background:#222}
       video{width:900px;height:466px}.ytp-left-controls,.ytp-right-controls{position:absolute;bottom:0;height:40px;display:flex;align-items:center}.ytp-left-controls{left:0}.ytp-right-controls{right:0}
@@ -68,10 +72,19 @@ try {
     </style></head><body>${player}<script>
       const video = document.querySelector('video'); video.volume = ${preferred / 100};
       const player = video.parentElement;
+      window.__startupControls = [];
+      if (${startup}) {
+        window.__startupControls = [...player.querySelectorAll(${JSON.stringify(youtube ? '.ytp-left-controls, .ytp-right-controls' : '[data-a-target="player-controls"]')})];
+        for (const control of window.__startupControls) control.remove();
+      }
+      video.addEventListener('playing', () => { window.__startupPlayingAt = performance.now(); }, {once:true});
+      video.addEventListener('volumechange', () => {
+        if (${startup} && window.__startupCorrectionAt == null && video.volume < ${preferred / 100 * .25}) window.__startupCorrectionAt = performance.now();
+      });
       const api = {getVolume:()=>video.volume * ${youtube ? 100 : 1},setVolume:v=>{video.volume=v / ${youtube ? 100 : 1}},isMuted:()=>video.muted,mute:()=>{video.muted=true},unMute:()=>{video.muted=false},setMuted:v=>{video.muted=v}};
       ${youtube ? 'Object.assign(player,api);' : 'player.__reactFiber$fixture={return:{memoizedProps:{mediaPlayerInstance:api},return:null}};'}
       localStorage.setItem('tm-${prefix}-volume','${preferred}');
-      if (${suspended || retrying}) localStorage.setItem('tm-${prefix}-volume-slider-normalization','true');
+      if (${suspended || retrying || startup}) localStorage.setItem('tm-${prefix}-volume-slider-normalization','true');
       AudioContext.prototype.createMediaElementSource = () => {throw new Error('Must never reroute original playback')};
       window.__normalizationCaptures = 0;
       window.__retryPlaybackEvents = 0;
@@ -138,9 +151,12 @@ try {
         window.__normalizationStreams.push(stream);
         return stream;
       };
-    </script><script>${artifact.replaceAll('</script>', '<\\/script>')}</script></body></html>`;
+    </script><script>${artifact.replaceAll('</script>', '<\\/script>')}</script>${startup ? '<script src="/finish-document.js"></script>' : ''}</body></html>`;
     await page.route('**/*', route => {
       const path = new URL(route.request().url()).pathname;
+      if (path === '/finish-document.js') {
+        return documentGate.then(() => route.fulfill({ contentType: 'text/javascript', body: 'document.querySelector("video").parentElement.append(...window.__startupControls);' }));
+      }
       if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('speech-return') ? speechReturn : path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
       // YouTube can send a policy without blob: in script-src. Reproduce the
       // actual module rejection, rather than mocking addModule's return value.
@@ -148,7 +164,41 @@ try {
       return route.fulfill({ status: 200, contentType: 'text/html', headers, body: html });
     });
     try {
-      await page.goto(`${origin}/${youtube ? 'watch?v=normalization' : 'normalization'}`);
+      await page.goto(`${origin}/${youtube ? 'watch?v=normalization' : 'normalization'}`, {waitUntil: startup ? 'commit' : 'load'});
+      if (startup) {
+        const cdp = await context.newCDPSession(page);
+        const read = async expression => {
+          const result = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: false });
+          assert.ok(!result.exceptionDetails, result.exceptionDetails?.text);
+          return result.result.value;
+        };
+        const wait = expression => read(`(async () => {
+          const deadline = performance.now() + 4000;
+          while (!(${expression})) {
+            if (performance.now() > deadline) throw new Error('Early startup condition timed out');
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+        })()`);
+        await wait(`window.__normalizationContexts != null`);
+        await read(`document.querySelector('video').play()`);
+        await wait(`window.__startupCorrectionAt != null`);
+        assert.equal(await read(`document.readyState`), 'loading', 'analysis does not wait for DOMContentLoaded');
+        assert.equal(await read(`!!document.querySelector('#tm-volume-slider-overlay')`), false, 'controls are still absent');
+        assert.equal(await read(`navigator.userActivation.hasBeenActive`), false);
+        const reaction = await read(`window.__startupCorrectionAt - window.__startupPlayingAt`);
+        assert.ok(reaction >= 0 && reaction < 500, `early correction after ${reaction.toFixed(1)} ms of playing`);
+        completeDocument();
+        await page.waitForSelector('#tm-volume-options-button');
+        assert.equal(await read(`window.__normalizationCaptures`), 1, 'controls retain the early capture');
+        assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+        await page.locator('#tm-volume-options-button').click();
+        await page.locator('#tm-volume-options-normalization').click();
+        assert.equal(await read(`document.querySelector('video').volume`), preferred / 100);
+        assert.ok(await read(`window.__normalizationTracks.length > 0 && window.__normalizationTracks.every(track => track.readyState === 'ended')`));
+        assert.deepEqual(errors, []);
+        console.log(`${platform} (${engine}): correction ${reaction.toFixed(1)} ms after playing, before controls/DOMContentLoaded, without input; one capture, preference and cleanup passed`);
+        continue;
+      }
       if (retrying) {
         const cdp = await context.newCDPSession(page);
         const evaluate = async expression => {
@@ -188,7 +238,7 @@ try {
         assert.ok(await evaluate(`window.__normalizationTracks.length > 0 && window.__normalizationTracks.every(track => track.readyState === 'ended')`));
         assert.equal(await evaluate(`document.querySelector('video').volume`), preferred / 100);
         assert.deepEqual(errors, []);
-        console.log(`${platform} (${engine}): transient startup failure retries without input; active-only icon, preference and cleanup passed`);
+        console.log(`${platform} (${engine}): transient startup failure retries without input; error indication, preference and cleanup passed`);
         continue;
       }
       if (suspended) {
@@ -414,7 +464,7 @@ try {
         details: document.querySelector('#tm-volume-options-normalization-details')?.textContent
       })));
       throw error;
-    } finally { await context.close(); }
+    } finally { completeDocument(); await context.close(); }
   }
 } finally {
   await browser.close();

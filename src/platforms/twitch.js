@@ -143,16 +143,16 @@ export function startTwitchVolumeSlider() {
         onStatusChanged: () => { syncNormalizationStatus(getOptionsPopup()); syncNormalizationIcon(); }
     });
 
-    function syncNormalization() {
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
         const enabled = isNormalizationEnabled() && isOverlayEnabled();
         normalizer.setEnabled(enabled);
-        normalizer.bind(overlayLifecycle.active?.root?._tmVolumeVideo || null);
+        normalizer.bind(video);
         refreshOptionsPopupState();
         syncNormalizationIcon();
     }
 
     function syncNormalizationIcon() {
-        updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus().startsWith('Active'));
+        updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
     }
 
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
@@ -1113,9 +1113,6 @@ export function startTwitchVolumeSlider() {
     }
 
     function createOverlay(video, player, controlsHost) {
-        if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) {
-            disposeActiveOverlay();
-        }
         // Prevent duplicates
         const existing = document.getElementById(OVERLAY_ID);
         if (existing) {
@@ -1450,13 +1447,16 @@ export function startTwitchVolumeSlider() {
             return !!document.getElementById(OPTIONS_BUTTON_ID);
         }
 
+        // Dispose the outgoing UI before starting analysis for the new video.
+        if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) disposeActiveOverlay();
         let overlay = document.getElementById(OVERLAY_ID);
         if (overlay && overlay._tmVolumeVideo !== video) {
             disposeActiveOverlay();
             overlay = null;
         }
-        if (!overlay && video) {
+        if (!overlay && video && !normalizer.isBoundTo(video)) {
             restoreSavedVolumeBeforeControls(video);
+            if (isNormalizationEnabled()) syncNormalization(video);
         }
         if (!video || !player || !controlsHost) {
             injectVolumeOptionsButton();
@@ -1571,12 +1571,14 @@ export function startTwitchVolumeSlider() {
         ensureAttachObserver();
         if (attachObserverTarget || attachBootstrapObserver) return;
 
+        const bootstrapRoot = document.body || document.documentElement;
+        if (!bootstrapRoot) return;
         attachBootstrapObserver = new MutationObserver(() => {
             if (!getAttachObserverRoot()) return;
             ensureAttachObserver();
             attachSliderIfPossible();
         });
-        attachBootstrapObserver.observe(document.body, { childList: true, subtree: true });
+        attachBootstrapObserver.observe(bootstrapRoot, { childList: true, subtree: true });
     }
 
     function setupInitialAttempts() {
@@ -1713,9 +1715,5 @@ export function startTwitchVolumeSlider() {
         setupNativeSettingsCloseHandler();
     }
 
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        init();
-    } else {
-        window.addEventListener('DOMContentLoaded', init, { once: true });
-    }
+    init();
 }

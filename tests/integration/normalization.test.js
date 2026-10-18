@@ -10,10 +10,12 @@ const platforms = [
   { file: 'twitch', prefix: 'twitch', url: 'https://www.twitch.tv/test', fixture: twitchFixture }
 ];
 
-async function prepare(config, t, { saved = false, blockedStorage = false } = {}) {
+async function prepare(config, t, { saved = false, blockedStorage = false, delayedControls = false, beforeBody = false } = {}) {
   const runtime = createRuntime(config.url, { runScripts: 'outside-only' });
   t.after(() => runtime.close());
   const { video, player, state } = config.fixture(runtime.document);
+  const controls = delayedControls ? [...player.querySelectorAll(config.file === 'youtube' ? '.ytp-left-controls, .ytp-right-controls' : '[data-a-target="player-controls"]')] : [];
+  for (const element of controls) element.remove();
   const audio = mockAudioCapture(runtime.window, video);
   const volumeKey = `tm-${config.prefix}-volume`;
   const optionKey = `tm-${config.prefix}-volume-slider-normalization`;
@@ -54,14 +56,49 @@ async function prepare(config, t, { saved = false, blockedStorage = false } = {}
       }
     }
   };
-  runtime.window.eval(await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`, import.meta.url), 'utf8'));
-  runtime.document.getElementById('tm-volume-options-button').click();
+  const artifact = await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`, import.meta.url), 'utf8');
+  if (delayedControls) {
+    await new Promise(resolve => setImmediate(resolve)); // Let JSDOM's own load events finish first.
+    Object.defineProperty(runtime.document, 'readyState', { configurable: true, value: 'loading' });
+  }
+  const body = runtime.document.body;
+  if (beforeBody) body.remove();
+  runtime.window.eval(artifact);
+  if (!delayedControls) runtime.document.getElementById('tm-volume-options-button').click();
   const toggle = runtime.document.getElementById('tm-volume-options-normalization');
   const rawVolume = () => config.file === 'youtube' ? state.volume : Math.round(state.volume * 100);
-  return { ...runtime, video, player, state, api, audio, toggle, advance, rawVolume, volumeKey, optionKey };
+  return { ...runtime, video, player, state, api, audio, toggle, advance, rawVolume, volumeKey, optionKey, controls, body };
 }
 
 for (const config of platforms) {
+  test(`${config.file}: saved normalization starts before controls or document completion and keeps one capture on mount`, async t => {
+    for (const beforeBody of [false, true]) {
+      const f = await prepare(config, t, { saved: true, delayedControls: true, beforeBody });
+      if (beforeBody) {
+        f.document.documentElement.append(f.body);
+        await new Promise(resolve => f.window.setTimeout(resolve, 50));
+      }
+      await f.advance(.2);
+      assert.equal(f.document.readyState, 'loading');
+      assert.equal(f.document.getElementById('tm-volume-slider-overlay'), null);
+      assert.equal(f.audio.captures, 1, 'the playing video does not wait for controls');
+      assert.ok(f.rawVolume() < 20, 'first measurements already reduce loud output');
+      assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
+      f.player.append(...f.controls);
+      Object.defineProperty(f.document, 'readyState', { configurable: true, value: 'interactive' });
+      f.window.dispatchEvent(new f.window.Event('DOMContentLoaded'));
+      await new Promise(resolve => f.window.setTimeout(resolve, 100));
+      await f.advance(.2);
+      assert.ok(f.document.getElementById('tm-volume-slider-overlay'));
+      assert.equal(f.audio.captures, 1, 'mounting controls retains the early analysis session');
+      assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
+      f.document.getElementById('tm-volume-options-button').click();
+      f.document.getElementById('tm-volume-options-normalization').click();
+      assert.equal(f.rawVolume(), 50);
+      assert.ok(f.audio.contexts.every(context => context.closed));
+    }
+  });
+
   test(`${config.file}: quiet startup boost stays bounded in the standalone artifact`, async t => {
     const f = await prepare(config, t);
     const slider = f.document.getElementById('tm-volume-slider-range');
@@ -92,16 +129,16 @@ for (const config of platforms) {
     }
   });
 
-  test(`${config.file}: normalization icon appears only while active and keeps its artwork through recovery`, async t => {
+  test(`${config.file}: normalization icon survives ordinary idle states and hides for analysis problems`, async t => {
     const f = await prepare(config, t, { saved: true });
     const indicator = f.document.querySelector('.tm-normalization-icon');
     const icon = f.document.querySelector('.tm-volume-icon-cell');
     const slider = f.document.getElementById('tm-volume-slider-range');
-    assert.equal(indicator.hidden, true, 'starting analysis is not yet active');
+    assert.equal(indicator.hidden, false, 'normal startup is not an analysis problem');
     await f.advance();
     assert.equal(indicator.hidden, false);
     assert.equal(indicator.textContent, '');
-    assert.equal(indicator.title, 'Auto-normalize volume is active');
+    assert.equal(indicator.title, 'Auto-normalize volume is on');
     const artwork = indicator.innerHTML;
     assert.equal(slider.value, '50');
     assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
@@ -114,22 +151,34 @@ for (const config of platforms) {
     assert.equal(slider.value, '50');
     if (config.file === 'youtube') f.api.mute(); else f.api.setMuted(true);
     await f.advance(); assert.equal(indicator.innerHTML, artwork);
-    assert.equal(indicator.hidden, true);
-    assert.equal(icon.getAttribute('aria-describedby'), null);
+    assert.equal(indicator.hidden, false);
+    assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
     if (config.file === 'youtube') f.api.unMute(); else f.api.setMuted(false);
     await f.advance(.2); assert.equal(indicator.hidden, false);
-    f.audio.paused = true; await f.advance(.2); assert.equal(indicator.hidden, true);
+    f.audio.paused = true; await f.advance(.2); assert.equal(indicator.hidden, false);
     f.audio.paused = false; await f.advance(.2); assert.equal(indicator.hidden, false);
+    // Volume zero is also an ordinary listening choice.
+    slider.value = '0'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
+    await f.advance(.2); assert.equal(indicator.hidden, false);
+    slider.value = '50'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
+    await f.advance(.2);
+    f.audio.contexts[0].state = 'suspended'; await f.advance(.2);
+    assert.equal(indicator.hidden, true, 'activation is required before analysis can resume');
+    f.document.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
+    await f.advance(.2); assert.equal(indicator.hidden, false);
     f.audio.streams[0].getAudioTracks()[0].muted = true;
     await f.advance(); assert.equal(indicator.innerHTML, artwork);
     assert.equal(indicator.hidden, true);
-    assert.equal(indicator.title, 'Auto-normalize volume is active');
+    assert.equal(indicator.title, 'Auto-normalize volume is on');
     assert.match(f.document.getElementById('tm-volume-options-normalization-status').textContent, /Waiting for accessible audio/);
     f.audio.streams[0].getAudioTracks()[0].muted = false;
     await f.advance(.2); assert.equal(indicator.hidden, false);
     f.audio.stalled = true; await f.advance(.7);
     assert.match(f.document.getElementById('tm-volume-options-normalization-status').textContent, /unavailable/i);
     assert.equal(indicator.hidden, true);
+    f.audio.paused = true; await f.advance(.2);
+    assert.equal(indicator.hidden, true, 'pausing does not mask a failed capture');
+    f.audio.paused = false;
     f.audio.stalled = false; await f.advance(1.2);
     assert.equal(indicator.hidden, false, 'automatic recovery updates the icon without toggling');
     assert.equal(indicator.innerHTML, artwork);

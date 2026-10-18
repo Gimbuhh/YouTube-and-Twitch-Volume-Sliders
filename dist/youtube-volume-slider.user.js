@@ -685,6 +685,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     }
     return {
       bind,
+      isBoundTo: (video) => session?.video === video,
       setEnabled(value) {
         enabled = !!value;
         if (!enabled) bind(null);
@@ -718,7 +719,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     const icon = document2.createElement("span");
     icon.className = "tm-normalization-icon";
     icon.hidden = true;
-    icon.title = "Auto-normalize volume is active";
+    icon.title = "Auto-normalize volume is on";
     icon.setAttribute("aria-hidden", "true");
     const ns = "http://www.w3.org/2000/svg";
     const svg = document2.createElementNS(ns, "svg");
@@ -734,16 +735,17 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     icon.append(svg);
     return icon;
   }
-  function updateNormalizationIcon(overlay, active) {
+  function updateNormalizationIcon(overlay, status) {
     if (!overlay) return;
+    const visible = status.startsWith("Active") || status === "Waiting for playback" || status === "Starting audio analysis" || status === "Muted";
     const icon = overlay.querySelector(".tm-normalization-icon");
     const description = overlay.querySelector(".tm-normalization-description");
-    if (!icon || !description || icon.hidden === !active) return;
-    overlay.classList.toggle("tm-normalization-active", active);
-    icon.hidden = !active;
+    if (!icon || !description || icon.hidden === !visible) return;
+    overlay.classList.toggle("tm-normalization-enabled", visible);
+    icon.hidden = !visible;
     for (const control of overlay.querySelectorAll('.tm-volume-icon-cell, input[type="range"]')) {
       const ids = (control.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== description.id);
-      if (active) ids.push(description.id);
+      if (visible) ids.push(description.id);
       if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
       else control.removeAttribute("aria-describedby");
     }
@@ -2984,7 +2986,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
   border-radius: 50%;
 }
 
-#{{overlayId}}.tm-normalization-active {
+#{{overlayId}}.tm-normalization-enabled {
   /* Keep the inset waveform visible at the pill's rounded edge. */
   overflow: clip !important;
   overflow-clip-margin: 8px;
@@ -3645,15 +3647,15 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         syncNormalizationIcon();
       }
     });
-    function syncNormalization() {
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
       const enabled = isNormalizationEnabled() && isOverlayEnabled();
       normalizer.setEnabled(enabled);
-      normalizer.bind(overlayLifecycle.active?.root?._tmVolumeVideo || null);
+      normalizer.bind(video);
       refreshOptionsPopupState();
       syncNormalizationIcon();
     }
     function syncNormalizationIcon() {
-      updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus().startsWith("Active"));
+      updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
     }
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
       window,
@@ -4240,9 +4242,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       }
     }
     function createOverlay(video, player, controlsHost) {
-      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) {
-        disposeActiveOverlay();
-      }
       const existing = document.getElementById(OVERLAY_ID);
       if (existing) {
         return existing;
@@ -4441,15 +4440,24 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         injectVolumeOptionsButton();
         return !!document.getElementById(OPTIONS_BUTTON_ID);
       }
-      if (!video || !player || !controlsHost && !isSliderOnVideo()) {
+      if (!video) {
         injectVolumeOptionsButton();
         return false;
       }
+      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) disposeActiveOverlay();
       let existingOverlay = document.getElementById(OVERLAY_ID);
       if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
         disposeActiveOverlay();
         existingOverlay.remove();
         existingOverlay = null;
+      }
+      if (!existingOverlay && isNormalizationEnabled() && !normalizer.isBoundTo(video)) {
+        restoreSavedVolume(video);
+        syncNormalization(video);
+      }
+      if (!controlsHost && !isSliderOnVideo()) {
+        injectVolumeOptionsButton();
+        return false;
       }
       if (existingOverlay) {
         placeOverlay(existingOverlay, player, controlsHost);
