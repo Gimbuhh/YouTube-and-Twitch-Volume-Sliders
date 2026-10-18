@@ -100,7 +100,7 @@ test('LUFS gain waits before boosting, respects volume headroom, and cuts a loud
       if (index < 19) assert.equal(gain, 1);
       assert.ok(gain <= 100 / preferred);
     }
-    assert.ok(gain > 2);
+    assert.ok(gain > 1.5 && gain <= 10 ** (6 / 20), 'quiet audio receives bounded boost');
     const first = measure([loud, loud], 48000)[0];
     gain = controller.update(first, 100 / preferred);
     const outputLufs = -0.691 + 10 * Math.log10(first.power * gain * gain);
@@ -127,8 +127,21 @@ test('a loud return reaches its safe correction within 15 ms across measurement 
       const chunk = signal.subarray(index, index + rate / 1000);
       meter.process([chunk, chunk], update, attackPower => update({ attackPower }));
     }
-    assert.ok(before > 2, 'the quiet lead-in is boosted');
+    assert.ok(before > 1.5 && before <= 10 ** (6 / 20), 'the quiet lead-in has useful, bounded boost');
     assert.ok(firstSafe != null && firstSafe - onset / rate <= .015001, `${offsetMs} ms phase: ${firstSafe - onset / rate} s`);
+  }
+});
+
+test('automatic boost stays within 6 dB and the native volume headroom', () => {
+  const target = 10 ** ((-18 + .691) / 10);
+  for (const preferred of [20, 30, 40, 70, 100]) {
+    const controller = createLufsGainController(), limit = Math.min(10 ** (6 / 20), 100 / preferred);
+    let gain;
+    for (let i = 0; i < 600; i++) {
+      gain = controller.update({ power: target / 64, rawPower: target / 128, momentaryPower: target / 64, duration: .05 }, 100 / preferred);
+      assert.ok(gain <= limit + 1e-9, `${preferred}%: boost must already be bounded before an unknown loud return`);
+    }
+    assert.ok(gain >= limit * .99, 'sustained quiet audio still receives useful available boost');
   }
 });
 
@@ -207,13 +220,13 @@ test('a cut recovers attenuation quickly but does not immediately restore a larg
   const quiet = { power: target / 16, rawPower: target / 32, momentaryPower: target / 16, duration: .05 };
   let gain;
   for (let i = 0; i < 300; i++) gain = controller.update(quiet, 5);
-  assert.ok(gain > 3.8, 'a consistently quiet source can still use its native headroom');
+  assert.ok(gain > 1.9 && gain <= 10 ** (6 / 20), 'a consistently quiet source receives bounded boost');
   assert.equal(controller.update({ attackPower: target * 16 }, 5), .25);
   controller.update(quiet, 5);
   gain = controller.update(quiet, 5);
   assert.ok(gain < .5, `100 ms after the cut: ${gain}`);
   for (let i = 0; i < 100; i++) gain = controller.update(quiet, 5);
-  assert.ok(gain > 2.5, 'sustained quiet audio gradually regains useful boost');
+  assert.ok(gain > 1.8 && gain <= 10 ** (6 / 20), 'sustained quiet audio gradually regains useful, bounded boost');
 });
 
 test('brief peak recovery remains smooth around unity gain', () => {

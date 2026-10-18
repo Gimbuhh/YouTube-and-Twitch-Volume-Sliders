@@ -159,7 +159,7 @@ test('closing a source during module loading prevents late node creation', async
   assert.deepEqual(f.failures, []);
 });
 
-test('blocked loading and processor errors trigger fallback once and clean up', async () => {
+test('unavailable input and processor errors report failure once and clean up', async () => {
   const blocked = fixture(); blocked.create(); blocked.reject(new Error('CSP')); await flush();
   assert.equal(blocked.failures.length, 1);
   assert.equal(blocked.revoked, 1);

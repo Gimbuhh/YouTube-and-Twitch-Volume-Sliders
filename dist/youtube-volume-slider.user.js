@@ -199,6 +199,7 @@
   }
   function createLufsGainController() {
     const targetPower = 10 ** ((-18 + 0.691) / 10);
+    const maxBoost = 10 ** (6 / 20);
     const history = [];
     let time = 0, gain = 1, programmeGain = 1, fastUntil = -Infinity, referenceHold = 0;
     const attackState = (power) => !Number.isFinite(power) || power <= 0 ? 0 : power * programmeGain * programmeGain > targetPower * 10 ? 2 : time < fastUntil ? 1 : 0;
@@ -235,7 +236,7 @@
         const rollingReference = activeEnergy / activeDuration;
         if (duration >= 1) referenceHold = frame.power >= referenceHold * 0.1 ? rollingReference : Math.max(referenceHold, rollingReference);
         const reference = Math.max(rollingReference, referenceHold);
-        let desired = Math.min(maxGain, Math.max(0.1, Math.sqrt(targetPower / reference)));
+        let desired = Math.min(maxGain, maxBoost, Math.max(0.1, Math.sqrt(targetPower / reference)));
         if (duration < 1) desired = Math.min(1, desired);
         if (desired < programmeGain) programmeGain = desired;
         else {

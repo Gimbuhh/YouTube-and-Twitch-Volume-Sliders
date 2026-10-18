@@ -62,6 +62,28 @@ async function prepare(config, t, { saved = false, blockedStorage = false } = {}
 }
 
 for (const config of platforms) {
+  test(`${config.file}: quiet startup boost stays bounded in the standalone artifact`, async t => {
+    const f = await prepare(config, t);
+    const slider = f.document.getElementById('tm-volume-slider-range');
+    slider.value = '20';
+    slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
+    slider.dispatchEvent(new f.window.Event('change', { bubbles: true }));
+    f.audio.amplitude = .03;
+    f.toggle.click();
+    for (let i = 0; i < 3; i++) {
+      await f.advance();
+      assert.ok(f.rawVolume() <= 40, 'the native output stays within the rounded 6 dB boost limit');
+      assert.ok(f.rawVolume() > 30, 'quiet audio still receives useful boost');
+      assert.equal(slider.value, '20');
+      assert.equal(f.window.localStorage.getItem(f.volumeKey), '20');
+    }
+    f.audio.amplitude = .8;
+    await f.advance();
+    assert.ok(f.rawVolume() < 10, 'loud audio still receives full attenuation');
+    f.toggle.click();
+    assert.equal(f.rawVolume(), 20);
+  });
+
   test(`${config.file}: the standalone artifact contains only the LUFS normalization path`, async () => {
     const artifact = await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`, import.meta.url), 'utf8');
     assert.match(artifact, /tm-lufs-analysis/);

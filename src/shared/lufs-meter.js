@@ -123,6 +123,9 @@ export function createLufsGainController() {
   // Source reference before the user's volume, close to the previous steady-tone
   // level. This is a live listening target, not the EBU broadcast target.
   const targetPower = 10 ** ((-18 + 0.691) / 10);
+  // Bound the boost already present before an unknown loud sound arrives.
+  // Native volume is reactive; faster measurements cannot undo that onset.
+  const maxBoost = 10 ** (6 / 20);
   const history = [];
   let time = 0, gain = 1, programmeGain = 1, fastUntil = -Infinity, referenceHold = 0;
   const attackState = power => !Number.isFinite(power) || power <= 0 ? 0
@@ -163,7 +166,7 @@ export function createLufsGainController() {
       if (duration >= 1) referenceHold = frame.power >= referenceHold * .1
         ? rollingReference : Math.max(referenceHold, rollingReference);
       const reference = Math.max(rollingReference, referenceHold);
-      let desired = Math.min(maxGain, Math.max(0.1, Math.sqrt(targetPower / reference)));
+      let desired = Math.min(maxGain, maxBoost, Math.max(0.1, Math.sqrt(targetPower / reference)));
       if (duration < 1) desired = Math.min(1, desired);
       if (desired < programmeGain) programmeGain = desired;
       else {

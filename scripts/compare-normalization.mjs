@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createLoudnessTracker } from '../tests/fixtures/normalization-rms.js';
 import { createLufsMeter, createLufsGainController } from '../src/shared/lufs-meter.js';
 
 // Optional developer comparison: FFmpeg is the independent meter, never a
@@ -54,34 +53,23 @@ function decode(file) {
   return [Float32Array.from({ length: values.length / 2 }, (_, i) => values[2 * i]), Float32Array.from({ length: values.length / 2 }, (_, i) => values[2 * i + 1])];
 }
 
-function render(channels, preferred, engine) {
+function render(channels, preferred) {
   // A 5 ms render grid represents fast spike decisions and 50 ms programme
-  // frames/output ticks exactly. Preserve the frozen RMS engine's cadence.
-  const frameLength = rate / (engine === 'lufs' ? 200 : 20);
+  // frames/output ticks exactly.
+  const frameLength = rate / 200;
   const output = new Float32Array(channels[0].length * 2);
-  const meter = engine === 'lufs' ? createLufsMeter(rate) : null;
-  const controller = meter ? createLufsGainController() : createLoudnessTracker();
-  const windows = meter ? null : channels.map(() => new Float32Array(4096));
+  const meter = createLufsMeter(rate), controller = createLufsGainController();
   let applied = preferred, gain = 1, limited = 0, frames = 0;
   const start = performance.now();
   for (let offset = 0; offset < channels[0].length; offset += frameLength) {
     const end = Math.min(offset + frameLength, channels[0].length);
     for (let i = offset; i < end; i++) { output[2 * i] = channels[0][i] * applied / 100; output[2 * i + 1] = channels[1][i] * applied / 100; }
-    if (meter) meter.process(channels.map(channel => channel.subarray(offset, end)),
+    meter.process(channels.map(channel => channel.subarray(offset, end)),
       frame => { gain = controller.update(frame, 100 / preferred); },
       attackPower => { gain = controller.update({ attackPower }, 100 / preferred); });
-    else {
-      // Match the preserved browser's overlapping 4096-sample analysis window.
-      channels.forEach((channel, index) => {
-        const window = windows[index], samples = channel.subarray(Math.max(0, end - window.length), end);
-        window.fill(0);
-        window.set(samples, window.length - samples.length);
-      });
-      gain = controller.update(windows, (end - offset) / rate, 100 / preferred);
-    }
     const next = Math.max(1, Math.round(Math.min(100, preferred * gain)));
     // Volume increases retain the 50 ms output timer. Cuts bypass it.
-    if (!meter || next < applied || Math.floor(end / (rate * .05)) > Math.floor(offset / (rate * .05))) applied = next;
+    if (next < applied || Math.floor(end / (rate * .05)) > Math.floor(offset / (rate * .05))) applied = next;
     if (applied === 100) limited++;
     frames++;
   }
@@ -130,24 +118,18 @@ const rows = [];
 for (const [name, channels] of sources) {
   for (const preferred of [30, 40]) for (const level of [1, 0.45]) {
     const input = channels.map(channel => channel.map(value => value * level));
-    for (const engine of ['rms', 'lufs']) {
-      const result = render(input, preferred, engine);
-      const measured = meterReference(result.output.subarray(5 * rate * 2));
-      rows.push({ name, preferred, level, engine, integratedLufs: measured.integrated, limitedFraction: result.limitedFraction,
-        processingMs: result.processingMs, audioSeconds: input[0].length / rate });
-    }
+    const result = render(input, preferred);
+    const measured = meterReference(result.output.subarray(5 * rate * 2));
+    rows.push({ name, preferred, level, engine: 'lufs', integratedLufs: measured.integrated, limitedFraction: result.limitedFraction,
+      processingMs: result.processingMs, audioSeconds: input[0].length / rate });
   }
 }
 
 const summaries = [30, 40].map(preferred => {
-  const result = { preferred };
-  const paired = rows.filter(row => row.preferred === preferred && row.limitedFraction >= 0.01).map(row => `${row.name}:${row.level}`);
-  for (const engine of ['rms', 'lufs']) {
-    const selected = rows.filter(row => row.preferred === preferred && row.engine === engine && !paired.includes(`${row.name}:${row.level}`));
-    const values = selected.map(row => row.integratedLufs), mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-    result[engine] = { count: values.length, mean, spreadLU: Math.max(...values) - Math.min(...values), deviationLU: Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length) };
-  }
-  return result;
+  const selected = rows.filter(row => row.preferred === preferred && row.limitedFraction < 0.01);
+  const values = selected.map(row => row.integratedLufs), mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return { preferred, lufs: { count: values.length, mean, spreadLU: Math.max(...values) - Math.min(...values),
+    deviationLU: Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length) } };
 });
 // Exercise the sample-clocked path for 30 minutes without retaining audio or
 // frames. The processing ratio is diagnostic, not a machine-dependent test gate.

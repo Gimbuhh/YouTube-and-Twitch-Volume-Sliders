@@ -41,7 +41,8 @@ const attackResults = [];
 try {
   const cases = ['youtube', 'twitch'].flatMap(platform => [30, 40].map(preferred => [platform, preferred, 'lufs']));
   cases.push(['youtube', 30, 'csp'], ['twitch', 40, 'native'], ['twitch', 40, 'unsupported']);
-  for (const [platform, preferred, engine] of cases) {
+  const selectedCases = process.env.VOLUME_SLIDER_NORMALIZATION_CASES?.split(',');
+  for (const [platform, preferred, engine] of cases.filter(parts => !selectedCases || selectedCases.includes(parts.join('/')))) {
     const youtube = platform === 'youtube';
     const prefix = youtube ? 'yt' : 'twitch';
     const origin = youtube ? 'https://www.youtube.com' : 'https://www.twitch.tv';
@@ -193,16 +194,19 @@ try {
       await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred);
       await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/quiet.wav'; await v.play(); });
       await page.waitForFunction(preference => {
-        const target = 0.1 * preference / 100;
-        const output = .06 / Math.sqrt(2) * document.querySelector('video').volume;
-        return Math.abs(output / target - 1) < .1;
-      }, preferred, { timeout: 6000 });
+        // This tone is limited by the new boost ceiling. Compare integer
+        // player steps, allowing two steps for the asymptotic upward ramp.
+        const target = Math.min(100, Math.round(preference * 10 ** (6 / 20)));
+        const output = Math.round(document.querySelector('video').volume * 100);
+        return output >= target - 2 && output <= target;
+      }, preferred, { timeout: 10000 });
       assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
       assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
       const quietOutput = await page.evaluate(() => document.querySelector('video').volume);
-      assert.ok(quietOutput > preferred / 100 * 2, 'quiet source uses headroom beyond the old 2x cap');
+      assert.ok(quietOutput > preferred / 100 * 1.9, 'quiet source still receives useful boost');
+      assert.ok(quietOutput <= Math.min(100, Math.round(preferred * 10 ** (6 / 20))) / 100, 'quiet boost is capped before a louder sound can arrive');
       const differenceDb = 20 * Math.log10((.06 * quietOutput) / (.7 * loudOutput));
-      assert.ok(Math.abs(differenceDb) < 1.5, `${platform} ${preferred}%: actual captured quiet/loud sources converge within 1.5 dB (${differenceDb.toFixed(2)} dB; loud ${loudOutput}, quiet ${quietOutput})`);
+      assert.ok(Math.abs(differenceDb) < 2, `${platform} ${preferred}%: bounded boost keeps these quiet/loud sources within 2 dB (${differenceDb.toFixed(2)} dB; loud ${loudOutput}, quiet ${quietOutput})`);
       await page.waitForFunction(() => /Raising quiet audio/.test(document.querySelector('#tm-volume-options-normalization-details').textContent));
       if (process.env.VOLUME_SLIDER_SCREENSHOTS) {
         await page.locator('#tm-volume-options-normalization-details').scrollIntoViewIfNeeded();
@@ -213,7 +217,7 @@ try {
       // Source replacement alone cannot reproduce that gain-transition bug.
       await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/burst.wav'; await v.play(); });
       await page.waitForFunction(() => document.querySelector('video').currentTime >= 3.5);
-      assert.ok(await page.evaluate(() => document.querySelector('video').volume) > preferred / 100 * 1.5, 'the quiet lead-in has a meaningful boost');
+      assert.ok(Math.round(await page.evaluate(() => document.querySelector('video').volume) * 100) >= Math.round(preferred * 1.5), 'the quiet lead-in has at least 50% boost in native player steps');
       const burstTrace = await page.evaluate(() => new Promise(resolve => {
         const video = document.querySelector('video');
         const rows = [];
@@ -276,6 +280,19 @@ try {
       assert.ok(await page.evaluate(() => window.__normalizationStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended'))), 'source changes and disable stop captured tracks');
       assert.deepEqual(errors, []);
       console.log(`${platform} (${engine}) at ${preferred}%: loud output ${(loudOutput * 100).toFixed(0)}%, quiet output ${(quietOutput * 100).toFixed(0)}%, remaining difference ${differenceDb.toFixed(2)} dB; stereo, mute/preference and CORS fallback passed`);
+    } catch (error) {
+      console.error(`${platform}/${preferred}/${engine}:`, await page.evaluate(() => ({
+        time: document.querySelector('video').currentTime,
+        volume: document.querySelector('video').volume,
+        muted: document.querySelector('video').muted,
+        measuredSeconds: window.__lufsSeconds,
+        nativeFrames: window.__nativeFrames,
+        captures: window.__normalizationCaptures,
+        contexts: window.__normalizationContexts.map(context => context.state),
+        status: document.querySelector('#tm-volume-options-normalization-status')?.textContent,
+        details: document.querySelector('#tm-volume-options-normalization-details')?.textContent
+      })));
+      throw error;
     } finally { await context.close(); }
   }
 } finally {

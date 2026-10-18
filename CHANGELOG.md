@@ -6,7 +6,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Added
 
-- **Both:** **Auto-normalize volume** keeps sources closer in loudness, reacts quickly to loud spikes, and preserves the chosen slider value and mute state.
+- **Both:** **Auto-normalize volume** keeps sources closer in loudness, limits boost during quiet audio to reduce sudden jumps, and preserves the chosen slider value and mute state.
   - The option starts disabled, saves separately for each site, and shows its current status under General → Audio in Volume Slider Options.
   - Audio settings show the adjusted player volume.
   - A waveform icon on the volume control indicates when normalization is enabled.
