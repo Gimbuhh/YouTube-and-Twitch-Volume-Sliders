@@ -71,6 +71,60 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
 }
 
 for (const config of platforms) {
+  test(`${config.file}: audio feedback distinguishes unchanged volume from loudness matching`, async t => {
+    const f = await prepare(config, t);
+    f.audio.amplitude = .03; f.toggle.click(); await f.advance(30);
+    const status = f.document.getElementById('tm-volume-options-normalization-status');
+    const details = f.document.getElementById('tm-volume-options-normalization-details');
+    assert.equal(status.textContent, 'Active — at volume limit');
+    const slider = f.document.getElementById('tm-volume-slider-range');
+    slider.value = '100'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
+    await f.advance(.05);
+    assert.equal(status.textContent, 'Active');
+    assert.equal(details.textContent, 'No volume adjustment\nOutput 100% · Selected 100%');
+    assert.equal(f.document.querySelector('.tm-normalization-icon').hidden, false);
+    f.toggle.click(); assert.equal(f.rawVolume(), 100);
+  });
+
+  test(`${config.file}: native changes scale normalized volume without relearning the source`, async t => {
+    for (const mode of ['on', 'replace-native']) for (const delta of [-5, 5]) {
+      const f = await prepare(config, t);
+      // Move past player-startup/user-intent guards, using the same clock as
+      // the controlled audio frames rather than waiting for wall-clock time.
+      f.window.Date.now = () => 1e13 + f.window.performance.now();
+      const select = f.document.getElementById('tm-volume-options-mode');
+      select.value = mode; select.dispatchEvent(new f.window.Event('change', { bubbles: true }));
+      const slider = f.document.getElementById('tm-volume-slider-range');
+      slider.value = '30'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
+      slider.dispatchEvent(new f.window.Event('change', { bubbles: true }));
+      f.audio.amplitude = .17; f.toggle.click(); await f.advance();
+      const before = f.rawVolume(), requested = before + delta;
+      f.api.setVolume(requested / (config.file === 'youtube' ? 1 : 100));
+      await f.advance(.2);
+      const guarded = config.file === 'twitch' && mode === 'replace-native';
+      const preferred = guarded ? 30 : Math.round(30 * requested / before);
+      assert.equal(Number(slider.value), preferred);
+      assert.ok(Math.abs(f.rawVolume() - (guarded ? before : requested)) <= 1,
+        `${mode}: native ${before} → ${requested} settles at ${f.rawVolume()}`);
+      await new Promise(resolve => f.window.setTimeout(resolve, 400));
+      assert.equal(Number(f.window.localStorage.getItem(f.volumeKey)), preferred);
+      f.toggle.click(); assert.equal(f.rawVolume(), preferred);
+    }
+  });
+
+  test(`${config.file}: established quiet audio resumes after silence without losing boost`, async t => {
+    const f = await prepare(config, t);
+    f.audio.amplitude = .06; f.toggle.click(); await f.advance(30);
+    const before = f.rawVolume(); assert.ok(before > 50);
+    f.audio.amplitude = 0; await f.advance(4);
+    assert.equal(f.rawVolume(), before);
+    f.audio.amplitude = .06; await f.advance(.05);
+    assert.ok(Math.abs(f.rawVolume() - before) <= 1);
+    assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
+    assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
+    f.toggle.click(); assert.equal(f.rawVolume(), 50);
+  });
+
   test(`${config.file}: saved normalization starts before controls or document completion and keeps one capture on mount`, async t => {
     for (const beforeBody of [false, true]) {
       const f = await prepare(config, t, { saved: true, delayedControls: true, beforeBody });

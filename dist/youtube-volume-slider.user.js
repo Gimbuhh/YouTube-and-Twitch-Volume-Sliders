@@ -234,10 +234,10 @@
         }
         referenceHold *= 10 ** (-0.5 * dt / 10);
         const rollingReference = activeEnergy / activeDuration;
-        if (duration >= 1) referenceHold = frame.power >= referenceHold * 0.1 ? rollingReference : Math.max(referenceHold, rollingReference);
+        if (duration >= 1) referenceHold = Math.max(referenceHold, rollingReference);
         const reference = Math.max(rollingReference, referenceHold);
         let desired = Math.min(maxGain, maxBoost, Math.max(0.1, Math.sqrt(targetPower / reference)));
-        if (duration < 1) desired = Math.min(1, desired);
+        if (!referenceHold) desired = Math.min(1, desired);
         if (desired < programmeGain) programmeGain = desired;
         else {
           const seconds = time < 3 ? 0.9 : 3;
@@ -411,7 +411,7 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
     function getDetails() {
       if (!session || !status.startsWith("Active")) return "";
       const { preferred, applied } = session;
-      const action = applied < preferred ? "Reducing loud audio" : applied > preferred ? "Raising quiet audio" : "Near target";
+      const action = applied < preferred ? "Reducing loud audio" : applied > preferred ? "Raising quiet audio" : "No volume adjustment";
       return `${action}
 Output ${applied}% \xB7 Selected ${preferred}%`;
     }
@@ -429,21 +429,23 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       if (owned.writing) return owned.preferred;
       const actual = clampVolume(rawVolume ?? getVolume(owned.video));
       if (Math.abs(actual - owned.applied) > 0.6) {
-        owned.preferred = actual;
+        owned.preferred = Math.round(clampVolume(owned.applied > 0 ? owned.preferred * actual / owned.applied : actual));
         owned.applied = actual;
-        owned.gain = 1;
-        owned.lufsTracker = null;
+        owned.lastWriteAt = window2.performance.now();
       }
       return owned.preferred;
     }
-    function writeOutput(owned, value) {
+    function writeOutput(owned, value, gradual = false) {
       const next = outputPercent(value);
       if (next === owned.applied) return;
+      const now = window2.performance.now();
+      if (gradual && next > owned.applied && owned.applied > 0 && next / owned.applied < 10 ** (0.5 / 20) && now - owned.lastWriteAt < 150) return;
       const previous = owned.applied;
       owned.applied = next;
       owned.writing = true;
       try {
         setVolume(owned.video, next, { preserveMute: true });
+        owned.lastWriteAt = now;
       } catch (error) {
         owned.applied = previous;
         throw error;
@@ -616,9 +618,9 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           report("Starting audio analysis");
           return;
         }
-        writeOutput(owned, owned.preferred * owned.gain);
+        writeOutput(owned, owned.preferred * owned.gain, true);
         if (now - owned.analysisStarted >= 3e3) owned.retryDelay = 1e3;
-        report(owned.applied === 100 && owned.gain > 1 ? "Active \u2014 at volume limit" : "Active");
+        report(owned.applied === 100 && owned.applied > owned.preferred ? "Active \u2014 at volume limit" : "Active");
       } catch {
         unavailable(owned);
       }
@@ -649,6 +651,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         preferred,
         applied: preferred,
         gain: 1,
+        lastWriteAt: -Infinity,
         blocked: false,
         retryAt: 0,
         retryDelay: 1e3
@@ -703,6 +706,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           owned.preferred = output;
           output = outputPercent(output * owned.gain);
           owned.applied = output;
+          owned.lastWriteAt = window2.performance.now();
           owned.writing = true;
         }
         try {

@@ -59,7 +59,7 @@ function render(channels, preferred) {
   const frameLength = rate / 200;
   const output = new Float32Array(channels[0].length * 2);
   const meter = createLufsMeter(rate), controller = createLufsGainController();
-  let applied = preferred, gain = 1, limited = 0, frames = 0;
+  let applied = preferred, gain = 1, limited = 0, frames = 0, lastWrite = -Infinity;
   const start = performance.now();
   for (let offset = 0; offset < channels[0].length; offset += frameLength) {
     const end = Math.min(offset + frameLength, channels[0].length);
@@ -68,8 +68,14 @@ function render(channels, preferred) {
       frame => { gain = controller.update(frame, 100 / preferred); },
       attackPower => { gain = controller.update({ attackPower }, 100 / preferred); });
     const next = Math.max(1, Math.round(Math.min(100, preferred * gain)));
-    // Volume increases retain the 50 ms output timer. Cuts bypass it.
-    if (next < applied || Math.floor(end / (rate * .05)) > Math.floor(offset / (rate * .05))) applied = next;
+    // Match the native writer: increases use 50 ms ticks and coalesce small
+    // recovery steps for at most 150 ms. Every cut still bypasses the timer.
+    const outputTick = Math.floor(end / (rate * .05)) > Math.floor(offset / (rate * .05));
+    const increaseReady = next / applied >= 10 ** (.5 / 20) || end - lastWrite >= rate * .15;
+    if (next < applied || (next > applied && outputTick && increaseReady)) {
+      applied = next;
+      lastWrite = end;
+    }
     if (applied === 100) limited++;
     frames++;
   }

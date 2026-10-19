@@ -8,7 +8,8 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 - **Both:** **Auto-normalize volume** keeps sources closer in loudness, limits boost during quiet audio to reduce sudden jumps, and preserves the chosen slider value and mute state.
   - The option starts disabled, saves separately for each site, and shows its current status under General → Audio in Volume Slider Options.
-  - Audio settings show the adjusted player volume.
+  - Audio settings show the adjusted player volume. Native controls adjust the chosen listening level.
+  - Normalization remembers recent louder audio through quieter passages and silent gaps.
   - Analysis starts without waiting for player controls to load; native capture needs no extra activation click.
   - Temporary audio access failures retry automatically.
   - A waveform icon shows normalization is on, including during pause and mute, and hides if analysis is blocked or unavailable.

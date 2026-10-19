@@ -158,16 +158,17 @@ export function createLufsGainController() {
         activeDuration += item.duration;
         activeEnergy += item.power * item.duration;
       }
-      // Keep ordinary programme tracking, but do not let distinctly quieter
-      // background erase established speech after the three-second window.
-      // That hold releases by 0.5 LU/s; silence and source resets stay separate.
+      // Remember established programme loudness across quieter backgrounds,
+      // including ordinary game audio only a few LU below speech. Release
+      // by 0.5 LU/s; silence holds the reference and source resets discard it.
       referenceHold *= 10 ** (-.5 * dt / 10);
       const rollingReference = activeEnergy / activeDuration;
-      if (duration >= 1) referenceHold = frame.power >= referenceHold * .1
-        ? rollingReference : Math.max(referenceHold, rollingReference);
+      if (duration >= 1) referenceHold = Math.max(referenceHold, rollingReference);
       const reference = Math.max(rollingReference, referenceHold);
       let desired = Math.min(maxGain, maxBoost, Math.max(0.1, Math.sqrt(targetPower / reference)));
-      if (duration < 1) desired = Math.min(1, desired);
+      // Silence may expire rolling history, but an established source must
+      // not lose its boost and repeat the initial measurement gate afterward.
+      if (!referenceHold) desired = Math.min(1, desired);
       if (desired < programmeGain) programmeGain = desired;
       else {
         const seconds = time < 3 ? 0.9 : 3;

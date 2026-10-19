@@ -214,6 +214,52 @@ test('quiet backgrounds do not erase established speech level before the next wo
   }
 });
 
+test('moderately quieter backgrounds retain speech reference and sustained quiet material eventually regains boost', () => {
+  const target = 10 ** ((-18 + .691) / 10);
+  for (const speechPower of [target, target * 2]) for (const preferred of [30, 40]) {
+    const controller = createLufsGainController();
+    const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: .05 }, 100 / preferred);
+    for (let i = 0; i < 80; i++) update(speechPower);
+    let gain;
+    for (let i = 0; i < 160; i++) gain = update(speechPower * 10 ** (-5 / 10));
+    assert.ok(10 * Math.log10(speechPower / target * gain ** 2) < 3,
+      'the returning voice starts within 3 dB before any reactive measurement');
+    // Sustained quiet material must eventually regain useful boost instead
+    // of a previous loud source setting the listening level indefinitely.
+    for (let i = 0; i < 600; i++) gain = update(target / 16);
+    assert.ok(20 * Math.log10(gain) > 5.5);
+  }
+});
+
+test('established speech returns within 3 dB across all 50 meter phases before a reactive cut', () => {
+  const rate = 48000;
+  for (const voice of [-18, -15]) for (let phase = 0; phase < 50; phase++) {
+    const controller = createLufsGainController(), meter = createLufsMeter(rate);
+    let gain = 1;
+    const update = frame => { gain = controller.update(frame, 100 / 30); };
+    const process = signal => meter.process([signal, signal], update, attackPower => update({ attackPower }));
+    process(tone(rate, 4, 10 ** (voice / 20)));
+    process(tone(rate, 8 + phase / 1000, 10 ** ((voice - 5) / 20)));
+    assert.ok(voice + 18 + 20 * Math.log10(gain) < 3, `${voice} LUFS speech, ${phase} ms phase`);
+  }
+});
+
+test('repeated brief effects do not cause multi-decibel boost pumping between events', () => {
+  const rate = 48000, controller = createLufsGainController(), meter = createLufsMeter(rate);
+  let gain = 1;
+  const update = frame => { gain = controller.update(frame, 100 / 30); };
+  const process = signal => meter.process([signal, signal], update, attackPower => update({ attackPower }));
+  process(tone(rate, 10, 10 ** (-24 / 20)));
+  const backgroundGains = [];
+  for (let ms = 0; ms < 6000; ms += 5) {
+    const effect = ms % 500 < 20;
+    process(tone(rate, .005, 10 ** ((effect ? -18 : -24) / 20)));
+    if (!effect) backgroundGains.push(20 * Math.log10(gain));
+  }
+  assert.ok(Math.min(...backgroundGains) > 4, 'brief effects do not repeatedly remove all quiet-source boost');
+  assert.ok(Math.max(...backgroundGains) - Math.min(...backgroundGains) < 1.5);
+});
+
 test('a cut recovers attenuation quickly but does not immediately restore a large boost', () => {
   const target = 10 ** ((-18 + .691) / 10);
   const controller = createLufsGainController();
@@ -261,4 +307,24 @@ test('one loud startup frame does not become a lasting reference for a quiet sou
   let gain;
   for (let i = 0; i < 100; i++) gain = controller.update({ power: target / 4, rawPower: target / 8, momentaryPower: target / 4, duration: .05 }, 5);
   assert.ok(gain > 1, 'a brief startup event must not keep a quieter recording attenuated');
+});
+
+test('established quiet-source boost survives silence without restarting the startup gate', () => {
+  const target = 10 ** ((-18 + .691) / 10);
+  for (const seconds of [1, 3.5, 10]) {
+    const controller = createLufsGainController();
+    const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: .05 });
+    let gain;
+    for (let i = 0; i < 600; i++) gain = update(target / 4);
+    const established = gain;
+    for (let i = 0; i < seconds * 20; i++) assert.equal(update(0), established);
+    for (let i = 0; i < 20; i++) {
+      gain = update(target / 4);
+      assert.ok(Math.abs(20 * Math.log10(gain / established)) < .5, `${seconds}s gap, returning frame ${i}`);
+    }
+    assert.ok(update(target * 16) <= .25, 'preserving boost must not weaken loud-return protection');
+  }
+  const fresh = createLufsGainController();
+  for (let i = 0; i < 100; i++) fresh.update({ power: 0, rawPower: 0, duration: .05 });
+  for (let i = 0; i < 19; i++) assert.equal(fresh.update({ power: target / 4, rawPower: target / 8, duration: .05 }), 1);
 });

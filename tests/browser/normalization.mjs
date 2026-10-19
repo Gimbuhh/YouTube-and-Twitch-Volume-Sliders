@@ -32,7 +32,9 @@ function wav(amplitude, channels = 1, frequency = 440) {
 
 const loud = wav(0.7), quiet = wav(0.06), stereo = wav(0.7, 2);
 const burst = wav(time => time < 4 ? 0.06 : 0.7);
-const speechReturn = wav(time => time < 4 || time >= 9 ? .2 : .02);
+// An ordinary background only 5 LU below speech catches reference loss that
+// the previous very quiet background (20 LU below speech) did not expose.
+const speechReturn = wav(time => time < 4 || time >= 9 ? .2 : .2 * 10 ** (-5 / 20));
 // Continuous audible tone with a changing envelope, never digital silence.
 const soft = wav(time => 0.016 + 0.012 * Math.sin(2 * Math.PI * time));
 const bass = wav(0.2, 1, 80), high = wav(0.2, 1, 4000);

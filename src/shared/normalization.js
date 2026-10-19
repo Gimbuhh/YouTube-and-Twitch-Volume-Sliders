@@ -19,7 +19,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
   function getDetails() {
     if (!session || !status.startsWith('Active')) return '';
     const { preferred, applied } = session;
-    const action = applied < preferred ? 'Reducing loud audio' : applied > preferred ? 'Raising quiet audio' : 'Near target';
+    const action = applied < preferred ? 'Reducing loud audio' : applied > preferred ? 'Raising quiet audio' : 'No volume adjustment';
     return `${action}\nOutput ${applied}% · Selected ${preferred}%`;
   }
 
@@ -38,22 +38,30 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     if (owned.writing) return owned.preferred;
     const actual = clampVolume(rawVolume ?? getVolume(owned.video));
     if (Math.abs(actual - owned.applied) > 0.6) {
-      // A native control or the site changed volume. That becomes new intent.
-      owned.preferred = actual;
+      // Native controls start from corrected output. Preserve their relative
+      // adjustment and the established source analysis instead of normalizing
+      // the same correction twice. Zero has no meaningful output ratio.
+      owned.preferred = Math.round(clampVolume(owned.applied > 0
+        ? owned.preferred * actual / owned.applied : actual));
       owned.applied = actual;
-      owned.gain = 1;
-      owned.lufsTracker = null;
+      owned.lastWriteAt = window.performance.now();
     }
     return owned.preferred;
   }
 
-  function writeOutput(owned, value) {
+  function writeOutput(owned, value, gradual = false) {
     const next = outputPercent(value);
     if (next === owned.applied) return;
+    const now = window.performance.now();
+    // Coalesce sub-0.5 dB recovery steps for at most 150 ms. Cuts, explicit
+    // input and restoration stay immediate; the existing timer finishes even
+    // the last small increase without allocating another timer or queue.
+    if (gradual && next > owned.applied && owned.applied > 0 &&
+        next / owned.applied < 10 ** (.5 / 20) && now - owned.lastWriteAt < 150) return;
     const previous = owned.applied;
     owned.applied = next; // Own synchronous and queued volumechange events.
     owned.writing = true;
-    try { setVolume(owned.video, next, { preserveMute: true }); }
+    try { setVolume(owned.video, next, { preserveMute: true }); owned.lastWriteAt = now; }
     catch (error) { owned.applied = previous; throw error; }
     finally { owned.writing = false; }
   }
@@ -214,10 +222,10 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         report('Starting audio analysis');
         return;
       }
-      writeOutput(owned, owned.preferred * owned.gain);
+      writeOutput(owned, owned.preferred * owned.gain, true);
       if (now - owned.analysisStarted >= 3000) owned.retryDelay = 1000;
       // A quiet measurement does not mean the live capture source disappeared.
-      report(owned.applied === 100 && owned.gain > 1 ? 'Active — at volume limit' : 'Active');
+      report(owned.applied === 100 && owned.applied > owned.preferred ? 'Active — at volume limit' : 'Active');
     } catch {
       unavailable(owned);
     }
@@ -244,7 +252,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     }
     const preferred = clampVolume(getVolume(video));
     const owned = session = {
-      video, preferred, applied: preferred, gain: 1, blocked: false, retryAt: 0, retryDelay: 1000
+      video, preferred, applied: preferred, gain: 1, lastWriteAt: -Infinity, blocked: false, retryAt: 0, retryDelay: 1000
     };
     owned.reset = () => {
       try { restore(owned); }
@@ -288,6 +296,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         owned.preferred = output;
         output = outputPercent(output * owned.gain);
         owned.applied = output;
+        owned.lastWriteAt = window.performance.now();
         owned.writing = true;
       }
       try { setVolume(video, output, options); }

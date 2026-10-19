@@ -21,7 +21,7 @@ function fixture() {
   const normalizer = createVolumeNormalizer({
     window, getVolume: () => { if (errors.read) throw errors.read; return raw; }, isMuted: () => video.muted,
     onStatusChanged: () => statuses.push(normalizer.getStatus()),
-    setVolume: (target, value, options) => { if (errors.write) throw errors.write; assert.equal(target, video); raw = value; writes.push({ value, options }); }
+    setVolume: (target, value, options) => { if (errors.write) throw errors.write; assert.equal(target, video); raw = value; writes.push({ value, options, time: now }); }
   });
   const advance = async (seconds = 5) => {
     for (let i = 0; i < seconds * 20; i++) {
@@ -236,7 +236,7 @@ test('ordinary fast measurements avoid player API reads without losing native in
   f.nativeVolume(70);
   port.onmessage({ data: { attackPower: 10 } });
   assert.ok(f.raw < 20);
-  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 70);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 100);
   f.normalizer.setEnabled(false);
 });
 
@@ -302,19 +302,84 @@ test('default off allocates nothing; enabling adjusts output without changing th
   assert.ok(f.audio.streams[0].getTracks().every(track => track.readyState === 'ended'));
 });
 
-test('custom and native volume changes become preferred intent; output is capped at 100', async () => {
+test('custom volume changes are absolute; native changes scale intent and output is capped at 100', async () => {
   const f = fixture(); await f.start(); await f.advance();
   f.normalizer.setPreferredVolume(f.video, 40, { preserveMute: true });
   assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 40);
   assert.ok(f.raw < 40);
   f.nativeVolume(70);
-  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 70);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 100);
+  f.normalizer.setPreferredVolume(f.video, 70, { preserveMute: true });
+  f.video.dispatchEvent(new Event('emptied'));
   f.audio.amplitude = 0.02; await f.advance(30);
   assert.equal(f.raw, 100);
   assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 70);
   assert.equal(f.normalizer.getStatus(), 'Active — at volume limit');
   f.normalizer.setEnabled(false);
   assert.equal(f.raw, 70);
+});
+
+test('native adjustments retain established leveling and scale the preferred listening level', async () => {
+  for (const amplitude of [.17, .03]) for (const delta of [-5, 5]) {
+    const f = fixture(); f.audio.amplitude = amplitude;
+    f.nativeVolume(30); await f.start(); await f.advance(30);
+    const before = f.raw, requested = before + delta;
+    f.nativeVolume(requested);
+    const preferred = Math.round(30 * requested / before);
+    assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), preferred);
+    assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), preferred, 'repeated reads do not compound intent');
+    await f.advance(.2);
+    assert.ok(Math.abs(f.raw - requested) <= 1, `${amplitude}: native ${before} → ${requested} settles at ${f.raw}`);
+    assert.equal(Math.sign(f.raw - before), Math.sign(delta));
+    f.normalizer.setEnabled(false);
+    assert.equal(f.raw, preferred);
+  }
+});
+
+test('native zero, unzero and clamped intent remain finite and preserve mute', async () => {
+  const f = fixture(); await f.start(); await f.advance();
+  f.nativeVolume(0); await f.advance(.1);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 0); assert.equal(f.raw, 0);
+  f.nativeVolume(40);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 40);
+  await f.advance(.2); assert.ok(f.raw > 0 && f.raw < 40);
+  f.nativeVolume(100);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 100);
+  f.video.muted = true; f.normalizer.setEnabled(false);
+  assert.equal(f.raw, 100); assert.equal(f.video.muted, true);
+});
+
+test('unchanged output describes adjustment rather than claiming measured loudness is on target', async () => {
+  const f = fixture(); f.audio.amplitude = .03;
+  await f.start(); await f.advance(30);
+  assert.equal(f.normalizer.getStatus(), 'Active — at volume limit');
+  f.normalizer.setPreferredVolume(f.video, 100, { preserveMute: true });
+  await f.advance(.05);
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.equal(f.normalizer.getDetails(), 'No volume adjustment\nOutput 100% · Selected 100%');
+  await f.advance(1);
+  assert.equal(f.normalizer.getDetails(), 'No volume adjustment\nOutput 100% · Selected 100%');
+  f.normalizer.setEnabled(false);
+});
+
+test('gradual recovery coalesces small writes, settles promptly and never delays cuts or user input', async t => {
+  const f = fixture(), target = 10 ** ((-18 + .691) / 10);
+  f.nativeVolume(100); f.audio.amplitude = Math.sqrt(target / 2);
+  await f.start(); await f.advance(5); f.writes.length = 0;
+  const port = f.audio.nodes[0].port;
+  port.onmessage({ data: { attackPower: 10 } });
+  assert.equal(f.raw, 10, 'protective cut is immediate');
+  await f.advance(3);
+  const busySecond = Math.max(...f.writes.map(write => f.writes.filter(next => next.time >= write.time && next.time < write.time + 1000).length));
+  t.diagnostic(`protective-cut recovery: ${f.writes.length} writes in 3s, busiest second ${busySecond}`);
+  assert.ok(busySecond <= 15, `recovery writes per second: ${busySecond}`);
+  assert.equal(f.raw, 100, 'the final small increase must not remain stuck in the deadband');
+  port.onmessage({ data: { attackPower: 10 } });
+  assert.equal(f.raw, 10, 'another cut bypasses the write interval');
+  f.normalizer.setPreferredVolume(f.video, 50, { preserveMute: true });
+  assert.equal(f.raw, 5, 'explicit custom input is immediate');
+  f.normalizer.setEnabled(false);
+  assert.equal(f.raw, 50, 'restoration is immediate');
 });
 
 test('pause and mute stop adjustments; zero preference remains zero', async () => {
