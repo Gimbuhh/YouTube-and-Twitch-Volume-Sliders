@@ -10,7 +10,7 @@ const platforms = [
   { file: 'twitch', prefix: 'twitch', url: 'https://www.twitch.tv/test', fixture: twitchFixture }
 ];
 
-async function prepare(config, t, { saved = false, blockedStorage = false, delayedControls = false, beforeBody = false } = {}) {
+async function prepare(config, t, { saved = false, blockedStorage = false, delayedControls = false, beforeBody = false, controlledTime = false } = {}) {
   const runtime = createRuntime(config.url, { runScripts: 'outside-only' });
   t.after(() => runtime.close());
   const { video, player, state } = config.fixture(runtime.document);
@@ -32,11 +32,15 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
   }
   let now = 0;
   Object.defineProperty(runtime.window.performance, 'now', { value: () => now });
+  if (controlledTime) {
+    const epoch = runtime.window.Date.now();
+    runtime.window.Date.now = () => epoch + now;
+  }
   const ticks = new Map();
   const originalSetInterval = runtime.window.setInterval.bind(runtime.window);
   const originalClearInterval = runtime.window.clearInterval.bind(runtime.window);
   runtime.window.setInterval = (callback, delay, ...args) => {
-    if (delay <= 100) {
+    if (controlledTime || delay <= 100) {
       const id = originalSetInterval(() => {}, 100000);
       ticks.set(id, { callback: () => callback(...args), delay, next: now + delay });
       return id;
@@ -44,14 +48,26 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
     return originalSetInterval(callback, delay, ...args);
   };
   runtime.window.clearInterval = id => { ticks.delete(id); originalClearInterval(id); };
+  if (controlledTime) {
+    // Startup restoration and persistence must use the audio clock too.
+    // Mixing real timeouts with virtual Date.now lets slow CI restore the
+    // old preference during a supposedly post-startup native adjustment.
+    runtime.window.setTimeout = (callback, delay = 0, ...args) => {
+      const id = originalSetInterval(() => {}, 100000);
+      ticks.set(id, { callback: () => callback(...args), next: now + delay, once: true });
+      return id;
+    };
+    runtime.window.clearTimeout = runtime.window.clearInterval;
+  }
   const advance = async (seconds = 7) => {
     await new Promise(resolve => setImmediate(resolve));
     for (let i = 0; i < seconds * 20; i++) {
       now += 50;
       await new Promise(resolve => setImmediate(resolve));
-      for (const tick of ticks.values()) {
-        if (now < tick.next) continue;
-        tick.next += tick.delay;
+      for (const [id, tick] of [...ticks]) {
+        if (!ticks.has(id) || now < tick.next) continue;
+        if (tick.once) { ticks.delete(id); originalClearInterval(id); }
+        else tick.next += tick.delay;
         tick.callback();
       }
     }
@@ -88,10 +104,7 @@ for (const config of platforms) {
 
   test(`${config.file}: native changes scale normalized volume without relearning the source`, async t => {
     for (const mode of ['on', 'replace-native']) for (const delta of [-5, 5]) {
-      const f = await prepare(config, t);
-      // Move past player-startup/user-intent guards, using the same clock as
-      // the controlled audio frames rather than waiting for wall-clock time.
-      f.window.Date.now = () => 1e13 + f.window.performance.now();
+      const f = await prepare(config, t, { controlledTime: true });
       const select = f.document.getElementById('tm-volume-options-mode');
       select.value = mode; select.dispatchEvent(new f.window.Event('change', { bubbles: true }));
       const slider = f.document.getElementById('tm-volume-slider-range');
@@ -106,7 +119,6 @@ for (const config of platforms) {
       assert.equal(Number(slider.value), preferred);
       assert.ok(Math.abs(f.rawVolume() - (guarded ? before : requested)) <= 1,
         `${mode}: native ${before} → ${requested} settles at ${f.rawVolume()}`);
-      await new Promise(resolve => f.window.setTimeout(resolve, 400));
       assert.equal(Number(f.window.localStorage.getItem(f.volumeKey)), preferred);
       f.toggle.click(); assert.equal(f.rawVolume(), preferred);
     }
