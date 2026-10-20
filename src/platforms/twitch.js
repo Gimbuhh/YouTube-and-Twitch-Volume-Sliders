@@ -1,4 +1,6 @@
 import { createVolumeNormalizer } from '../shared/normalization.js';
+import { bindNativeVolumeInput } from '../shared/native-volume-input.js';
+import { focusedTwitchExtensionKey } from './twitch-extension-keys.js';
 import { updateNormalizationIcon } from '../shared/normalization-ui.js';
 import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
@@ -1241,7 +1243,7 @@ export function startTwitchVolumeSlider() {
             if (!direction) return;
             event.preventDefault();
             event.stopPropagation();
-            const currentValue = Number(slider.value) || 0;
+            const currentValue = getUnderlyingVolume(video);
             const nextValue = clampVolume(currentValue + (direction * KEYBOARD_VOLUME_STEP));
             if (nextValue === currentValue) return;
             markUserVolumeIntent();
@@ -1269,6 +1271,21 @@ export function startTwitchVolumeSlider() {
             applyKeyboardVolumeStep(event);
         };
         document.addEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
+        const onExtensionKey = event => {
+            const key = focusedTwitchExtensionKey(event, getPlayerContainer(video) || player);
+            if (!key || isOptionsPopupOpen()) return;
+            if (key === ' ') {
+                if (video.paused) {
+                    video.play().catch(() => {});
+                } else {
+                    video.pause();
+                }
+            } else {
+                applyKeyboardVolumeStep({ key, preventDefault() {}, stopPropagation() {} });
+            }
+        };
+        window.addEventListener('message', onExtensionKey);
+        cleanupRegistry.add(() => window.removeEventListener('message', onExtensionKey));
 
         cleanupRegistry.add(bindWheelVolumeStep({
             target: iconCell,
@@ -1348,6 +1365,8 @@ export function startTwitchVolumeSlider() {
             } catch (e) { /* prevent crash */ }
         };
         video.addEventListener('volumechange', onVideoVolumeChange);
+        cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: '[data-a-target="player-volume-slider"]', normalizer,
+            onChange: () => { markUserVolumeIntent(); onVideoVolumeChange(); } }));
 
         const onLayoutChange = () => {
             if (!overlay.isConnected) return;

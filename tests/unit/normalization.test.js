@@ -31,7 +31,7 @@ function fixture() {
     }
   };
   const start = async () => { normalizer.setEnabled(true); normalizer.bind(video); await new Promise(resolve => setImmediate(resolve)); };
-  return { window, video, audio, normalizer, timers, writes, statuses, errors, advance, start, jump(seconds) { now += seconds * 1000; }, get raw() { return raw; }, nativeVolume(value) { raw = value; } };
+  return { window, video, audio, normalizer, timers, writes, statuses, errors, advance, start, jump(seconds) { now += seconds * 1000; }, get raw() { return raw; }, nativeVolume(value) { raw = value; normalizer.acceptNativeVolume(video); }, siteVolume(value) { raw = value; } };
 }
 
 function nativeCaptureWithSuspendedContext(f, blockedWorklet = false) {
@@ -347,6 +347,22 @@ test('native zero, unzero and clamped intent remain finite and preserve mute', a
   assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 100);
   f.video.muted = true; f.normalizer.setEnabled(false);
   assert.equal(f.raw, 100); assert.equal(f.video.muted, true);
+});
+
+test('passive player writes and source restarts never become selected-volume intent', async () => {
+  const f = fixture(); f.nativeVolume(25); f.audio.amplitude = .17;
+  await f.start(); await f.advance();
+  const corrected = f.raw;
+  for (const type of [null, 'emptied', 'loadstart']) {
+    f.siteVolume(corrected - 1);
+    assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 25, 'a one-step site write is not user input');
+    if (type) f.video.dispatchEvent(new Event(type));
+    await f.advance(.2);
+    assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 25);
+    assert.equal(f.raw, corrected);
+  }
+  f.normalizer.setEnabled(false);
+  assert.equal(f.raw, 25);
 });
 
 test('unchanged output describes adjustment rather than claiming measured loudness is on target', async () => {

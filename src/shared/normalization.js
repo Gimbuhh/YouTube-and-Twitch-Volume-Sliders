@@ -37,21 +37,16 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
   function readPreferred(owned, rawVolume) {
     if (owned.writing) return owned.preferred;
     const actual = clampVolume(rawVolume ?? getVolume(owned.video));
-    if (Math.abs(actual - owned.applied) > 0.6) {
-      // Native controls start from corrected output. Preserve their relative
-      // adjustment and the established source analysis instead of normalizing
-      // the same correction twice. Zero has no meaningful output ratio.
-      owned.preferred = Math.round(clampVolume(owned.applied > 0
-        ? owned.preferred * actual / owned.applied : actual));
-      owned.applied = actual;
-      owned.lastWriteAt = window.performance.now();
-    }
+    // Stream replacement and site restoration also write native volume. Only
+    // explicit native-control input may change intent; repair passive writes
+    // on the existing output tick, even when its desired output is unchanged.
+    owned.outputChanged = Math.abs(actual - owned.applied) > .6;
     return owned.preferred;
   }
 
   function writeOutput(owned, value, gradual = false) {
     const next = outputPercent(value);
-    if (next === owned.applied) return;
+    if (next === owned.applied && !owned.outputChanged) return;
     const now = window.performance.now();
     // Coalesce sub-0.5 dB recovery steps for at most 150 ms. Cuts, explicit
     // input and restoration stay immediate; the existing timer finishes even
@@ -61,7 +56,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     const previous = owned.applied;
     owned.applied = next; // Own synchronous and queued volumechange events.
     owned.writing = true;
-    try { setVolume(owned.video, next, { preserveMute: true }); owned.lastWriteAt = now; }
+    try { setVolume(owned.video, next, { preserveMute: true }); owned.lastWriteAt = now; owned.outputChanged = false; }
     catch (error) { owned.applied = previous; throw error; }
     finally { owned.writing = false; }
   }
@@ -289,6 +284,18 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     getPreferredVolume(video, rawVolume) {
       return session?.video === video ? readPreferred(session, rawVolume) : rawVolume;
     },
+    acceptNativeVolume(video) {
+      const owned = session?.video === video ? session : null;
+      if (!owned || owned.writing) return;
+      const actual = clampVolume(getVolume(video));
+      if (Math.abs(actual - owned.applied) > .6) {
+        owned.preferred = Math.round(clampVolume(owned.applied > 0
+          ? owned.preferred * actual / owned.applied : actual));
+        owned.applied = actual;
+        owned.lastWriteAt = window.performance.now();
+      }
+      owned.outputChanged = false;
+    },
     setPreferredVolume(video, value, options) {
       let output = clampVolume(value);
       const owned = session?.video === video ? session : null;
@@ -296,6 +303,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         owned.preferred = output;
         output = outputPercent(output * owned.gain);
         owned.applied = output;
+        owned.outputChanged = false;
         owned.lastWriteAt = window.performance.now();
         owned.writing = true;
       }

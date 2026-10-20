@@ -6,6 +6,7 @@
 // @author       Gimbuhh (Made using AI)
 // @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
 // @match        https://www.twitch.tv/*
+// @match        https://*.ext-twitch.tv/*
 // @updateURL    https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
 // @downloadURL  https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
 // @run-at       document-start
@@ -312,8 +313,10 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
       },
       dispose() {
         disposed = true;
-        if (reader) reader.cancel().catch(() => {
-        });
+        if (reader) {
+          reader.cancel().catch(() => {
+          });
+        }
         releaseNode();
       }
     };
@@ -428,16 +431,12 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     function readPreferred(owned, rawVolume) {
       if (owned.writing) return owned.preferred;
       const actual = clampVolume(rawVolume ?? getVolume(owned.video));
-      if (Math.abs(actual - owned.applied) > 0.6) {
-        owned.preferred = Math.round(clampVolume(owned.applied > 0 ? owned.preferred * actual / owned.applied : actual));
-        owned.applied = actual;
-        owned.lastWriteAt = window2.performance.now();
-      }
+      owned.outputChanged = Math.abs(actual - owned.applied) > 0.6;
       return owned.preferred;
     }
     function writeOutput(owned, value, gradual = false) {
       const next = outputPercent(value);
-      if (next === owned.applied) return;
+      if (next === owned.applied && !owned.outputChanged) return;
       const now = window2.performance.now();
       if (gradual && next > owned.applied && owned.applied > 0 && next / owned.applied < 10 ** (0.5 / 20) && now - owned.lastWriteAt < 150) return;
       const previous = owned.applied;
@@ -446,6 +445,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       try {
         setVolume(owned.video, next, { preserveMute: true });
         owned.lastWriteAt = now;
+        owned.outputChanged = false;
       } catch (error) {
         owned.applied = previous;
         throw error;
@@ -699,6 +699,17 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       getPreferredVolume(video, rawVolume) {
         return session?.video === video ? readPreferred(session, rawVolume) : rawVolume;
       },
+      acceptNativeVolume(video) {
+        const owned = session?.video === video ? session : null;
+        if (!owned || owned.writing) return;
+        const actual = clampVolume(getVolume(video));
+        if (Math.abs(actual - owned.applied) > 0.6) {
+          owned.preferred = Math.round(clampVolume(owned.applied > 0 ? owned.preferred * actual / owned.applied : actual));
+          owned.applied = actual;
+          owned.lastWriteAt = window2.performance.now();
+        }
+        owned.outputChanged = false;
+      },
       setPreferredVolume(video, value, options) {
         let output = clampVolume(value);
         const owned = session?.video === video ? session : null;
@@ -706,6 +717,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           owned.preferred = output;
           output = outputPercent(output * owned.gain);
           owned.applied = output;
+          owned.outputChanged = false;
           owned.lastWriteAt = window2.performance.now();
           owned.writing = true;
         }
@@ -716,6 +728,70 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         }
       }
     };
+  }
+
+  // src/shared/native-volume-input.js
+  function bindNativeVolumeInput({ window: window2, video, player, selector, normalizer, onChange }) {
+    let active = true;
+    const types = ["pointerdown", "pointermove", "input", "change", "wheel", "keydown"];
+    const onInput = (event) => {
+      if (!event.target?.closest?.(selector) || !player.contains(event.target)) return;
+      if (event.type === "pointermove" && !event.buttons) return;
+      if (event.type === "keydown" && !["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) return;
+      window2.queueMicrotask(() => {
+        if (!active || !video.isConnected) return;
+        normalizer.acceptNativeVolume(video);
+        onChange();
+      });
+    };
+    for (const type of types) window2.document.addEventListener(type, onInput, true);
+    return () => {
+      active = false;
+      for (const type of types) window2.document.removeEventListener(type, onInput, true);
+    };
+  }
+
+  // src/platforms/twitch-extension-keys.js
+  var messageType = "tm-volume-player-key-v1";
+  var playerKeys = /* @__PURE__ */ new Set(["ArrowUp", "ArrowDown", " "]);
+  var recentCommands = /* @__PURE__ */ new WeakMap();
+  var extensionOrigin = (origin) => /^https:\/\/[a-z0-9-]+\.ext-twitch\.tv$/i.test(origin);
+  var interactive = 'input, textarea, select, button, a[href], [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="button"], [role="slider"], [role="combobox"]';
+  function validMessage(event) {
+    return extensionOrigin(event.origin) && event.data?.type === messageType && typeof event.data.id === "string" && event.data.id.length > 0 && event.data.id.length <= 64 && playerKeys.has(event.data.key) && !(event.data.key === " " && event.data.repeat);
+  }
+  function startTwitchExtensionKeys(window2) {
+    if (window2.parent === window2 || !extensionOrigin(window2.location.origin)) return;
+    window2.addEventListener("keydown", (event) => {
+      if (!playerKeys.has(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key === " " && event.repeat) return;
+      if (event.target?.closest?.(interactive)) return;
+      window2.queueMicrotask(() => {
+        if (event.defaultPrevented) return;
+        event.preventDefault();
+        event.stopPropagation();
+        window2.parent.postMessage({ type: messageType, id: window2.crypto.randomUUID(), key: event.key, repeat: event.repeat }, "*");
+      });
+    });
+    window2.addEventListener("message", (event) => {
+      const frame = window2.document.activeElement;
+      if (validMessage(event) && frame?.tagName === "IFRAME" && frame.contentWindow === event.source) {
+        window2.parent.postMessage({ type: messageType, id: event.data.id, key: event.data.key, repeat: event.data.repeat === true }, "*");
+      }
+    });
+  }
+  function focusedTwitchExtensionKey(event, player) {
+    const frame = player?.ownerDocument.activeElement;
+    if (!validMessage(event) || !frame?.matches?.("iframe.extension-view__iframe") || !player.contains(frame) || frame.contentWindow !== event.source) return null;
+    let seen = recentCommands.get(frame);
+    if (!seen) {
+      seen = /* @__PURE__ */ new Set();
+      recentCommands.set(frame, seen);
+    }
+    if (seen.has(event.data.id)) return null;
+    seen.add(event.data.id);
+    if (seen.size > 64) seen.delete(seen.values().next().value);
+    return event.data.key;
   }
 
   // src/shared/normalization-ui.js
@@ -1788,8 +1864,8 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
   function normalizeReplaceNativePlacement(placement) {
     return normalizeChoice(placement, ["native", "custom"]);
   }
-  function normalizeSliderLocation(location) {
-    return normalizeChoice(location, LOCATIONS);
+  function normalizeSliderLocation(location2) {
+    return normalizeChoice(location2, LOCATIONS);
   }
   function normalizeVolumeAppearance(appearance) {
     return normalizeChoice(appearance, APPEARANCES);
@@ -1925,8 +2001,8 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       write(keys.appearance, normalizeVolumeAppearance(appearance) || "new");
       updateOverlayAppearance(getOverlay());
     }
-    function setSliderLocation(location) {
-      write(keys.location, normalizeSliderLocation(location) || "controls");
+    function setSliderLocation(location2) {
+      write(keys.location, normalizeSliderLocation(location2) || "controls");
       onPlacementChanged();
     }
     function setReplaceNativePlacement(placement) {
@@ -4690,7 +4766,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         if (!direction) return;
         event.preventDefault();
         event.stopPropagation();
-        const currentValue = Number(slider.value) || 0;
+        const currentValue = getUnderlyingVolume(video);
         const nextValue = clampVolume(currentValue + direction * KEYBOARD_VOLUME_STEP);
         if (nextValue === currentValue) return;
         markUserVolumeIntent();
@@ -4716,6 +4792,24 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         applyKeyboardVolumeStep(event);
       };
       document.addEventListener("keydown", applyPlayerKeyboardVolumeStep, true);
+      const onExtensionKey = (event) => {
+        const key = focusedTwitchExtensionKey(event, getPlayerContainer(video) || player);
+        if (!key || isOptionsPopupOpen()) return;
+        if (key === " ") {
+          if (video.paused) {
+            video.play().catch(() => {
+            });
+          } else {
+            video.pause();
+          }
+        } else {
+          applyKeyboardVolumeStep({ key, preventDefault() {
+          }, stopPropagation() {
+          } });
+        }
+      };
+      window.addEventListener("message", onExtensionKey);
+      cleanupRegistry.add(() => window.removeEventListener("message", onExtensionKey));
       cleanupRegistry.add(bindWheelVolumeStep({
         target: iconCell,
         slider,
@@ -4788,6 +4882,17 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         }
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
+      cleanupRegistry.add(bindNativeVolumeInput({
+        window,
+        video,
+        player,
+        selector: '[data-a-target="player-volume-slider"]',
+        normalizer,
+        onChange: () => {
+          markUserVolumeIntent();
+          onVideoVolumeChange();
+        }
+      }));
       const onLayoutChange = () => {
         if (!overlay.isConnected) return;
         const activePlayer = getPlayerContainer(video);
@@ -5106,5 +5211,6 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
   }
 
   // src/entries/twitch.user.js
-  startTwitchVolumeSlider();
+  if (location.hostname.endsWith(".ext-twitch.tv")) startTwitchExtensionKeys(window);
+  else startTwitchVolumeSlider();
 })();

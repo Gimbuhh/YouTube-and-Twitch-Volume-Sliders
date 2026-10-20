@@ -354,11 +354,13 @@ test('Twitch: arrow keys use fixed five-percent steps while preserving mute and 
     assert.equal(slider.value,'50');
     assert.equal(fixture.state.volume,.5);
   }
-  slider.value='100';
+  for(let step=0;step<10;step++){
+    slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  }
   slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
   assert.equal(slider.value,'100');
   await waitForTimers(runtime,180);
-  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'50');
+  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'100');
   runtime.close();
 });
 

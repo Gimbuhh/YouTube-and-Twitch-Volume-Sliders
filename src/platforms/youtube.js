@@ -1,4 +1,5 @@
 import { createVolumeNormalizer } from '../shared/normalization.js';
+import { bindNativeVolumeInput } from '../shared/native-volume-input.js';
 import { updateNormalizationIcon } from '../shared/normalization-ui.js';
 import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
@@ -976,6 +977,18 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         };
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
+        const applyPlayerKeyboardVolumeStep = event => {
+            if (!isNormalizationEnabled() || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+            if (isOptionsPopupOpen()) return;
+            if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+            if (!player.contains(event.target) && !player.contains(document.activeElement)) return;
+            slider.value = String(getUnderlyingVolume(video));
+            applyKeyboardVolumeStep(event);
+        };
+        document.addEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
+        cleanupRegistry.add(() => document.removeEventListener('keydown', applyPlayerKeyboardVolumeStep, true));
+
         const onVideoVolumeChange = () => {
             if (!document.getElementById(OVERLAY_ID)) return;
             const muted = isMuted(video);
@@ -995,6 +1008,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             if (!muted) scheduleSaveVolume(playerVolume);
         };
         video.addEventListener('volumechange', onVideoVolumeChange);
+        cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: '.ytp-volume-area', normalizer, onChange: onVideoVolumeChange }));
 
         updateOverlayAppearance(overlay);
         if (isAlwaysExpandedEnabled()) {

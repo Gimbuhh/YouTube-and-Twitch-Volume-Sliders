@@ -87,6 +87,33 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
 }
 
 for (const config of platforms) {
+  test(`${config.file}: source-restoration writes keep selected volume and player keys use five-point steps`, async t => {
+    for (const mode of ['on', 'replace-native']) {
+      const f = await prepare(config, t, { controlledTime: true });
+      const select = f.document.getElementById('tm-volume-options-mode');
+      select.value = mode; select.dispatchEvent(new f.window.Event('change', { bubbles: true }));
+      const slider = f.document.getElementById('tm-volume-slider-range');
+      slider.value = '25'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
+      slider.dispatchEvent(new f.window.Event('change', { bubbles: true }));
+      f.audio.amplitude = .17; f.toggle.click(); await f.advance();
+      const corrected = f.rawVolume();
+      for (const type of [null, 'emptied', 'loadstart']) {
+        f.api.setVolume((corrected - 1) / (config.file === 'youtube' ? 1 : 100));
+        if (type) f.video.dispatchEvent(new f.window.Event(type));
+        await f.advance(.2);
+        assert.equal(slider.value, '25'); assert.equal(f.rawVolume(), corrected);
+        assert.equal(f.window.localStorage.getItem(f.volumeKey), '25');
+      }
+      f.document.getElementById('tm-volume-options-button').click();
+      f.video.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
+      for (const [key, expected] of [['ArrowUp', '30'], ['ArrowDown', '25']]) {
+        f.player.dispatchEvent(new f.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+        await f.advance(.2); assert.equal(slider.value, expected);
+      }
+      f.toggle.click(); assert.equal(f.rawVolume(), 25);
+    }
+  });
+
   test(`${config.file}: audio feedback distinguishes unchanged volume from loudness matching`, async t => {
     const f = await prepare(config, t);
     f.audio.amplitude = .03; f.toggle.click(); await f.advance(30);
@@ -112,9 +139,13 @@ for (const config of platforms) {
       slider.dispatchEvent(new f.window.Event('change', { bubbles: true }));
       f.audio.amplitude = .17; f.toggle.click(); await f.advance();
       const before = f.rawVolume(), requested = before + delta;
+      const guarded = config.file === 'twitch' && mode === 'replace-native';
+      if (!guarded) {
+        const control = f.player.querySelector(config.file === 'youtube' ? '.ytp-volume-area' : '[data-a-target="player-volume-slider"]');
+        control.dispatchEvent(new f.window.Event('input', { bubbles: true }));
+      }
       f.api.setVolume(requested / (config.file === 'youtube' ? 1 : 100));
       await f.advance(.2);
-      const guarded = config.file === 'twitch' && mode === 'replace-native';
       const preferred = guarded ? 30 : Math.round(30 * requested / before);
       assert.equal(Number(slider.value), preferred);
       assert.ok(Math.abs(f.rawVolume() - (guarded ? before : requested)) <= 1,

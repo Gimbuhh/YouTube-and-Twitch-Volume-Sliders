@@ -110,9 +110,13 @@ Small trackpad movements accumulate before changing volume; normal mouse-wheel i
 
 With the 1% or 2% setting, pressing on or close to a taller mark selects that 10% value directly. Moving the grabber still uses the selected fine step. Arrow Up and Arrow Down remain fixed at 5% whenever the custom volume control handles them, independent of the adjustment-step setting.
 
+The Twitch script also runs a small keyboard relay in Twitch's official extension frames (`*.ext-twitch.tv`). This keeps Space and volume arrows working when an extension overlay has focus. Text fields, buttons, and keys handled by the extension keep their normal behavior; audio analysis runs only in the player page.
+
 ## Loudness normalization (2.9)
 
 Open **Volume Slider Options → General → Audio → Auto-normalize volume** to enable it. It starts off and is saved separately for YouTube and Twitch. On later page loads, analysis can start from the playing video before the player controls finish loading. The slider continues to set your preferred listening level; automatic corrections do not move it or replace the saved percentage.
+
+Stream restarts keep that selected level. Player Up/Down keys change it in five-point steps, rather than stepping from the automatically adjusted output. Native volume controls can still change your listening level.
 
 The mode measures a local copy of the playing audio using LUFS-based loudness analysis and adjusts the native player volume. Frequency weighting better matches how people perceive loudness across speech, music, and effects. It reacts quickly to loud passages, raises quieter sources gradually, ignores silence and very low background levels, and relearns after a source change. Automatic boost stops at 6 dB to reduce sudden jumps, so especially quiet recordings may remain below target. The player's normal 100% maximum also applies. Channels are measured separately so stereo cancellation does not hide audible sound.
 

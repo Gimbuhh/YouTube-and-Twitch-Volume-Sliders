@@ -51,7 +51,9 @@ export function createLufsAnalysis({ window, context, track, onFrame, onFailure 
     get needsActivation() { return !reader && context.state !== 'running'; },
     dispose() {
       disposed = true;
-      if (reader) reader.cancel().catch(() => {});
+      if (reader) {
+        reader.cancel().catch(() => {});
+      }
       // Stop inputless processors instead of leaving their active-source flag set.
       releaseNode();
     }

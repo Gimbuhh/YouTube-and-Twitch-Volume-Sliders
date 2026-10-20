@@ -343,6 +343,73 @@ async function twitchSmoke(browser){
   }finally{await context.close();}
 }
 
+async function nativeVolumeInputSmoke(browser){
+  const context=await browser.newContext();
+  const page=await context.newPage();
+  const helper=await readFile(join(projectRoot,'src/shared/native-volume-input.js'),'utf8');
+  const html=`<!doctype html><div id="player"><video></video><input type="range" id="native" min="0" max="100" step="5" value="20"></div><script>${helper.replace('export function','function')}
+    window.__raw=20;window.__adopted=[];
+    document.querySelector('#native').addEventListener('input',event=>{window.__raw=Number(event.target.value);event.stopPropagation()});
+    bindNativeVolumeInput({window,video:document.querySelector('video'),player:document.querySelector('#player'),selector:'#native',normalizer:{acceptNativeVolume(){window.__adopted.push(window.__raw)}},onChange(){}});
+  </script>`;
+  try{
+    await context.route('https://volume-input.test/**',route=>route.fulfill({contentType:'text/html',body:html}));
+    await page.goto('https://volume-input.test/');
+    await page.locator('#native').focus(); await page.keyboard.press('ArrowUp');
+    assert.equal(await page.evaluate(()=>window.__raw),25);
+    assert.equal(await page.evaluate(()=>window.__adopted.at(-1)),25,'native gestures adopt the value after the site setter');
+    console.log('browser smoke: native volume gestures adopt the completed site setter');
+  }finally{await context.close();}
+}
+
+async function twitchExtensionSmoke(browser){
+  const context=await browser.newContext({viewport:{width:1280,height:800}});
+  const page=await context.newPage(), errors=[];
+  page.setDefaultTimeout(5000);
+  page.on('pageerror',error=>errors.push(error.message));
+  const artifact=await readFile(join(artifactRoot,'twitch-volume-slider.user.js'),'utf8');
+  const script=`<script>${artifact.replaceAll('</script>','<\\/script>')}</script>`;
+  const storage=`<script>localStorage.setItem('tm-twitch-volume','25');localStorage.setItem('tm-twitch-muted','false');window.__commands=[];window.addEventListener('message',e=>{if(e.data?.type==='tm-volume-player-key-v1')window.__commands.push(e.data.key)});</script>`;
+  const main=twitchHtml.replace('<head>',`<head>${storage}${script}`)
+    .replace('<video></video>','<video></video><iframe class="extension-view__iframe" src="https://supervisor.ext-twitch.tv/supervisor" style="position:absolute;top:0;left:0;width:900px;height:466px;border:0"></iframe>')
+    .replace('</body>',`<script>window.__smoke.paused=false;const v=document.querySelector('video');Object.defineProperty(v,'paused',{get:()=>window.__smoke.paused});v.pause=()=>{window.__smoke.paused=true};v.play=()=>{window.__smoke.paused=false;return Promise.resolve()};</script></body>`);
+  const supervisor=`<!doctype html><html><head><script>window.addEventListener('message',event=>{if(event.source===document.querySelector('iframe')?.contentWindow)parent.postMessage(event.data,'*')});</script>${script}<style>body{margin:0}iframe{width:900px;height:466px;border:0}</style></head><body><iframe src="https://keyboard-test.ext-twitch.tv/player"></iframe></body></html>`;
+  const extension=`<!doctype html><html><head>${script}<style>body{min-height:1800px}</style></head><body><div id="blank" style="height:260px">Extension background</div><input aria-label="Extension input"><button>Extension action</button><script>window.__clicks=0;document.querySelector('button').onclick=()=>window.__clicks++;document.addEventListener('keydown',e=>{window.__lastKey=e},true);document.addEventListener('keydown',e=>{if(window.__handleKeys && e.key==='ArrowDown')e.preventDefault()});</script></body></html>`;
+  try{
+    await context.route('https://www.twitch.tv/**',route=>route.fulfill({contentType:'text/html',body:main}));
+    await context.route('https://supervisor.ext-twitch.tv/**',route=>route.fulfill({contentType:'text/html',body:supervisor}));
+    await context.route('https://keyboard-test.ext-twitch.tv/**',route=>route.fulfill({contentType:'text/html',body:extension}));
+    await page.goto('https://www.twitch.tv/extension-test');
+    await page.waitForSelector('#tm-volume-slider-range',{state:'attached'});
+    const frame=page.frameLocator('.extension-view__iframe').frameLocator('iframe');
+    await frame.locator('#blank').click();
+    for(const [key,value] of [['ArrowUp','30'],['ArrowDown','25']]){
+      await page.keyboard.press(key);
+      await page.waitForFunction(value=>document.querySelector('#tm-volume-slider-range').value===value,value);
+      assert.equal(await frame.locator('body').evaluate(()=>window.__lastKey.defaultPrevented),true,'relayed arrows prevent native scrolling');
+    }
+    await page.keyboard.press('Space'); await page.waitForFunction(()=>window.__smoke.paused);
+    await page.keyboard.press('Space'); await page.waitForFunction(()=>!window.__smoke.paused);
+    assert.equal(await frame.locator('body').evaluate(()=>window.__lastKey.defaultPrevented),true,'relayed Space prevents native scrolling');
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    assert.deepEqual(await page.evaluate(()=>window.__commands),['ArrowUp','ArrowUp','ArrowDown','ArrowDown',' ',' ',' ',' '],'both relay copies arrive while each key changes the player only once');
+    assert.equal(await frame.locator('body').evaluate(()=>window.scrollY),0,'extension key handling does not scroll');
+    assert.equal(await page.evaluate(()=>window.scrollY),0,'player page does not scroll');
+    await frame.getByLabel('Extension input').fill('hello');
+    await page.keyboard.press('ArrowUp'); await page.keyboard.press('Space');
+    assert.equal(await page.locator('#tm-volume-slider-range').inputValue(),'25');
+    assert.equal(await page.evaluate(()=>window.__smoke.paused),false);
+    await frame.getByRole('button').click(); await page.keyboard.press('Space');
+    assert.equal(await frame.locator('body').evaluate(()=>window.__clicks),2,'mouse and Space still activate extension buttons');
+    assert.equal(await page.evaluate(()=>window.__smoke.paused),false);
+    await frame.locator('#blank').click(); await frame.locator('body').evaluate(()=>{window.__handleKeys=true;});
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await page.locator('#tm-volume-slider-range').inputValue(),'25','extension-owned keys are not forwarded');
+    assert.deepEqual(errors,[]);
+    console.log('browser smoke: nested cross-origin Twitch extension preserves Space/volume keys, text input, buttons and extension-owned keys');
+  }finally{await context.close();}
+}
+
 async function twitchZoomSmoke(browser) {
   const html = twitchPreviewHtml.replace('width:533px', 'width:calc(100vw - 390px)');
   const {context, page, pageErrors} = await preparedPage(browser, {
@@ -532,6 +599,8 @@ try{
   await modeDropdownSmoke(browser, 'twitch');
   await youtubeSmoke(browser);
   await twitchSmoke(browser);
+  await nativeVolumeInputSmoke(browser);
+  await twitchExtensionSmoke(browser);
   await twitchPreviewSmoke(browser);
   await wheelSmoke(browser, 'youtube');
   await wheelSmoke(browser, 'twitch');

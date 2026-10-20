@@ -312,8 +312,10 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
       },
       dispose() {
         disposed = true;
-        if (reader) reader.cancel().catch(() => {
-        });
+        if (reader) {
+          reader.cancel().catch(() => {
+          });
+        }
         releaseNode();
       }
     };
@@ -428,16 +430,12 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     function readPreferred(owned, rawVolume) {
       if (owned.writing) return owned.preferred;
       const actual = clampVolume(rawVolume ?? getVolume(owned.video));
-      if (Math.abs(actual - owned.applied) > 0.6) {
-        owned.preferred = Math.round(clampVolume(owned.applied > 0 ? owned.preferred * actual / owned.applied : actual));
-        owned.applied = actual;
-        owned.lastWriteAt = window2.performance.now();
-      }
+      owned.outputChanged = Math.abs(actual - owned.applied) > 0.6;
       return owned.preferred;
     }
     function writeOutput(owned, value, gradual = false) {
       const next = outputPercent(value);
-      if (next === owned.applied) return;
+      if (next === owned.applied && !owned.outputChanged) return;
       const now = window2.performance.now();
       if (gradual && next > owned.applied && owned.applied > 0 && next / owned.applied < 10 ** (0.5 / 20) && now - owned.lastWriteAt < 150) return;
       const previous = owned.applied;
@@ -446,6 +444,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       try {
         setVolume(owned.video, next, { preserveMute: true });
         owned.lastWriteAt = now;
+        owned.outputChanged = false;
       } catch (error) {
         owned.applied = previous;
         throw error;
@@ -699,6 +698,17 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       getPreferredVolume(video, rawVolume) {
         return session?.video === video ? readPreferred(session, rawVolume) : rawVolume;
       },
+      acceptNativeVolume(video) {
+        const owned = session?.video === video ? session : null;
+        if (!owned || owned.writing) return;
+        const actual = clampVolume(getVolume(video));
+        if (Math.abs(actual - owned.applied) > 0.6) {
+          owned.preferred = Math.round(clampVolume(owned.applied > 0 ? owned.preferred * actual / owned.applied : actual));
+          owned.applied = actual;
+          owned.lastWriteAt = window2.performance.now();
+        }
+        owned.outputChanged = false;
+      },
       setPreferredVolume(video, value, options) {
         let output = clampVolume(value);
         const owned = session?.video === video ? session : null;
@@ -706,6 +716,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           owned.preferred = output;
           output = outputPercent(output * owned.gain);
           owned.applied = output;
+          owned.outputChanged = false;
           owned.lastWriteAt = window2.performance.now();
           owned.writing = true;
         }
@@ -715,6 +726,27 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           if (owned) owned.writing = false;
         }
       }
+    };
+  }
+
+  // src/shared/native-volume-input.js
+  function bindNativeVolumeInput({ window: window2, video, player, selector, normalizer, onChange }) {
+    let active = true;
+    const types = ["pointerdown", "pointermove", "input", "change", "wheel", "keydown"];
+    const onInput = (event) => {
+      if (!event.target?.closest?.(selector) || !player.contains(event.target)) return;
+      if (event.type === "pointermove" && !event.buttons) return;
+      if (event.type === "keydown" && !["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) return;
+      window2.queueMicrotask(() => {
+        if (!active || !video.isConnected) return;
+        normalizer.acceptNativeVolume(video);
+        onChange();
+      });
+    };
+    for (const type of types) window2.document.addEventListener(type, onInput, true);
+    return () => {
+      active = false;
+      for (const type of types) window2.document.removeEventListener(type, onInput, true);
     };
   }
 
@@ -4365,6 +4397,17 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         applySliderValue(nextValue);
       };
       slider.addEventListener("keydown", applyKeyboardVolumeStep);
+      const applyPlayerKeyboardVolumeStep = (event) => {
+        if (!isNormalizationEnabled() || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        if (isOptionsPopupOpen()) return;
+        if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+        if (!player.contains(event.target) && !player.contains(document.activeElement)) return;
+        slider.value = String(getUnderlyingVolume(video));
+        applyKeyboardVolumeStep(event);
+      };
+      document.addEventListener("keydown", applyPlayerKeyboardVolumeStep, true);
+      cleanupRegistry.add(() => document.removeEventListener("keydown", applyPlayerKeyboardVolumeStep, true));
       const onVideoVolumeChange = () => {
         if (!document.getElementById(OVERLAY_ID)) return;
         const muted = isMuted(video);
@@ -4384,6 +4427,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!muted) scheduleSaveVolume(playerVolume);
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
+      cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: ".ytp-volume-area", normalizer, onChange: onVideoVolumeChange }));
       updateOverlayAppearance(overlay);
       if (isAlwaysExpandedEnabled()) {
         setOverlayExpanded(overlay, true, true);
