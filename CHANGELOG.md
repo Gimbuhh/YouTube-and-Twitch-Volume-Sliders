@@ -2,7 +2,7 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
-## 2.9 - Unreleased
+## 2.9
 
 ### Added
 
