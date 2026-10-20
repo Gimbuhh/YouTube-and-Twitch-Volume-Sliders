@@ -2,7 +2,7 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
-## 2.9
+## 2.9 - 2026-10-21
 
 ### Added
 
@@ -22,9 +22,9 @@ All notable changes to the maintained userscripts are documented here. Historica
 ### Fixed
 
 - **Both:** Slider drags finish once, without reacting to unrelated page releases.
-- **Twitch:** Space and volume arrows work through extension overlays once per keypress, without scrolling the page or taking input from extension controls.
 - **YouTube:** Volume and mute controls keep working when the player API is temporarily unavailable.
 - **YouTube:** Volume Slider Options stays visible when YouTube retains a hidden progress bar before the active controls. The popup anchors to a rendered progress bar in the current player, falling back to its own button when none is available.
+- **Twitch:** Space and volume arrows work through extension overlays once per keypress, without scrolling the page or taking input from extension controls.
 - **Twitch:** Narrow channel, video, and clip players keep the custom slider and Options button when zooming or resizing. Compact preview detection applies only on browsing pages, preventing native volume controls from appearing beside or replacing the custom slider.
 
 ### Known limitations

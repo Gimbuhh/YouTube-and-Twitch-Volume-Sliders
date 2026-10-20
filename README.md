@@ -53,15 +53,15 @@ The control and settings screenshots come from the built 2.9 scripts in local pl
 - A modern browser
 - A current userscript manager, such as [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/)
 
-### Version 2.9 preview
+### Version 2.9
 
-Version 2.9 introduces opt-in **Auto-normalize volume**. To test this branch, import [the YouTube userscript](dist/youtube-volume-slider.user.js) or [the Twitch userscript](dist/twitch-volume-slider.user.js) into your userscript manager, then reload the video page. See the [2.9 release notes](release-notes/2.9.md) for behavior and limitations. Version 2.9 is not yet published as a GitHub Release; the stable install links below remain on 2.8.3.
+Version 2.9 introduces opt-in **Auto-normalize volume**. Enable it in **Volume Slider Options → General → Audio**. See the [2.9 release notes](release-notes/2.9.md) for changes and limitations.
 
 ### GitHub Releases
 
 Download: [GitHub Releases](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases)
 
-Latest published version, 2.8.3: [YouTube userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.8.3/YouTube.Volume.Slider.2.8.3.user.js) or [Twitch userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.8.3/Twitch.Volume.Slider.2.8.3.user.js). Approve the install prompt in your userscript manager, then reload the video page. The published 2.8.3 scripts do not include Auto-normalize volume.
+Install version **2.9**: [YouTube userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.9/YouTube.Volume.Slider.2.9.user.js) or [Twitch userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.9/Twitch.Volume.Slider.2.9.user.js). Approve the install prompt in your userscript manager, then reload the video page.
 
 ### Tampermonkey Setup
 
