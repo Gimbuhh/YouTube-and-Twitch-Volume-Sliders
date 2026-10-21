@@ -1,6 +1,6 @@
 import { createVolumeNormalizer } from '../shared/normalization.js';
 import { bindNativeVolumeInput } from '../shared/native-volume-input.js';
-import { createYouTubeVolumeFeedback } from './youtube-volume-feedback.js';
+import { createVolumeFeedback } from '../shared/volume-feedback.js';
 import { updateNormalizationIcon } from '../shared/normalization-ui.js';
 import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
@@ -855,7 +855,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
         const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
         const cleanupRegistry = createCleanupRegistry();
-        const keyboardFeedback = createYouTubeVolumeFeedback({ window, player });
+        const keyboardFeedback = createVolumeFeedback({ window, player });
         cleanupRegistry.add(() => keyboardFeedback.dispose());
 
         let hasPointerIntent = false;
@@ -981,14 +981,14 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
         const applyPlayerKeyboardVolumeStep = event => {
-            if (!isNormalizationEnabled() || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
             if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
             if (isOptionsPopupOpen()) return;
             if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
             if (!player.contains(event.target) && !player.contains(document.activeElement)) return;
             slider.value = String(getUnderlyingVolume(video));
             applyKeyboardVolumeStep(event, { markInteraction: false });
-            keyboardFeedback.show(Number(slider.value));
+            keyboardFeedback.show(Number(slider.value), isMuted(video));
         };
         document.addEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
         cleanupRegistry.add(() => document.removeEventListener('keydown', applyPlayerKeyboardVolumeStep, true));

@@ -3,7 +3,7 @@
 - **Both:** **Auto-normalize volume** helps keep listening levels more consistent when switching YouTube videos or Twitch channels, with quick protection against loud spikes and gradual recovery afterward.
   - The feature starts off. Enable **Volume Slider Options → General → Audio → Auto-normalize volume** separately on each site; a status below the toggle shows whether it is active, waiting, or unavailable.
   - Quiet audio receives limited boost, with recent loudness remembered through quiet passages and silent gaps. Audio settings show the adjusted output percentage.
-  - Stream restarts preserve your selected level. Player volume arrows change it in five-point steps, with percentage feedback on YouTube that leaves the volume pill compact. Native volume controls still work.
+  - Stream restarts preserve your selected level. Player volume arrows change it in five-point steps; native volume controls still work.
   - Normalization starts without waiting for player controls to load. Native audio analysis needs no extra activation click.
   - Temporary audio access failures recover automatically when capture becomes available.
   - A small waveform icon shows normalization is on. Pause and mute keep it visible; blocked or unavailable analysis hides it.
@@ -12,6 +12,7 @@
 
 ## Changed
 
+- **Both:** Arrow-key volume feedback shows your selected percentage and a matching speaker icon on both sites, with normalization on or off.
 - **Both:** Volume Slider Options is easier to navigate with **General** and **Appearance** tabs. The borderless Mode dropdown is available from either tab, with readable choices and an arrow that shows whether it is open. Audio feedback separates output from your selected volume; the Appearance hint points to **General → Show on video** for size and opacity controls.
 
 ## Fixed
@@ -20,6 +21,7 @@
 - **YouTube:** Volume and mute controls remain usable while the player API is unavailable or recovering.
 - **YouTube:** Volume Slider Options opens visibly on videos where hidden progress bars previously positioned the menu above the player. It uses the visible progress bar or the options button.
 - **Twitch:** Space and volume arrows work through extension overlays without double actions or page scrolling. Extension controls keep their own input.
+- **Twitch:** Adjusting volume just after page load keeps your new level instead of restoring the previous one.
 - **Twitch:** Page zoom keeps the custom volume slider and Options button instead of bringing back native volume controls. Narrow channel, video, and clip players keep your selected mode; compact previews on browsing pages still use native controls.
 
 ## Known limitations

@@ -87,6 +87,19 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
 }
 
 for (const config of platforms) {
+  if (config.file === 'twitch') test('twitch: sustained startup volume keys supersede the delayed preference restore', async t => {
+    const f = await prepare(config, t, { saved: true, controlledTime: true });
+    f.document.getElementById('tm-volume-options-button').click();
+    f.video.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
+    const slider = f.document.getElementById('tm-volume-slider-range');
+    for (let i = 0; i < 22; i++) {
+      const key = i % 2 ? 'ArrowDown' : 'ArrowUp';
+      f.player.dispatchEvent(new f.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      await f.advance(.1);
+      assert.equal(slider.value, i % 2 ? '50' : '55', 'startup restoration cannot reset held-key selection');
+    }
+  });
+
   test(`${config.file}: source-restoration writes keep selected volume and player keys use five-point steps`, async t => {
     for (const mode of ['on', 'replace-native']) {
       const f = await prepare(config, t, { controlledTime: true });
@@ -108,7 +121,6 @@ for (const config of platforms) {
       f.video.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
       const overlay = f.document.getElementById('tm-volume-slider-overlay');
       if (config.file === 'youtube') {
-        f.player.insertAdjacentHTML('beforeend', '<button class="ytp-mute-button"><svg><path/></svg></button><div data-layer="4" style="display:none"><div class="ytp-bezel-text-wrapper"><div class="ytp-bezel-text"></div></div><div class="ytp-bezel" role="status"><div class="ytp-bezel-icon"></div></div></div>');
         overlay.classList.remove('tm-expanded'); overlay.classList.add('tm-collapsed');
         overlay.dataset.tmKeepExpanded = 'false';
       }
@@ -118,10 +130,20 @@ for (const config of platforms) {
         if (config.file === 'youtube') {
           assert.equal(overlay.classList.contains('tm-expanded'), false, 'player keys never expand the volume pill');
           assert.equal(overlay.dataset.tmKeepExpanded, 'false');
-          assert.equal(f.player.querySelector('[data-tm-volume-feedback] .ytp-bezel-text').textContent, `${expected}%`);
         }
+        assert.equal(f.player.querySelector('[data-tm-volume-feedback]').textContent, `${expected}%`);
+        assert.equal(f.player.querySelector('[data-tm-volume-feedback]').dataset.volumeIcon, 'low');
       }
       f.toggle.click(); assert.equal(f.rawVolume(), 25);
+      f.video.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
+      for (const [key, expected] of [['ArrowUp', '30'], ['ArrowDown', '25']]) {
+        f.player.dispatchEvent(new f.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+        await f.advance(.2);
+        assert.equal(slider.value, expected, 'normalization-off player keys use the same selected-volume handler');
+        assert.equal(f.rawVolume(), Number(expected));
+        assert.equal(f.player.querySelector('[data-tm-volume-feedback]').textContent, `${expected}%`);
+        assert.equal(overlay.classList.contains('tm-expanded'), false);
+      }
     }
   });
 

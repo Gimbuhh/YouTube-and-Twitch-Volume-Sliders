@@ -386,9 +386,11 @@ async function twitchExtensionSmoke(browser){
     for(const [key,value] of [['ArrowUp','30'],['ArrowDown','25']]){
       await page.keyboard.press(key);
       await page.waitForFunction(value=>document.querySelector('#tm-volume-slider-range').value===value,value);
+      assert.equal(await page.locator('[data-tm-volume-feedback]').textContent(),`${value}%`,'extension arrows show selected volume on the player');
       assert.equal(await frame.locator('body').evaluate(()=>window.__lastKey.defaultPrevented),true,'relayed arrows prevent native scrolling');
     }
     await page.keyboard.press('Space'); await page.waitForFunction(()=>window.__smoke.paused);
+    assert.equal(await page.locator('[data-tm-volume-feedback]').count(),0,'extension pause clears volume feedback');
     await page.keyboard.press('Space'); await page.waitForFunction(()=>!window.__smoke.paused);
     assert.equal(await frame.locator('body').evaluate(()=>window.__lastKey.defaultPrevented),true,'relayed Space prevents native scrolling');
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));

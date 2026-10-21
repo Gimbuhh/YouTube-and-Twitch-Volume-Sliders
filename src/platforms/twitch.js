@@ -1,5 +1,6 @@
 import { createVolumeNormalizer } from '../shared/normalization.js';
 import { bindNativeVolumeInput } from '../shared/native-volume-input.js';
+import { createVolumeFeedback } from '../shared/volume-feedback.js';
 import { focusedTwitchExtensionKey } from './twitch-extension-keys.js';
 import { updateNormalizationIcon } from '../shared/normalization-ui.js';
 import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
@@ -712,6 +713,7 @@ export function startTwitchVolumeSlider() {
     }
 
     function markUserVolumeIntent() {
+        cancelDelayedFirstAttachRestore();
         stopStartupMuteGuard();
         userIntentUntil = Date.now() + USER_INTENT_GRACE_MS;
     }
@@ -1126,6 +1128,8 @@ export function startTwitchVolumeSlider() {
         const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
         overlay._tmVolumeVideo = video;
         const cleanupRegistry = createCleanupRegistry();
+        const keyboardFeedback = createVolumeFeedback({ window, player });
+        cleanupRegistry.add(() => keyboardFeedback.dispose());
 
         let hasPointerIntent = false;
         const markPointerIntent = () => {
@@ -1245,11 +1249,13 @@ export function startTwitchVolumeSlider() {
             event.stopPropagation();
             const currentValue = getUnderlyingVolume(video);
             const nextValue = clampVolume(currentValue + (direction * KEYBOARD_VOLUME_STEP));
-            if (nextValue === currentValue) return;
-            markUserVolumeIntent();
-            slider.value = String(nextValue);
-            applySliderValue(nextValue, { preserveMute: true, markInteraction: false });
-            startKeyboardControlsHold();
+            if (nextValue !== currentValue) {
+                markUserVolumeIntent();
+                slider.value = String(nextValue);
+                applySliderValue(nextValue, { preserveMute: true, markInteraction: false });
+                startKeyboardControlsHold();
+            }
+            keyboardFeedback.show(nextValue, isMuted(video));
         };
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
@@ -1275,6 +1281,7 @@ export function startTwitchVolumeSlider() {
             const key = focusedTwitchExtensionKey(event, getPlayerContainer(video) || player);
             if (!key || isOptionsPopupOpen()) return;
             if (key === ' ') {
+                keyboardFeedback.clear();
                 if (video.paused) {
                     video.play().catch(() => {});
                 } else {

@@ -31,7 +31,7 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     const host = youtube
       ? '<div id="movie_player" tabindex="0"><video></video><div class="ytp-left-controls"><div class="ytp-volume-area"><button class="ytp-mute-button"><svg><path d="M8 15h4l5-5v16l-5-5H8z"/></svg></button></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">Settings</button></div><div data-layer="4" style="display:none" class="ytp-bezel-text-hide"><div class="ytp-bezel-text-wrapper"><div class="ytp-bezel-text"></div></div><div class="ytp-bezel" role="status" aria-label="Play"><div class="ytp-bezel-icon"></div></div></div></div>'
-      : '<div class="video-player" data-a-target="player-overlay-click-handler"><video></video><div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button">Settings</button></div></div></div>';
+      : '<div class="video-player" tabindex="0" data-a-target="player-overlay-click-handler"><video></video><div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button">Settings</button></div></div></div>';
     await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><style>
       body{margin:24px;background:#111;color:white;font-family:Arial}#movie_player,.video-player{position:relative;width:900px;height:330px;overflow:hidden;background:#222}
       video{display:block;width:900px;height:290px}.ytp-left-controls,.ytp-right-controls{position:absolute;bottom:0;height:40px;display:flex;align-items:center}.ytp-left-controls{left:0}.ytp-right-controls{right:0}
@@ -48,7 +48,13 @@ try {
         window.__iconAudio.amplitude = 0.17;
         video.volume = 0.3;
         const api = { getVolume: () => video.volume * (youtube ? 100 : 1), setVolume: value => { video.volume = value / (youtube ? 100 : 1); }, isMuted: () => video.muted, mute: () => { video.muted = true; }, unMute: () => { video.muted = false; }, setMuted: value => { video.muted = value; } };
-        if (youtube) Object.assign(video.parentElement, api);
+        if (youtube) {
+          Object.assign(video.parentElement, api);
+          window.__nativeVolumeKeys = 0;
+          video.parentElement.addEventListener('keydown', event => {
+            if (event.key === 'ArrowUp' || event.key === 'ArrowDown') window.__nativeVolumeKeys++;
+          });
+        }
         else video.parentElement.__reactFiber$icon = { return: { memoizedProps: { mediaPlayerInstance: api }, return: null } };
         localStorage.setItem(`tm-${prefix}-volume`, '30');
         localStorage.setItem(`tm-${prefix}-volume-slider-normalization`, 'true');
@@ -60,30 +66,62 @@ try {
       const slider = page.locator('#tm-volume-slider-range');
       await indicator.waitFor({ state: 'visible' });
       await page.waitForFunction(() => document.querySelector('video').volume < 0.2);
-      if (youtube) {
-        const native = await page.locator('[data-layer="4"]').evaluate(element => element.outerHTML);
+      {
+        const player = page.locator('#movie_player, .video-player');
+        const native = youtube ? await page.locator('[data-layer="4"]').evaluate(element => element.outerHTML) : null;
         for (const [key, value] of [['ArrowUp', '35'], ['ArrowDown', '30']]) {
-          await page.locator('#movie_player').press(key);
+          await player.press(key);
           assert.equal(await slider.inputValue(), value);
           assert.equal(await overlay.evaluate(element => element.classList.contains('tm-expanded')), false, 'player arrows keep the pill collapsed');
-          assert.equal(await page.locator('[data-tm-volume-feedback] .ytp-bezel-text').textContent(), `${value}%`);
+          assert.equal(await page.locator('[data-tm-volume-feedback]').textContent(), `${value}%`);
           assert.equal(await page.locator('video').evaluate(video => video.volume < .25), true, 'feedback never applies unnormalized volume');
-          assert.equal(await page.locator('[data-layer="4"]:not([data-tm-volume-feedback])').evaluate(element => element.outerHTML), native);
+          if (youtube) assert.equal(await page.locator('[data-layer="4"]').evaluate(element => element.outerHTML), native);
         }
         const repeatedKeysStarted = Date.now();
         let repeats = 0;
         while (Date.now() - repeatedKeysStarted < 2200 || repeats % 2) {
-          await page.locator('#movie_player').press(repeats % 2 ? 'ArrowDown' : 'ArrowUp');
+          await player.press(repeats % 2 ? 'ArrowDown' : 'ArrowUp');
           const visible = await page.locator('[data-tm-volume-feedback]').evaluate(popup =>
-            [...popup.querySelectorAll('.ytp-bezel-text-wrapper, .ytp-bezel')].every(element => getComputedStyle(element).opacity === '1'));
+            getComputedStyle(popup).opacity === '1' && getComputedStyle(popup).animationName === 'none');
           assert.equal(visible, true, 'percentage and speaker stay visible beyond the native fade duration during repeated keys');
           repeats++;
           await page.waitForTimeout(100);
         }
         assert.equal(await slider.inputValue(), '30');
         assert.equal(await overlay.evaluate(element => element.classList.contains('tm-expanded')), false);
+        const selectWithKeys = async value => {
+          let current = Number(await slider.inputValue());
+          for (let attempt = 0; current !== value && attempt < 20; attempt++) {
+            await player.press(current < value ? 'ArrowUp' : 'ArrowDown');
+            current = Number(await slider.inputValue());
+          }
+          assert.equal(current, value, 'volume keys reach the requested percentage');
+        };
+        for (const [start, key, expected, icon] of [[45, 'ArrowUp', 50, 'high'], [50, 'ArrowDown', 45, 'low'], [0, 'ArrowDown', 0, 'muted'], [100, 'ArrowUp', 100, 'high']]) {
+          await selectWithKeys(start);
+          await player.press(key);
+          const feedback = page.locator('[data-tm-volume-feedback]');
+          assert.equal(await feedback.textContent(), `${expected}%`);
+          assert.equal(await feedback.getAttribute('data-volume-icon'), icon);
+          assert.equal(await feedback.evaluate(element => getComputedStyle(element).pointerEvents), 'none');
+          const bounds = await feedback.boundingBox(), host = await player.boundingBox();
+          assert.ok(bounds.x >= host.x && bounds.x + bounds.width <= host.x + host.width, 'feedback stays within the player');
+          if (screenshotDirectory && !updateDocs && expected === 50) {
+            await mkdir(screenshotDirectory, { recursive: true });
+            await player.screenshot({ path: join(screenshotDirectory, `${platform}-volume-feedback.png`) });
+          }
+        }
+        await selectWithKeys(30);
+        await player.evaluate(element => element.requestFullscreen());
+        await player.press('ArrowUp');
+        const fullscreenPopup = await page.locator('[data-tm-volume-feedback]').boundingBox();
+        const fullscreenPlayer = await player.boundingBox();
+        assert.ok(fullscreenPopup.x >= fullscreenPlayer.x && fullscreenPopup.y >= fullscreenPlayer.y && fullscreenPopup.x + fullscreenPopup.width <= fullscreenPlayer.x + fullscreenPlayer.width, 'fullscreen keeps volume feedback within the player');
+        assert.equal(await player.evaluate(element => element === document.fullscreenElement), true);
+        await page.evaluate(() => document.exitFullscreen());
+        await player.press('ArrowDown');
         await page.locator('[data-tm-volume-feedback]').waitFor({ state: 'detached' });
-        console.log('youtube: player arrows show percentage feedback, retain corrected output and leave the pill collapsed');
+        console.log(`${platform}: repeated player arrows show selected percentage and distinct speaker states, retain corrected output and leave the pill collapsed`);
       }
       const artwork = await indicator.innerHTML();
       assert.equal(await indicator.textContent(), '');
@@ -143,6 +181,11 @@ try {
           await session.send('Emulation.setDeviceMetricsOverride', { width: Math.round(1280 / zoom), height: Math.round(800 / zoom), deviceScaleFactor: zoom, mobile: false, screenWidth: 1280, screenHeight: 800 });
           await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const boxes = await assertGeometry();
+          const player = page.locator('#movie_player, .video-player');
+          await player.press('ArrowUp');
+          const badge = await page.locator('[data-tm-volume-feedback]').boundingBox(), host = await player.boundingBox();
+          assert.ok(Math.abs(badge.x + badge.width / 2 - (host.x + host.width / 2)) < .6, `${platform}: feedback remains centered at ${zoom * 100}% zoom`);
+          await player.press('ArrowDown');
           assert.ok(Math.abs(boxes.dpr - zoom) < 0.000001);
           if ([0.8, 1, 1.25, 1.5, 2].includes(zoom)) await screenshot(`zoom-${zoom * 100}`, session);
         }
@@ -223,6 +266,13 @@ try {
       assert.equal(await mute.getAttribute('aria-describedby'), null);
       assert.equal(await slider.getAttribute('aria-describedby'), 'tm-volume-slider-value');
       await page.keyboard.press('Escape'); await page.mouse.move(1100, 700);
+      await page.locator('#movie_player, .video-player').press('ArrowUp');
+      assert.equal(await page.locator('[data-tm-volume-feedback]').textContent(), '35%', `${platform}: shared feedback also works with normalization off`);
+      assert.equal(await slider.inputValue(), '35');
+      assert.equal(await page.locator('video').evaluate(video => Math.round(video.volume * 100)), 35);
+      await page.locator('#movie_player, .video-player').press('ArrowDown');
+      assert.equal(await page.locator('[data-tm-volume-feedback]').textContent(), '30%');
+      if (youtube) assert.equal(await page.evaluate(() => window.__nativeVolumeKeys), 0, 'both normalization states prevent a second native player-key action');
       await page.waitForFunction(() => document.querySelector('#tm-volume-slider-overlay').classList.contains('tm-collapsed'));
       await page.waitForTimeout(260);
       assert.equal((await overlay.boundingBox()).width, 40);
