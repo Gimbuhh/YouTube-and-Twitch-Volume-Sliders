@@ -750,6 +750,55 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     };
   }
 
+  // src/platforms/youtube-volume-feedback.js
+  function createYouTubeVolumeFeedback({ window: window2, player }) {
+    let popup = null;
+    let timer = 0;
+    const clear = () => {
+      window2.clearTimeout(timer);
+      timer = 0;
+      popup?.remove();
+      popup = null;
+    };
+    const onKey = (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") clear();
+    };
+    player.addEventListener("pointerdown", clear, true);
+    player.addEventListener("keydown", onKey, true);
+    return {
+      show(value) {
+        const source = player.querySelector(".ytp-bezel-text-wrapper")?.parentElement;
+        const speaker = player.querySelector(".ytp-mute-button svg");
+        if (!source || !speaker) return;
+        if (!popup) {
+          popup = source.cloneNode(true);
+          popup.dataset.tmVolumeFeedback = "true";
+          popup.style.pointerEvents = "none";
+          for (const element of popup.querySelectorAll(".ytp-bezel-text-wrapper, .ytp-bezel")) {
+            element.style.animation = "none";
+            element.style.opacity = "1";
+          }
+          player.appendChild(popup);
+        }
+        const icon = speaker.cloneNode(true);
+        for (const use of icon.querySelectorAll("use")) use.remove();
+        popup.querySelector(".ytp-bezel-icon")?.replaceChildren(icon);
+        for (const element of [popup, ...popup.querySelectorAll("[id]")]) element.removeAttribute("id");
+        popup.querySelector(".ytp-bezel")?.setAttribute("aria-label", `Volume ${value}%`);
+        popup.querySelector(".ytp-bezel-text").textContent = `${value}%`;
+        popup.classList.remove("ytp-bezel-text-hide");
+        popup.style.display = "";
+        window2.clearTimeout(timer);
+        timer = window2.setTimeout(clear, 500);
+      },
+      dispose() {
+        clear();
+        player.removeEventListener("pointerdown", clear, true);
+        player.removeEventListener("keydown", onKey, true);
+      }
+    };
+  }
+
   // src/shared/normalization-ui.js
   function createNormalizationIcon(document2) {
     const icon = document2.createElement("span");
@@ -4285,6 +4334,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       createStylesIfNeeded();
       const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
       const cleanupRegistry = createCleanupRegistry();
+      const keyboardFeedback = createYouTubeVolumeFeedback({ window, player });
+      cleanupRegistry.add(() => keyboardFeedback.dispose());
       let hasPointerIntent = false;
       const markPointerIntent = () => {
         hasPointerIntent = true;
@@ -4347,7 +4398,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       } else {
         syncInitialSliderState(getVolume(video), isMuted(video));
       }
-      const applySliderValue = (value) => {
+      const applySliderValue = (value, { markInteraction = true } = {}) => {
         requestedVolumeIntent = { value, until: Date.now() + USER_VOLUME_INTENT_GRACE_MS, overlay };
         setVolume(video, value);
         saveMute(false);
@@ -4355,7 +4406,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         updateSliderBar(slider);
         updateVolumeIndicator(overlay, value, isMuted(video));
         scheduleSaveVolume(value);
-        markVolumeChangedWhileExpanded(overlay);
+        if (markInteraction) markVolumeChangedWhileExpanded(overlay);
       };
       cleanupRegistry.add(bindWheelVolumeStep({
         target: iconCell,
@@ -4384,7 +4435,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         cancelScheduledSaveVolume();
         saveVolume(Number(slider.value) || 0);
       });
-      const applyKeyboardVolumeStep = (event) => {
+      const applyKeyboardVolumeStep = (event, { markInteraction = true } = {}) => {
         const direction = event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
         if (!direction) return;
         event.preventDefault();
@@ -4394,7 +4445,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         const nextValue = clampVolume(currentValue + direction * KEYBOARD_VOLUME_STEP);
         if (nextValue === currentValue) return;
         slider.value = String(nextValue);
-        applySliderValue(nextValue);
+        applySliderValue(nextValue, { markInteraction });
       };
       slider.addEventListener("keydown", applyKeyboardVolumeStep);
       const applyPlayerKeyboardVolumeStep = (event) => {
@@ -4404,7 +4455,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
         if (!player.contains(event.target) && !player.contains(document.activeElement)) return;
         slider.value = String(getUnderlyingVolume(video));
-        applyKeyboardVolumeStep(event);
+        applyKeyboardVolumeStep(event, { markInteraction: false });
+        keyboardFeedback.show(Number(slider.value));
       };
       document.addEventListener("keydown", applyPlayerKeyboardVolumeStep, true);
       cleanupRegistry.add(() => document.removeEventListener("keydown", applyPlayerKeyboardVolumeStep, true));

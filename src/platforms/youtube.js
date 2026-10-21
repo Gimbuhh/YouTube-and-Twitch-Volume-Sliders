@@ -1,5 +1,6 @@
 import { createVolumeNormalizer } from '../shared/normalization.js';
 import { bindNativeVolumeInput } from '../shared/native-volume-input.js';
+import { createYouTubeVolumeFeedback } from './youtube-volume-feedback.js';
 import { updateNormalizationIcon } from '../shared/normalization-ui.js';
 import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
@@ -854,6 +855,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
         const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
         const cleanupRegistry = createCleanupRegistry();
+        const keyboardFeedback = createYouTubeVolumeFeedback({ window, player });
+        cleanupRegistry.add(() => keyboardFeedback.dispose());
 
         let hasPointerIntent = false;
         const markPointerIntent = () => {
@@ -922,7 +925,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             syncInitialSliderState(getVolume(video), isMuted(video));
         }
 
-        const applySliderValue = (value) => {
+        const applySliderValue = (value, { markInteraction = true } = {}) => {
             requestedVolumeIntent = { value, until: Date.now() + USER_VOLUME_INTENT_GRACE_MS, overlay };
             setVolume(video, value);
             saveMute(false);
@@ -930,7 +933,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             updateSliderBar(slider);
             updateVolumeIndicator(overlay, value, isMuted(video));
             scheduleSaveVolume(value);
-            markVolumeChangedWhileExpanded(overlay);
+            if (markInteraction) markVolumeChangedWhileExpanded(overlay);
         };
 
         cleanupRegistry.add(bindWheelVolumeStep({
@@ -963,7 +966,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             saveVolume(Number(slider.value) || 0);
         });
 
-        const applyKeyboardVolumeStep = (event) => {
+        const applyKeyboardVolumeStep = (event, { markInteraction = true } = {}) => {
             const direction = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
             if (!direction) return;
             event.preventDefault();
@@ -973,7 +976,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             const nextValue = clampVolume(currentValue + (direction * KEYBOARD_VOLUME_STEP));
             if (nextValue === currentValue) return;
             slider.value = String(nextValue);
-            applySliderValue(nextValue);
+            applySliderValue(nextValue, { markInteraction });
         };
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
@@ -984,7 +987,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
             if (!player.contains(event.target) && !player.contains(document.activeElement)) return;
             slider.value = String(getUnderlyingVolume(video));
-            applyKeyboardVolumeStep(event);
+            applyKeyboardVolumeStep(event, { markInteraction: false });
+            keyboardFeedback.show(Number(slider.value));
         };
         document.addEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
         cleanupRegistry.add(() => document.removeEventListener('keydown', applyPlayerKeyboardVolumeStep, true));

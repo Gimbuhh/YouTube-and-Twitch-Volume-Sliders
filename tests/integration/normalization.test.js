@@ -106,9 +106,20 @@ for (const config of platforms) {
       }
       f.document.getElementById('tm-volume-options-button').click();
       f.video.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
+      const overlay = f.document.getElementById('tm-volume-slider-overlay');
+      if (config.file === 'youtube') {
+        f.player.insertAdjacentHTML('beforeend', '<button class="ytp-mute-button"><svg><path/></svg></button><div data-layer="4" style="display:none"><div class="ytp-bezel-text-wrapper"><div class="ytp-bezel-text"></div></div><div class="ytp-bezel" role="status"><div class="ytp-bezel-icon"></div></div></div>');
+        overlay.classList.remove('tm-expanded'); overlay.classList.add('tm-collapsed');
+        overlay.dataset.tmKeepExpanded = 'false';
+      }
       for (const [key, expected] of [['ArrowUp', '30'], ['ArrowDown', '25']]) {
         f.player.dispatchEvent(new f.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
         await f.advance(.2); assert.equal(slider.value, expected);
+        if (config.file === 'youtube') {
+          assert.equal(overlay.classList.contains('tm-expanded'), false, 'player keys never expand the volume pill');
+          assert.equal(overlay.dataset.tmKeepExpanded, 'false');
+          assert.equal(f.player.querySelector('[data-tm-volume-feedback] .ytp-bezel-text').textContent, `${expected}%`);
+        }
       }
       f.toggle.click(); assert.equal(f.rawVolume(), 25);
     }

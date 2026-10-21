@@ -30,13 +30,15 @@ try {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const host = youtube
-      ? '<div id="movie_player"><video></video><div class="ytp-left-controls"><div class="ytp-volume-area"></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">Settings</button></div></div>'
+      ? '<div id="movie_player" tabindex="0"><video></video><div class="ytp-left-controls"><div class="ytp-volume-area"><button class="ytp-mute-button"><svg><path d="M8 15h4l5-5v16l-5-5H8z"/></svg></button></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">Settings</button></div><div data-layer="4" style="display:none" class="ytp-bezel-text-hide"><div class="ytp-bezel-text-wrapper"><div class="ytp-bezel-text"></div></div><div class="ytp-bezel" role="status" aria-label="Play"><div class="ytp-bezel-icon"></div></div></div></div>'
       : '<div class="video-player" data-a-target="player-overlay-click-handler"><video></video><div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button">Settings</button></div></div></div>';
     await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><style>
       body{margin:24px;background:#111;color:white;font-family:Arial}#movie_player,.video-player{position:relative;width:900px;height:330px;overflow:hidden;background:#222}
       video{display:block;width:900px;height:290px}.ytp-left-controls,.ytp-right-controls{position:absolute;bottom:0;height:40px;display:flex;align-items:center}.ytp-left-controls{left:0}.ytp-right-controls{right:0}
       [data-a-target="player-controls"]{height:40px;display:flex;align-items:center;justify-content:space-between}.player-controls__left-control-group,.player-controls__right-control-group{display:flex;align-items:center}
       .ytp-volume-area,[data-a-target="player-volume-slider"]{width:60px;height:32px}
+      .ytp-bezel-text-wrapper,.ytp-bezel{animation:1s forwards native-bezel-fade}
+      @keyframes native-bezel-fade{0%{opacity:0}25%,75%{opacity:1}100%{opacity:0}}
     </style></head><body>${host}</body></html>` }));
     try {
       await page.goto(youtube ? 'https://www.youtube.com/watch?v=icon' : 'https://www.twitch.tv/icon');
@@ -58,6 +60,31 @@ try {
       const slider = page.locator('#tm-volume-slider-range');
       await indicator.waitFor({ state: 'visible' });
       await page.waitForFunction(() => document.querySelector('video').volume < 0.2);
+      if (youtube) {
+        const native = await page.locator('[data-layer="4"]').evaluate(element => element.outerHTML);
+        for (const [key, value] of [['ArrowUp', '35'], ['ArrowDown', '30']]) {
+          await page.locator('#movie_player').press(key);
+          assert.equal(await slider.inputValue(), value);
+          assert.equal(await overlay.evaluate(element => element.classList.contains('tm-expanded')), false, 'player arrows keep the pill collapsed');
+          assert.equal(await page.locator('[data-tm-volume-feedback] .ytp-bezel-text').textContent(), `${value}%`);
+          assert.equal(await page.locator('video').evaluate(video => video.volume < .25), true, 'feedback never applies unnormalized volume');
+          assert.equal(await page.locator('[data-layer="4"]:not([data-tm-volume-feedback])').evaluate(element => element.outerHTML), native);
+        }
+        const repeatedKeysStarted = Date.now();
+        let repeats = 0;
+        while (Date.now() - repeatedKeysStarted < 2200 || repeats % 2) {
+          await page.locator('#movie_player').press(repeats % 2 ? 'ArrowDown' : 'ArrowUp');
+          const visible = await page.locator('[data-tm-volume-feedback]').evaluate(popup =>
+            [...popup.querySelectorAll('.ytp-bezel-text-wrapper, .ytp-bezel')].every(element => getComputedStyle(element).opacity === '1'));
+          assert.equal(visible, true, 'percentage and speaker stay visible beyond the native fade duration during repeated keys');
+          repeats++;
+          await page.waitForTimeout(100);
+        }
+        assert.equal(await slider.inputValue(), '30');
+        assert.equal(await overlay.evaluate(element => element.classList.contains('tm-expanded')), false);
+        await page.locator('[data-tm-volume-feedback]').waitFor({ state: 'detached' });
+        console.log('youtube: player arrows show percentage feedback, retain corrected output and leave the pill collapsed');
+      }
       const artwork = await indicator.innerHTML();
       assert.equal(await indicator.textContent(), '');
       assert.equal(await indicator.getAttribute('title'), 'Auto-normalize volume is on');

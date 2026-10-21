@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createRuntime } from '../helpers/runtime.js';
+import { createYouTubeVolumeFeedback } from '../../src/platforms/youtube-volume-feedback.js';
+
+test('keyboard feedback leaves native playback feedback intact and owns one transient popup', t => {
+  const f = createRuntime(); t.after(f.close);
+  f.document.body.innerHTML = '<div id="player"><button class="ytp-mute-button"><svg><use href="#speaker"/><path id="speaker" d="M0 0"/></svg></button><div data-layer="4" style="display:none" class="ytp-bezel-text-hide"><div class="ytp-bezel-text-wrapper"><div class="ytp-bezel-text"></div></div><div class="ytp-bezel" role="status" aria-label="Play"><div class="ytp-bezel-icon"><svg/></div></div></div></div>';
+  const player = f.document.getElementById('player'), native = player.querySelector('[data-layer]');
+  const original = native.outerHTML, timers = new Map(); let id = 0;
+  f.window.setTimeout = callback => { timers.set(++id, callback); return id; };
+  f.window.clearTimeout = key => timers.delete(key);
+  const feedback = createYouTubeVolumeFeedback({ window: f.window, player });
+  feedback.show(30); feedback.show(25);
+  assert.equal(player.querySelectorAll('[data-tm-volume-feedback]').length, 1);
+  assert.equal(timers.size, 1);
+  const popup = player.querySelector('[data-tm-volume-feedback]');
+  assert.equal(popup.querySelector('.ytp-bezel-text').textContent, '25%');
+  assert.equal(popup.querySelector('.ytp-bezel').getAttribute('aria-label'), 'Volume 25%');
+  assert.equal(popup.querySelectorAll('[id], use').length, 0);
+  assert.equal(native.outerHTML, original);
+  player.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: ' ' }));
+  assert.equal(player.querySelector('[data-tm-volume-feedback]'), null);
+  feedback.show(100); [...timers.values()][0]();
+  assert.equal(player.querySelector('[data-tm-volume-feedback]'), null);
+  feedback.show(0); feedback.dispose();
+  assert.equal(timers.size, 0);
+  assert.equal(native.outerHTML, original);
+  assert.equal(player.querySelector('[data-tm-volume-feedback]'), null);
+});

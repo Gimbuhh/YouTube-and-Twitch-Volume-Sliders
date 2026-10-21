@@ -8,7 +8,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 - **Both:** **Auto-normalize volume** keeps sources closer in loudness, limits boost during quiet audio to reduce sudden jumps, and preserves the chosen slider value and mute state.
   - The option starts disabled, saves separately for each site, and shows its current status under General → Audio in Volume Slider Options.
-  - Audio settings show adjusted output separately from the selected level. Stream restarts preserve the selection, and player volume arrows adjust it in five-point steps. Native volume controls still work.
+  - Audio settings show adjusted output separately from the selected level. Stream restarts preserve the selection, and player volume arrows adjust it in five-point steps. YouTube shows percentage feedback without expanding the volume pill. Native volume controls still work.
   - Normalization remembers recent louder audio through quieter passages and silent gaps.
   - Analysis starts without waiting for player controls to load; native capture needs no extra activation click.
   - Temporary audio access failures retry automatically.
