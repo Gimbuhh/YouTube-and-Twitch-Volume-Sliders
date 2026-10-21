@@ -176,6 +176,38 @@ test('temporary spike protection releases without holding the programme at the t
   assert.ok(gain < 1, 'the programme history still limits recovery conservatively');
 });
 
+test('brief loud passages do not replace the established listening level', () => {
+  const target = 10 ** ((-18 + .691) / 10);
+  for (const seconds of [.05, .25, .5, 1]) for (const excess of [12, 20]) {
+    const controller = createLufsGainController(), recent = [];
+    const update = power => {
+      recent.push(power);
+      if (recent.length > 8) recent.shift();
+      return controller.update({ power, rawPower: power / 2, duration: .05,
+        momentaryPower: recent.reduce((sum, value) => sum + value, 0) / recent.length });
+    };
+    let established, gain;
+    for (let i = 0; i < 100; i++) established = update(target * 2);
+    for (let i = 0; i < Math.round(seconds * 20); i++) {
+      gain = update(target * 2 * 10 ** (excess / 10));
+      assert.ok(gain <= Math.max(.1, established * 10 ** (-excess / 20)) + 1e-9, 'loud audio still cuts immediately');
+    }
+    for (let i = 0; i < 30; i++) gain = update(target * 2);
+    assert.ok(Math.abs(20 * Math.log10(gain / established)) < 1,
+      `${seconds}s event at +${excess} LU: ordinary audio recovers within 1 dB in 1.5 seconds`);
+  }
+});
+
+test('sustained louder material establishes a new listening level', () => {
+  const target = 10 ** ((-18 + .691) / 10), controller = createLufsGainController();
+  const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: .05 });
+  for (let i = 0; i < 100; i++) update(target * 2);
+  for (let i = 0; i < 100; i++) assert.ok(update(target * 8) <= Math.sqrt(1 / 8) + 1e-9);
+  let gain;
+  for (let i = 0; i < 20; i++) gain = update(target * 2);
+  assert.ok(gain < .4, 'a sustained loud passage retains the cautious programme recovery');
+});
+
 test('quiet word endings and speech gaps do not drive LUFS gain upward', () => {
   const controller = createLufsGainController();
   const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: 0.05 });

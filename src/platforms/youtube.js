@@ -681,10 +681,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!player) return;
         clearOptionsCloseControlsHide();
         player.classList.add('tm-volume-options-controls-hold');
-        player.classList.remove('ytp-autohide', 'ytp-hide-controls');
+        // Let YouTube resume its controls (including the playback clock) while
+        // their native hidden state is intact. Clearing it first skips that work.
         if (typeof player.showControls === 'function') {
             try { player.showControls(); } catch (e) { /* ignore player API errors */ }
         }
+        player.classList.remove('ytp-autohide', 'ytp-hide-controls');
     }
 
     function releaseYouTubeControlsVisibility() {

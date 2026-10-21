@@ -776,6 +776,23 @@ test('Twitch: active player video switch rebinds the custom slider',async()=>{
   runtime.close();
 });
 
+test('YouTube: Options lets the native player resume hidden controls before changing their classes',async()=>{
+  const {runtime,fixture}=await loadPlatform(platforms[0]);
+  let resumes=0;
+  fixture.player.showControls=()=>{
+    if (fixture.player.classList.contains('ytp-autohide') || fixture.player.classList.contains('ytp-hide-controls')) resumes++;
+    fixture.player.classList.remove('ytp-autohide','ytp-hide-controls');
+  };
+  fixture.player.classList.add('ytp-autohide');
+  runtime.document.getElementById('tm-volume-options-button').click();
+  assert.equal(resumes,1,'native visibility and time updates resume when Options opens');
+  fixture.player.classList.add('ytp-hide-controls');
+  await waitForTimers(runtime,20);
+  assert.equal(resumes,2,'a later native autohide goes through the same player API');
+  assert.ok(fixture.player.classList.contains('tm-volume-options-controls-hold'));
+  runtime.close();
+});
+
 test('YouTube: closing a scrolled options menu outside the player hides controls without forcing autohide',async()=>{
   const config=platforms[0];
   const {runtime,fixture}=await loadPlatform(config);

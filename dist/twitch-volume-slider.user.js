@@ -221,20 +221,18 @@
         while (history2.length && history2[0].time <= time - 3) history2.shift();
         if (dt === 0 || frame.rawPower < 1e-4 || frame.power <= 0) return gain;
         history2.push({ power: frame.power, duration: dt, time });
-        let duration = 0, energy = 0;
-        for (const item of history2) {
-          duration += item.duration;
-          energy += item.power * item.duration;
-        }
-        const threshold = energy / duration * 0.1;
-        let activeDuration = 0, activeEnergy = 0;
-        for (const item of history2) {
-          if (item.power < threshold) continue;
-          activeDuration += item.duration;
-          activeEnergy += item.power * item.duration;
+        let duration = 0;
+        for (const item of history2) duration += item.duration;
+        const ordered = history2.slice().sort((a, b) => a.power - b.power);
+        let cumulative = 0, rollingReference = 0;
+        for (const item of ordered) {
+          cumulative += item.duration;
+          if (cumulative >= duration / 2) {
+            rollingReference = item.power;
+            break;
+          }
         }
         referenceHold *= 10 ** (-0.5 * dt / 10);
-        const rollingReference = activeEnergy / activeDuration;
         if (duration >= 1) referenceHold = Math.max(referenceHold, rollingReference);
         const reference = Math.max(rollingReference, referenceHold);
         let desired = Math.min(maxGain, maxBoost, Math.max(0.1, Math.sqrt(targetPower / reference)));

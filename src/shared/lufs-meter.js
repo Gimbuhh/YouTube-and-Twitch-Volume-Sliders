@@ -116,8 +116,8 @@ export function createLufsMeter(sampleRate) {
   };
 }
 
-// The meter stays ungated. This separate live gain policy excludes quiet phrase
-// endings and preserves the noise-floor hold. Temporary protection recovers
+// The meter stays ungated. This separate live gain policy tracks the typical
+// active level and preserves the noise-floor hold. Temporary protection recovers
 // separately so one transient cannot keep the programme quiet for seconds.
 export function createLufsGainController() {
   // Source reference before the user's volume, close to the previous steady-tone
@@ -149,20 +149,21 @@ export function createLufsGainController() {
       while (history.length && history[0].time <= time - 3) history.shift();
       if (dt === 0 || frame.rawPower < 0.0001 || frame.power <= 0) return gain;
       history.push({ power: frame.power, duration: dt, time });
-      let duration = 0, energy = 0;
-      for (const item of history) { duration += item.duration; energy += item.power * item.duration; }
-      const threshold = energy / duration * 0.1;
-      let activeDuration = 0, activeEnergy = 0;
-      for (const item of history) {
-        if (item.power < threshold) continue;
-        activeDuration += item.duration;
-        activeEnergy += item.power * item.duration;
+      // Use the typical measured level, not a mean that a brief scream can
+      // dominate. Fast and momentary protection still cuts every loud frame;
+      // only sustained louder material should raise the remembered reference.
+      let duration = 0;
+      for (const item of history) duration += item.duration;
+      const ordered = history.slice().sort((a, b) => a.power - b.power);
+      let cumulative = 0, rollingReference = 0;
+      for (const item of ordered) {
+        cumulative += item.duration;
+        if (cumulative >= duration / 2) { rollingReference = item.power; break; }
       }
       // Remember established programme loudness across quieter backgrounds,
       // including ordinary game audio only a few LU below speech. Release
       // by 0.5 LU/s; silence holds the reference and source resets discard it.
       referenceHold *= 10 ** (-.5 * dt / 10);
-      const rollingReference = activeEnergy / activeDuration;
       if (duration >= 1) referenceHold = Math.max(referenceHold, rollingReference);
       const reference = Math.max(rollingReference, referenceHold);
       let desired = Math.min(maxGain, maxBoost, Math.max(0.1, Math.sqrt(targetPower / reference)));

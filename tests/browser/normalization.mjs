@@ -32,6 +32,7 @@ function wav(amplitude, channels = 1, frequency = 440) {
 
 const loud = wav(0.7), quiet = wav(0.06), stereo = wav(0.7, 2);
 const burst = wav(time => time < 4 ? 0.06 : 0.7);
+const screamReturn = wav(time => time >= 4 && time < 4.5 ? .7 : .1);
 // An ordinary background only 5 LU below speech catches reference loss that
 // the previous very quiet background (20 LU below speech) did not expose.
 const speechReturn = wav(time => time < 4 || time >= 9 ? .2 : .2 * 10 ** (-5 / 20));
@@ -159,7 +160,7 @@ try {
       if (path === '/finish-document.js') {
         return documentGate.then(() => route.fulfill({ contentType: 'text/javascript', body: 'document.querySelector("video").parentElement.append(...window.__startupControls);' }));
       }
-      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('speech-return') ? speechReturn : path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
+      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('scream-return') ? screamReturn : path.includes('speech-return') ? speechReturn : path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
       // YouTube can send a policy without blob: in script-src. Reproduce the
       // actual module rejection, rather than mocking addModule's return value.
       const headers = engine.startsWith('csp') ? { 'Content-Security-Policy': "script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none'" } : {};
@@ -408,6 +409,17 @@ try {
       assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
       assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
       console.log(`${platform} (${engine}) at ${preferred}%: loud-return correction after ${reactionMs.toFixed(1)} ms; ${worstBurstDb.toFixed(2)} dB above target after 250 ms`);
+      await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/scream-return.wav'; await v.play(); });
+      await page.waitForFunction(() => document.querySelector('video').currentTime >= 3.5);
+      const beforeScream = await page.evaluate(() => document.querySelector('video').volume);
+      await page.waitForFunction(() => document.querySelector('video').currentTime >= 4.2);
+      assert.ok(await page.evaluate(() => document.querySelector('video').volume) < beforeScream / 3, 'the brief scream still receives an immediate cut');
+      await page.waitForFunction(() => document.querySelector('video').currentTime >= 6);
+      const recoveryDb = 20 * Math.log10(await page.evaluate(() => document.querySelector('video').volume) / beforeScream);
+      assert.ok(Math.abs(recoveryDb) < 1.5, `ordinary audio recovers within 1.5 dB in 1.5 seconds: ${recoveryDb.toFixed(2)} dB`);
+      assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+      assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
+      console.log(`${platform} (${engine}): brief-scream recovery ${recoveryDb.toFixed(2)} dB from the established level after 1.5 seconds`);
       // The old mono analyser reads this audible stereo source as silence.
       await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/stereo.wav'; await v.play(); });
       await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred, { timeout: 3000 });
