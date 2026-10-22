@@ -41,14 +41,20 @@ const soft = wav(time => 0.016 + 0.012 * Math.sin(2 * Math.PI * time));
 const bass = wav(0.2, 1, 80), high = wav(0.2, 1, 4000);
 const browser = await chromium.launch({ headless: true, executablePath, args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--no-first-run'] });
 const attackResults = [];
+const startupResults = [];
 try {
   const cases = ['youtube', 'twitch'].flatMap(platform => [30, 40].map(preferred => [platform, preferred, 'lufs']));
   cases.push(['youtube', 30, 'csp'], ['twitch', 40, 'native'], ['twitch', 40, 'unsupported']);
   cases.push(['youtube', 30, 'csp-suspended'], ['twitch', 40, 'native-suspended'], ['youtube', 30, 'worklet-suspended']);
   cases.push(['youtube', 30, 'lufs-retry'], ['twitch', 40, 'native-retry']);
-  cases.push(['youtube', 30, 'csp-startup'], ['youtube', 30, 'lufs-startup'], ['twitch', 40, 'lufs-startup']);
+  cases.push(['youtube', 30, 'csp-startup'], ['youtube', 30, 'lufs-startup'], ['twitch', 40, 'lufs-startup'], ['twitch', 40, 'native-startup']);
   const selectedCases = process.env.VOLUME_SLIDER_NORMALIZATION_CASES?.split(',');
-  for (const [platform, preferred, engine] of cases.filter(parts => !selectedCases || selectedCases.includes(parts.join('/')))) {
+  const startupRepeats = Number(process.env.VOLUME_SLIDER_STARTUP_REPEATS || 1);
+  const startupLeadMs = Number(process.env.VOLUME_SLIDER_STARTUP_LEAD_MS || 0);
+  assert.ok(Number.isInteger(startupRepeats) && startupRepeats >= 1 && startupRepeats <= 20);
+  assert.ok(Number.isFinite(startupLeadMs) && startupLeadMs >= 0 && startupLeadMs <= 1000);
+  for (const [platform, preferred, engine] of cases.filter(parts => !selectedCases || selectedCases.includes(parts.join('/')))
+    .flatMap(parts => Array.from({length: parts[2].endsWith('-startup') ? startupRepeats : 1}, () => parts))) {
     const youtube = platform === 'youtube';
     const suspended = engine.endsWith('-suspended');
     const retrying = engine.endsWith('-retry');
@@ -80,11 +86,18 @@ try {
         window.__startupControls = [...player.querySelectorAll(${JSON.stringify(youtube ? '.ytp-left-controls, .ytp-right-controls' : '[data-a-target="player-controls"]')})];
         for (const control of window.__startupControls) control.remove();
       }
-      video.addEventListener('playing', () => { window.__startupPlayingAt = performance.now(); }, {once:true});
+      video.addEventListener('playing', () => {
+        window.__startupPlayingAt = performance.now();
+        window.__startupPlayingVolume = video.volume;
+      }, {once:true});
       video.addEventListener('volumechange', () => {
-        if (${startup} && window.__startupCorrectionAt == null && video.volume < ${preferred / 100 * .25}) window.__startupCorrectionAt = performance.now();
+        if (${startup} && window.__startupCorrectionAt == null && video.volume > 0 && video.volume < ${preferred / 100 * .35}) window.__startupCorrectionAt = performance.now();
       });
-      const api = {getVolume:()=>video.volume * ${youtube ? 100 : 1},setVolume:v=>{video.volume=v / ${youtube ? 100 : 1}},isMuted:()=>video.muted,mute:()=>{video.muted=true},unMute:()=>{video.muted=false},setMuted:v=>{video.muted=v}};
+      window.__startupWrites = [];
+      const api = {getVolume:()=>video.volume * ${youtube ? 100 : 1},setVolume:v=>{
+        video.volume=v / ${youtube ? 100 : 1};
+        if (${startup}) window.__startupWrites.push({volume:video.volume,measured:window.__lufsSeconds,time:performance.now()});
+      },isMuted:()=>video.muted,mute:()=>{video.muted=true},unMute:()=>{video.muted=false},setMuted:v=>{video.muted=v}};
       ${youtube ? 'Object.assign(player,api);' : 'player.__reactFiber$fixture={return:{memoizedProps:{mediaPlayerInstance:api},return:null}};'}
       localStorage.setItem('tm-${prefix}-volume','${preferred}');
       if (${suspended || retrying || startup}) localStorage.setItem('tm-${prefix}-volume-slider-normalization','true');
@@ -183,6 +196,10 @@ try {
           }
         })()`);
         await wait(`window.__normalizationContexts != null`);
+        await wait(`document.querySelector('video').volume === 0`);
+        if (startupLeadMs) {
+          await read(`new Promise(resolve => setTimeout(resolve, ${startupLeadMs}))`);
+        }
         await read(`document.querySelector('video').play()`);
         await wait(`window.__startupCorrectionAt != null`);
         assert.equal(await read(`document.readyState`), 'loading', 'analysis does not wait for DOMContentLoaded');
@@ -190,6 +207,20 @@ try {
         assert.equal(await read(`navigator.userActivation.hasBeenActive`), false);
         const reaction = await read(`window.__startupCorrectionAt - window.__startupPlayingAt`);
         assert.ok(reaction >= 0 && reaction < 500, `early correction after ${reaction.toFixed(1)} ms of playing`);
+        assert.equal(await read(`window.__startupPlayingVolume`), 0, 'playback begins with output held silent');
+        await wait(`window.__lufsSeconds >= .1`);
+        const writes = await read(`window.__startupWrites`);
+        const hold = writes.findIndex(write => write.volume === 0);
+        assert.ok(hold >= 0);
+        assert.ok(writes.slice(hold).some(write => write.volume > 0), 'captured audio is available despite zero player output');
+        assert.ok(writes.slice(hold).every(write => write.volume <= Math.max(1, Math.round(preferred * .1)) / 100
+          || write.measured >= .05 && write.volume < preferred / 100 * .35),
+          `startup never restores unmeasured output: ${JSON.stringify(writes)}`);
+        const playingAt = await read('window.__startupPlayingAt');
+        startupResults.push({platform, engine, reactionMs: reaction,
+          audibleMs: writes.slice(hold).find(write => write.volume > 0).time - playingAt,
+          matchedMs: writes.slice(hold).find(write => write.volume > Math.max(1, Math.round(preferred * .1)) / 100)?.time - playingAt,
+          firstOutput: writes.slice(hold).find(write => write.volume > 0).volume});
         completeDocument();
         await page.waitForSelector('#tm-volume-options-button');
         assert.equal(await read(`window.__normalizationCaptures`), 1, 'controls retain the early capture');
@@ -199,7 +230,7 @@ try {
         assert.equal(await read(`document.querySelector('video').volume`), preferred / 100);
         assert.ok(await read(`window.__normalizationTracks.length > 0 && window.__normalizationTracks.every(track => track.readyState === 'ended')`));
         assert.deepEqual(errors, []);
-        console.log(`${platform} (${engine}): correction ${reaction.toFixed(1)} ms after playing, before controls/DOMContentLoaded, without input; one capture, preference and cleanup passed`);
+        console.log(`${platform} (${engine}): protected audio after ${reaction.toFixed(1)} ms, before controls/DOMContentLoaded, without input; one capture, preference and cleanup passed`);
         continue;
       }
       if (retrying) {
@@ -266,6 +297,7 @@ try {
         assert.equal(await read(() => navigator.userActivation.hasBeenActive), false, 'no trusted input has activated this tab');
         if (engine === 'worklet-suspended') {
           await wait(() => window.__lufsOutputs.length > 0);
+          await wait(preference => document.querySelector('video').volume === preference / 100, preferred);
           assert.equal(await read(() => window.__lufsSeconds), 0);
           assert.equal(await read(() => document.querySelector('video').volume), preferred / 100);
         } else {
@@ -291,7 +323,7 @@ try {
           assert.ok(await page.evaluate(() => window.__normalizationContexts.every(context => ['closed', 'suspended'].includes(context.state))), 'source replacement does not activate the unused context');
         }
         await page.evaluate(() => { document.querySelector('video').muted = true; });
-        await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent === 'Muted');
+        await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent === 'Waiting for audio');
         await toggle.click();
         await page.waitForFunction(() => window.__normalizationContexts.every(context => context.state === 'closed'));
         // A retained capture stream can receive new tracks after a source
@@ -359,7 +391,7 @@ try {
       assert.match(await page.locator('#tm-volume-options-normalization-details').textContent(), /Reducing loud audio/);
       // A native mute must survive both analysis ticks and disabling the mode.
       await page.evaluate(() => { document.querySelector('video').muted = true; });
-      await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent === 'Muted');
+      await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent === 'Waiting for audio');
       await toggle.click();
       assert.deepEqual(await page.evaluate(() => ({ volume: document.querySelector('video').volume, muted: document.querySelector('video').muted })), { volume: preferred / 100, muted: true });
       await page.evaluate(() => { document.querySelector('video').muted = false; });
@@ -483,4 +515,5 @@ try {
 } finally {
   await browser.close();
   if (process.env.VOLUME_SLIDER_ATTACK_REPORT) await writeFile(process.env.VOLUME_SLIDER_ATTACK_REPORT, JSON.stringify(attackResults, null, 2));
+  if (process.env.VOLUME_SLIDER_STARTUP_REPORT) await writeFile(process.env.VOLUME_SLIDER_STARTUP_REPORT, JSON.stringify(startupResults, null, 2));
 }

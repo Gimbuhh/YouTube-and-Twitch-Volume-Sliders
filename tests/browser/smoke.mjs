@@ -593,8 +593,84 @@ async function youtubeOptionsPositionSmoke(browser) {
   console.log('browser smoke: YouTube options ignore hidden and unrelated progress bars, with button fallback');
 }
 
+async function optionsScrollSmoke(browser, platform) {
+  const youtube = platform === 'youtube';
+  const playerSelector = youtube ? '#movie_player' : '.video-player';
+  const html = (youtube ? youtubeHtml : twitchHtml).replace('<body>', `<body><div id="options-page-scroll" style="${youtube ? '' : 'height:650px;overflow:auto'}"><div style="height:120px"></div><div style="transform:translateZ(0);overflow:hidden">`)
+    .replace('<div class="spacer">', '</div><div class="spacer">')
+    .replace('</body>', `${youtube ? '' : '</div><div style="height:1800px"></div>'}</div></body>`);
+  const { context, page, pageErrors } = await preparedPage(browser, {
+    platform, url: youtube ? 'https://www.youtube.com/watch?v=smoke' : 'https://www.twitch.tv/test', html,
+    storage: { [`tm-${youtube ? 'yt' : 'twitch'}-volume-slider-mode`]: 'replace-native' }
+  });
+  const popup = page.locator('#tm-volume-options-popup');
+  const button = page.locator('#tm-volume-options-button');
+  const scrollPage = value => page.evaluate(({youtube, value}) => {
+    if (youtube) window.scrollTo(0, value);
+    else document.getElementById('options-page-scroll').scrollTop = value;
+  }, {youtube, value});
+  const geometry = () => popup.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, height: rect.height,
+      anchorTop: document.getElementById('tm-volume-options-button').getBoundingClientRect().top,
+      hit: element.contains(document.elementFromPoint(rect.left + rect.width / 2, Math.max(20, rect.top + 20))),
+      viewport: innerHeight };
+  });
+  try {
+    await button.click();
+    const normal = await geometry();
+    await page.keyboard.press('Escape');
+    await scrollPage(300);
+    await button.click();
+    const scrolled = await geometry();
+    assert.ok(Math.abs(scrolled.height - normal.height) < 1, `${platform}: scrolling the page preserves full menu height: ${JSON.stringify({normal, scrolled})}`);
+    assert.ok(Math.abs(scrolled.bottom - scrolled.anchorTop + 8) < 1,
+      `${platform}: the menu opens directly above its button instead of shifting downward: ${JSON.stringify(scrolled)}`);
+    assert.equal(scrolled.hit, true, `${platform}: the visible portion of the scrolled menu receives input`);
+    await scrollPage(380);
+    await page.waitForFunction(offset => {
+      const popup = document.getElementById('tm-volume-options-popup');
+      const rect = popup.getBoundingClientRect();
+      const anchor = document.getElementById('tm-volume-options-button').getBoundingClientRect();
+      return Math.abs(rect.top - anchor.top - offset) < 1;
+    }, scrolled.top - scrolled.anchorTop, {timeout:3000});
+    const moved = await geometry();
+    assert.ok(moved.top < scrolled.top - 50, `${platform}: the menu scrolls with its player instead of floating against the viewport`);
+    assert.ok(Math.abs((await geometry()).height - normal.height) < 1, `${platform}: scrolling with Options open preserves its height`);
+    await scrollPage(0);
+    await page.waitForFunction(top => Math.abs(document.getElementById('tm-volume-options-popup').getBoundingClientRect().top - top) < 1, normal.top);
+    await page.locator('#tm-volume-options-tab-appearance').click();
+    await page.waitForFunction(() => document.getElementById('tm-volume-options-popup').getBoundingClientRect().bottom <= innerHeight - 7);
+    await page.locator('#tm-volume-options-tab-general').click();
+    await page.locator(playerSelector).evaluate(element => element.requestFullscreen());
+    await page.waitForFunction(() => document.fullscreenElement?.contains(document.getElementById('tm-volume-options-popup')));
+    assert.equal((await geometry()).hit, true, `${platform}: fullscreen keeps Options interactive`);
+    await page.evaluate(() => document.exitFullscreen());
+    await page.waitForFunction(() => !document.fullscreenElement);
+    await page.setViewportSize({width:1280, height:320});
+    await scrollPage(320);
+    await page.waitForFunction(() => {
+      const rect = document.getElementById('tm-volume-options-popup').getBoundingClientRect();
+      const anchor = document.getElementById('tm-volume-options-button').getBoundingClientRect();
+      return rect.height <= innerHeight - 15 && Math.abs(rect.bottom - anchor.top + 8) < 1;
+    });
+    assert.ok((await geometry()).height < normal.height, `${platform}: a genuinely short viewport still limits the menu`);
+    await page.keyboard.press('Escape');
+    assert.equal(await button.evaluate(element => element === document.activeElement), true, `${platform}: Escape restores focus to the opener`);
+    await button.click();
+    await page.locator(playerSelector).evaluate(element => element.remove());
+    await popup.waitFor({state:'detached'});
+    assert.deepEqual(pageErrors, [], `${platform}: scrolled Options has no page errors`);
+    console.log(`browser smoke: ${platform} full-size Options opens above its button and scrolls with its player; tabs, fullscreen, short viewport and detached-player removal passed`);
+  } finally {
+    await context.close();
+  }
+}
+
 const browser=await chromium.launch({headless:true,executablePath,args:['--disable-background-networking','--disable-component-update','--no-first-run']});
 try{
+  await optionsScrollSmoke(browser, 'youtube');
+  await optionsScrollSmoke(browser, 'twitch');
   await youtubeOptionsPositionSmoke(browser);
   await twitchZoomSmoke(browser);
   await modeDropdownSmoke(browser, 'youtube');

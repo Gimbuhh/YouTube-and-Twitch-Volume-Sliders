@@ -79,6 +79,7 @@
   }
 
   // src/shared/lufs-meter.js
+  var MIN_NORMALIZATION_GAIN = 0.1;
   function createLufsMeter(sampleRate) {
     if (!Number.isFinite(sampleRate) || sampleRate < 8e3) throw new RangeError("Invalid audio sample rate");
     const shelfK = Math.tan(Math.PI * 1681.974450955533 / sampleRate);
@@ -211,7 +212,7 @@
           const state = attackState(power);
           if (!state) return gain;
           if (state === 2) fastUntil = time + 0.1;
-          gain = Math.min(gain, Math.max(0.1, Math.sqrt(targetPower / power)));
+          gain = Math.min(gain, Math.max(MIN_NORMALIZATION_GAIN, Math.sqrt(targetPower / power)));
           return gain;
         }
         const dt = Math.min(0.25, Math.max(0, frame.duration));
@@ -234,7 +235,7 @@
         referenceHold *= 10 ** (-0.5 * dt / 10);
         if (duration >= 1) referenceHold = Math.max(referenceHold, rollingReference);
         const reference = Math.max(rollingReference, referenceHold);
-        let desired = Math.min(maxGain, maxBoost, Math.max(0.1, Math.sqrt(targetPower / reference)));
+        let desired = Math.min(maxGain, maxBoost, Math.max(MIN_NORMALIZATION_GAIN, Math.sqrt(targetPower / reference)));
         if (!referenceHold) desired = Math.min(1, desired);
         if (desired < programmeGain) programmeGain = desired;
         else {
@@ -242,7 +243,7 @@
           programmeGain = Math.exp(Math.log(programmeGain) + (Math.log(desired) - Math.log(programmeGain)) * (1 - Math.exp(-dt / seconds)));
         }
         const safetyPower = Math.max(frame.momentaryPower ?? frame.power, frame.power > reference * 4 ? frame.power : 0);
-        const ceiling = Math.min(maxGain, Math.max(0.1, Math.sqrt(targetPower / safetyPower)));
+        const ceiling = Math.min(maxGain, Math.max(MIN_NORMALIZATION_GAIN, Math.sqrt(targetPower / safetyPower)));
         desired = Math.min(programmeGain, ceiling);
         if (desired < gain) gain = desired;
         else {
@@ -279,8 +280,12 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
     const url = window2.URL.createObjectURL(new window2.Blob([source], { type: "application/javascript" }));
     const loaded = Promise.resolve().then(() => context.audioWorklet.addModule(url)).finally(() => window2.URL.revokeObjectURL(url));
     modules.set(context, loaded);
-    loaded.catch(() => modules.delete(context));
     return loaded;
+  }
+  async function prepareLufsAnalysis({ window: window2, context }) {
+    if (context.audioWorklet && window2.AudioWorkletNode && window2.URL?.createObjectURL && window2.Blob) {
+      await loadMeter(window2, context);
+    }
   }
   function createLufsAnalysis({ window: window2, context, track, onFrame, onFailure }) {
     const hasWorklet = context.audioWorklet && window2.AudioWorkletNode && window2.URL?.createObjectURL && window2.Blob;
@@ -453,7 +458,20 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     function restore(owned) {
       const preferred = readPreferred(owned);
       owned.gain = 1;
+      owned.awaitingFrame = false;
+      owned.startupPower = 0;
       writeOutput(owned, preferred);
+      owned.lufsTracker = null;
+      owned.lastLufsFrame = null;
+      owned.catchUpAfter = 0;
+      owned.analysisStarted = window2.performance.now();
+    }
+    function resetAnalysis(owned) {
+      readPreferred(owned);
+      owned.gain = 0;
+      owned.awaitingFrame = true;
+      owned.startupPower = 0;
+      writeOutput(owned, 0);
       owned.lufsTracker = null;
       owned.lastLufsFrame = null;
       owned.catchUpAfter = 0;
@@ -490,12 +508,9 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       for (const track2 of owned.stream.getVideoTracks()) track2.stop();
       const track = owned.stream.getAudioTracks().find((item) => item.readyState === "live");
       if (!track || track === owned.track) return;
-      if (owned.track) restore(owned);
+      resetAnalysis(owned);
       owned.lufs?.dispose();
-      owned.lastLufsFrame = null;
       owned.track = track;
-      owned.lufsTracker = null;
-      owned.analysisStarted = window2.performance.now();
       owned.lufs = createLufsAnalysis({
         window: window2,
         context: owned.context,
@@ -506,14 +521,28 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           owned.catchUpAfter = 0;
           if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || owned.preferred === 0 || owned.lufs?.needsActivation) return;
           try {
+            if (owned.awaitingFrame && frame.attackPower != null) {
+              if (!Number.isFinite(frame.attackPower) || frame.attackPower <= 0 || isMuted(owned.video)) return;
+              owned.startupPower = Math.max(owned.startupPower, frame.attackPower);
+              if (owned.gain === 0) {
+                readPreferred(owned);
+                owned.gain = MIN_NORMALIZATION_GAIN;
+                writeOutput(owned, owned.preferred * owned.gain);
+              }
+              return;
+            }
             owned.lufsTracker || (owned.lufsTracker = createLufsGainController());
             if (frame.attackPower != null && !owned.lufsTracker.wantsAttack(frame.attackPower)) return;
             if (isMuted(owned.video)) return;
             readPreferred(owned);
-            owned.lufsTracker || (owned.lufsTracker = createLufsGainController());
-            owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
+            const starting = owned.awaitingFrame;
+            owned.gain = owned.lufsTracker.update(
+              starting ? { ...frame, momentaryPower: Math.max(frame.momentaryPower ?? frame.power, owned.startupPower) } : frame,
+              100 / Math.max(1, owned.preferred)
+            );
             const output = owned.preferred * owned.gain;
-            if (outputPercent(output) < owned.applied) writeOutput(owned, output);
+            owned.awaitingFrame = false;
+            if (starting || outputPercent(output) < owned.applied) writeOutput(owned, output);
           } catch {
             unavailable(owned);
           }
@@ -533,6 +562,15 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       owned.context.resume().catch(() => {
       }).finally(() => {
         owned.resuming = false;
+      });
+    }
+    function prepareContext(owned) {
+      if (owned.context || owned.video.mediaKeys) return;
+      const AudioContext = window2.AudioContext || window2.webkitAudioContext;
+      const hasAnalysis = window2.MediaStreamTrackProcessor || window2.AudioWorkletNode && window2.Blob && window2.URL?.createObjectURL;
+      if (!(owned.video.captureStream || owned.video.mozCaptureStream) || !AudioContext || !window2.MediaStream || !hasAnalysis) return;
+      owned.context = new AudioContext();
+      prepareLufsAnalysis({ window: window2, context: owned.context }).catch(() => {
       });
     }
     function tick() {
@@ -567,12 +605,13 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           const AudioContext = window2.AudioContext || window2.webkitAudioContext;
           const hasAnalysis = window2.MediaStreamTrackProcessor || window2.AudioWorkletNode && window2.Blob && window2.URL?.createObjectURL;
           if (!capture || !AudioContext || !window2.MediaStream || !hasAnalysis) {
+            restore(owned);
             owned.blocked = true;
             report("Unavailable in this browser");
             return;
           }
           owned.stream = capture.call(video);
-          owned.context = new AudioContext();
+          owned.context || (owned.context = new AudioContext());
           owned.onTrack = () => {
             try {
               connectTrack(owned);
@@ -588,23 +627,32 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         if (!owned.track || owned.track.readyState !== "live") connectTrack(owned);
         if (owned.blocked) return;
         readPreferred(owned);
+        if (owned.awaitingFrame) writeOutput(owned, owned.preferred * owned.gain);
         if (owned.lufs?.needsActivation) {
+          if (owned.awaitingFrame && owned.resuming && now - owned.analysisStarted < 3e3) {
+            report("Starting audio analysis");
+            return;
+          }
           restore(owned);
           report("Click the player to activate");
           return;
         }
         if (!owned.track || owned.track.muted || owned.track.readyState !== "live") {
-          restore(owned);
+          if (!owned.awaitingFrame) restore(owned);
+          else if (now - owned.analysisStarted > 3e3) {
+            unavailable(owned);
+            return;
+          }
           report("Waiting for accessible audio");
           return;
         }
         if (isMuted(video) || owned.preferred === 0) {
           owned.lastLufsFrame = null;
           owned.analysisStarted = window2.performance.now();
-          report("Muted");
+          report("Waiting for audio");
           return;
         }
-        const starting = owned.lastLufsFrame == null;
+        const starting = owned.awaitingFrame || owned.lastLufsFrame == null;
         if (now - (starting ? owned.analysisStarted : owned.lastLufsFrame) > (starting ? 3e3 : 500)) {
           if (delayed && !owned.catchUpAfter) owned.catchUpAfter = now + 100;
           if (now < (owned.catchUpAfter || 0)) return;
@@ -634,6 +682,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         window2.clearInterval(owned2.timer);
         for (const type of ["emptied", "loadstart"]) owned2.video.removeEventListener(type, owned2.reset);
         for (const type of ["playing", "loadedmetadata"]) owned2.video.removeEventListener(type, owned2.retry);
+        owned2.video.removeEventListener("volumechange", owned2.holdOutput);
         window2.document.removeEventListener("pointerdown", owned2.gesture, true);
         window2.document.removeEventListener("keydown", owned2.gesture, true);
         releaseCapture(owned2);
@@ -655,19 +704,36 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       };
       owned.reset = () => {
         try {
-          restore(owned);
+          resetAnalysis(owned);
         } catch {
         }
-        releaseCapture(owned);
+        if (owned.stream) releaseCapture(owned);
         owned.blocked = false;
         owned.retryAt = 0;
         owned.retryDelay = 1e3;
         report("Waiting for playback");
+        try {
+          prepareContext(owned);
+        } catch {
+          unavailable(owned);
+        }
       };
       owned.retry = () => {
         owned.blocked = false;
         owned.retryAt = 0;
         tick();
+      };
+      owned.holdOutput = () => {
+        if (!owned.awaitingFrame || owned.writing) return;
+        window2.queueMicrotask(() => {
+          if (session !== owned || !owned.video.isConnected || !owned.awaitingFrame) return;
+          try {
+            readPreferred(owned);
+            writeOutput(owned, owned.preferred * owned.gain);
+          } catch {
+            unavailable(owned);
+          }
+        });
       };
       owned.gesture = () => {
         if (owned.blocked && owned.retryAt) owned.retry();
@@ -678,9 +744,16 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       };
       for (const type of ["emptied", "loadstart"]) video.addEventListener(type, owned.reset);
       for (const type of ["playing", "loadedmetadata"]) video.addEventListener(type, owned.retry);
+      video.addEventListener("volumechange", owned.holdOutput);
       window2.document.addEventListener("pointerdown", owned.gesture, true);
       window2.document.addEventListener("keydown", owned.gesture, true);
       owned.timer = window2.setInterval(tick, 50);
+      try {
+        resetAnalysis(owned);
+        prepareContext(owned);
+      } catch {
+        unavailable(owned);
+      }
       tick();
     }
     return {
@@ -701,11 +774,12 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         if (!owned || owned.writing) return;
         const actual = clampVolume(getVolume(video));
         if (Math.abs(actual - owned.applied) > 0.6) {
-          owned.preferred = Math.round(clampVolume(owned.applied > 0 ? owned.preferred * actual / owned.applied : actual));
+          owned.preferred = Math.round(clampVolume(owned.applied > 0 && !owned.awaitingFrame ? owned.preferred * actual / owned.applied : actual));
           owned.applied = actual;
           owned.lastWriteAt = window2.performance.now();
         }
         owned.outputChanged = false;
+        if (owned.awaitingFrame) writeOutput(owned, owned.preferred * owned.gain);
       },
       setPreferredVolume(video, value, options) {
         let output = clampVolume(value);
@@ -872,7 +946,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
   }
   function updateNormalizationIcon(overlay, status) {
     if (!overlay) return;
-    const visible = status.startsWith("Active") || status === "Waiting for playback" || status === "Starting audio analysis" || status === "Muted";
+    const visible = status.startsWith("Active") || status === "Waiting for playback" || status === "Starting audio analysis" || status === "Waiting for audio";
     const icon = overlay.querySelector(".tm-normalization-icon");
     const description = overlay.querySelector(".tm-normalization-description");
     if (!icon || !description || icon.hidden === !visible) return;
@@ -4190,10 +4264,9 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       popup.style.left = "auto";
       popup.style.top = "auto";
       const margin = 8;
-      const viewportTop = window.visualViewport?.offsetTop ?? 0;
-      const popupBottomY = playerRect.bottom - Math.max(margin, bottomPx);
-      const minTop = Math.max(playerRect.top + margin, viewportTop + margin);
-      popup.style.maxHeight = `${Math.floor(Math.max(120, popupBottomY - minTop))}px`;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const playerHeight = playerRect.height - Math.max(margin, bottomPx) - margin;
+      popup.style.maxHeight = `${Math.floor(Math.max(120, Math.min(playerHeight, viewportHeight - margin * 2)))}px`;
       const body = popup.querySelector(".tm-volume-options-body");
       if (!body) return;
       if (resetScroll) body.scrollTop = 0;

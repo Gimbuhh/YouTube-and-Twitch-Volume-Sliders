@@ -903,10 +903,10 @@ export function startTwitchVolumeSlider() {
         popup.style.top = 'auto';
 
         const margin = 8;
-        const viewportTop = window.visualViewport?.offsetTop ?? 0;
-        const popupBottomY = playerRect.bottom - Math.max(margin, bottomPx);
-        const minTop = Math.max(playerRect.top + margin, viewportTop + margin);
-        popup.style.maxHeight = `${Math.floor(Math.max(120, popupBottomY - minTop))}px`;
+        // Scrolling must not change the player's menu height or its anchor.
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+        const playerHeight = playerRect.height - Math.max(margin, bottomPx) - margin;
+        popup.style.maxHeight = `${Math.floor(Math.max(120, Math.min(playerHeight, viewportHeight - margin * 2)))}px`;
 
         const body = popup.querySelector('.tm-volume-options-body');
         if (!body) return;

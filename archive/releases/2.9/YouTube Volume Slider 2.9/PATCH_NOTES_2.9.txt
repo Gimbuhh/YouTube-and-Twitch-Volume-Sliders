@@ -4,7 +4,7 @@
   - The feature starts off. Enable **Volume Slider Options → General → Audio → Auto-normalize volume** separately on each site; a status below the toggle shows whether it is active, waiting, or unavailable.
   - Quiet audio receives limited boost, with the usual listening level remembered through quiet passages and silent gaps. Brief loud sounds reduce volume without leaving it low afterward. Audio settings show the adjusted output percentage.
   - Stream restarts preserve your selected level. Player volume arrows change it in five-point steps; native volume controls still work.
-  - Normalization starts without waiting for player controls to load. Native audio analysis needs no extra activation click.
+  - Startup audio comes in softly under protection while normalization finds the right level, including after a source restart. Analysis starts before player controls load; native capture needs no extra activation click.
   - Temporary audio access failures recover automatically when capture becomes available.
   - A small waveform icon shows normalization is on. Pause and mute keep it visible; blocked or unavailable analysis hides it.
   - Turning normalization off or setting slider mode to Off restores your chosen volume while preserving mute. If the browser cannot analyze a stream, ordinary playback continues at your chosen level.
@@ -18,6 +18,7 @@
 ## Fixed
 
 - **Both:** Slider drags finish cleanly without duplicate handling or interruptions from unrelated page releases.
+- **Both:** Volume Slider Options retains its normal height on scrolled pages and always opens above the player controls, scrolling with the video.
 - **YouTube:** Volume and mute controls remain usable while the player API is unavailable or recovering.
 - **YouTube:** Opening Volume Slider Options keeps the elapsed and remaining time updating.
 - **YouTube:** Volume Slider Options opens visibly on videos where hidden progress bars previously positioned the menu above the player. It uses the visible progress bar or the options button.

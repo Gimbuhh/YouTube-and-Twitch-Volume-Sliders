@@ -241,6 +241,7 @@ try {
       await page.locator('#tm-volume-options-location-video').click();
       await page.keyboard.press('Escape'); await mute.focus(); await page.keyboard.press('Space');
       await page.waitForFunction(() => document.querySelector('video').muted);
+      await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent === 'Waiting for audio');
       assert.equal(await indicator.isVisible(), true);
       assert.equal(await indicator.innerHTML(), artwork);
       await mute.click();

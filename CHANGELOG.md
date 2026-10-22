@@ -10,7 +10,7 @@ All notable changes to the maintained userscripts are documented here. Historica
   - The option starts disabled, saves separately for each site, and shows its current status under General → Audio in Volume Slider Options.
   - Audio settings show adjusted output separately from the selected level. Stream restarts preserve the selection, and player volume arrows adjust it in five-point steps. Native volume controls still work.
   - Normalization remembers the usual listening level through quiet passages and silent gaps, and recovers promptly after brief loud sounds.
-  - Analysis starts without waiting for player controls to load; native capture needs no extra activation click.
+  - Audio starts softly under protection as soon as samples arrive. Analysis starts before player controls load; native capture needs no extra activation click.
   - Temporary audio access failures retry automatically.
   - A waveform icon shows normalization is on, including during pause and mute, and hides if analysis is blocked or unavailable.
   - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.
@@ -23,6 +23,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 ### Fixed
 
 - **Both:** Slider drags finish once, without reacting to unrelated page releases.
+- **Both:** Volume Slider Options keeps its normal height on scrolled pages and stays attached above the player controls.
 - **YouTube:** Volume and mute controls keep working when the player API is temporarily unavailable.
 - **YouTube:** The playback time keeps updating while Volume Slider Options is open.
 - **YouTube:** Volume Slider Options stays visible when YouTube retains a hidden progress bar before the active controls. The popup anchors to a rendered progress bar in the current player, falling back to its own button when none is available.
@@ -32,7 +33,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Known limitations
 
-- **Both:** Normalization requires supported browser audio capture and an accessible stream. Approximate loudness leveling cannot anticipate a new source's first loud moment or eliminate all perceived differences.
+- **Both:** Normalization requires supported browser audio capture and an accessible stream. Approximate loudness leveling cannot eliminate every short peak or perceived difference.
 
 ## 2.8.3 - 2026-09-11
 

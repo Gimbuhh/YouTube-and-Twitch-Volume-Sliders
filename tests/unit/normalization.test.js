@@ -8,7 +8,7 @@ function fixture() {
   const timers = new Map();
   let timerId = 0;
   const window = {
-    EventTarget, document: new EventTarget(), performance: { now: () => now },
+    EventTarget, document: new EventTarget(), performance: { now: () => now }, queueMicrotask,
     setInterval: callback => { timers.set(++timerId, callback); return timerId; },
     clearInterval: id => timers.delete(id)
   };
@@ -136,12 +136,12 @@ test('native analysis works with a suspended context through mute, pause, source
     assert.ok(f.raw < 20, 'native samples normalize without activating the unused context');
     const output = f.raw;
     f.video.muted = true; readers[0].send(); await f.advance(.1);
-    assert.equal(f.normalizer.getStatus(), 'Muted'); assert.equal(f.raw, output);
+    assert.equal(f.normalizer.getStatus(), 'Waiting for audio'); assert.equal(f.raw, output);
     f.video.muted = false; f.audio.paused = true; readers[0].send(); await f.advance(.1);
     assert.equal(f.normalizer.getStatus(), 'Waiting for playback'); assert.equal(f.raw, output);
     f.audio.paused = false; f.normalizer.setPreferredVolume(f.video, 0, { preserveMute: true });
     readers[0].send(); await f.advance(.1);
-    assert.equal(f.raw, 0); assert.equal(f.normalizer.getStatus(), 'Muted');
+    assert.equal(f.raw, 0); assert.equal(f.normalizer.getStatus(), 'Waiting for audio');
     f.normalizer.setPreferredVolume(f.video, 50, { preserveMute: true });
     f.video.dispatchEvent(new Event('emptied')); await f.advance(.05);
     await new Promise(resolve => setImmediate(resolve)); // Allow a rejected module to hand off to native frames.
@@ -198,11 +198,11 @@ test('silent samples hold the correction while capture remains Active', async ()
 });
 
 test('loud measurements cut output immediately while recovery waits for the output timer', async () => {
-  const f = fixture(); await f.start();
+  const f = fixture(); await f.start(); await f.advance(.1);
   const frame = (power, rawPower = power / 2) => f.audio.nodes[0].port.onmessage({ data: { power, rawPower, momentaryPower: power, duration: .02 } });
   // Keep this timer-ownership check independent of programme history: a fast
   // spike cuts output without teaching the controller a new source level.
-  f.audio.nodes[0].port.onmessage({ data: { attackPower: 1 } });
+  f.audio.nodes[0].port.onmessage({ data: { attackPower: 10 } });
   assert.ok(f.raw < 10, 'a cut does not wait for any polling timer');
   const reduced = f.raw;
   for (let i = 0; i < 200; i++) frame(.002);
@@ -262,12 +262,13 @@ test('steady capture avoids repeated track scans and still picks up a replacemen
 
 test('fast measurements leave paused, muted and detached players alone', async () => {
   for (const state of ['paused', 'muted', 'detached']) {
-    const f = fixture(); await f.start();
+    const f = fixture(); await f.start(); await f.advance(.1);
+    const output = f.raw;
     if (state === 'paused') f.audio.paused = true;
     if (state === 'muted') f.video.muted = true;
     if (state === 'detached') f.video.isConnected = false;
     f.audio.nodes[0].port.onmessage({ data: { power: 1, rawPower: .5, momentaryPower: 1, duration: .02 } });
-    assert.equal(f.raw, 50);
+    assert.equal(f.raw, output);
     f.normalizer.setEnabled(false);
   }
 });
@@ -402,7 +403,7 @@ test('pause and mute stop adjustments; zero preference remains zero', async () =
   const f = fixture(); await f.start(); await f.advance();
   const before = f.raw;
   f.video.muted = true; f.audio.amplitude = 0.02; await f.advance(10);
-  assert.equal(f.raw, before); assert.equal(f.normalizer.getStatus(), 'Muted');
+  assert.equal(f.raw, before); assert.equal(f.normalizer.getStatus(), 'Waiting for audio');
   f.audio.paused = true; await f.advance(); assert.equal(f.raw, before);
   f.normalizer.setPreferredVolume(f.video, 0, { preserveMute: true });
   f.audio.paused = false; f.video.muted = false; await f.advance();
@@ -432,7 +433,7 @@ test('capture/access errors fall back without changing mute or leaving resources
 
 test('muted capture and suspended context restore ordinary volume and can recover', async () => {
   const f = fixture(); await f.start(); await f.advance();
-  f.audio.streams[0].getAudioTracks()[0].muted = true; await f.advance();
+  f.audio.streams[0].getAudioTracks()[0].muted = true; await f.advance(.1);
   assert.equal(f.raw, 50); assert.match(f.normalizer.getStatus(), /accessible/);
   f.audio.streams[0].getAudioTracks()[0].muted = false; await f.advance(); assert.ok(f.raw < 20);
   f.audio.contexts[0].state = 'suspended'; await f.advance();
@@ -444,7 +445,7 @@ test('source changes and detachment release capture; rebinding does not accumula
   const f = fixture(); await f.start(); await f.advance();
   f.normalizer.bind(f.video); assert.equal(f.audio.captures, 1);
   f.video.dispatchEvent(new Event('emptied'));
-  assert.equal(f.raw, 50); assert.equal(f.audio.contexts[0].closed, true);
+  assert.equal(f.raw, 0); assert.equal(f.audio.contexts[0].closed, true);
   await f.advance(); assert.equal(f.audio.captures, 2); assert.ok(f.raw < 20);
   assert.equal(f.timers.size, 2);
   f.video.isConnected = false; await f.advance(); assert.equal(f.timers.size, 0);
@@ -495,16 +496,197 @@ test('unsupported browsers and protected content leave ordinary playback intact'
   assert.equal(protectedVideo.audio.captures, 0); assert.equal(protectedVideo.raw, 50);
 });
 
-test('startup keeps the selected volume until LUFS frames arrive', async () => {
+test('startup opens at maximum attenuation on short samples before full LUFS matching', async () => {
   const f = fixture();
+  f.audio.stalled = true;
   f.normalizer.setEnabled(true); f.normalizer.bind(f.video);
-  assert.equal(f.raw, 50);
+  assert.equal(f.raw, 0);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 50);
   assert.equal(f.normalizer.getStatus(), 'Starting audio analysis');
   assert.equal(f.normalizer.getDetails(), '');
-  await f.advance(1);
-  assert.ok(f.raw < 20);
+  await f.advance(.5);
+  assert.equal(f.raw, 0, 'loading/capture delays cannot expose uncorrected audio');
+  const port = f.audio.nodes[0].port;
+  port.onmessage({ data: { attackPower: .5 } });
+  await f.advance(.05);
+  assert.equal(f.raw, 5, 'short samples open only at the strongest allowed attenuation');
+  assert.equal(f.normalizer.getStatus(), 'Starting audio analysis');
+  port.onmessage({ data: { power: .5, rawPower: .25, momentaryPower: .5, duration: .05 } });
+  assert.ok(f.raw > 0 && f.raw < 20, 'the first full frame releases directly at corrected volume');
+  assert.ok(f.writes.every(write => write.value < 20 && write.options.preserveMute));
+  await f.advance(.05);
   assert.equal(f.normalizer.getStatus(), 'Active');
   f.normalizer.setEnabled(false);
+  assert.equal(f.raw, 50);
+});
+
+test('early startup output never exceeds the controller minimum, including native rounding and input', async () => {
+  for (const preferred of [1, 2, 20, 30, 40, 100]) {
+    const f = fixture(); f.audio.stalled = true; f.nativeVolume(preferred); await f.start();
+    const port = f.audio.nodes[0].port;
+    for (const attackPower of [0, -1, Infinity, NaN]) port.onmessage({ data: { attackPower } });
+    assert.equal(f.raw, 0, 'invalid/silent samples cannot release audio');
+    port.onmessage({ data: { attackPower: .5 } });
+    const floor = Math.max(1, Math.round(preferred * .1));
+    assert.equal(f.raw, floor);
+    for (const attackPower of [.00001, .001, .1, 1, 10]) {
+      port.onmessage({ data: { attackPower } });
+      await f.advance(.05);
+      assert.equal(f.raw, floor, 'short reports and output ticks cannot lift early gain');
+    }
+    f.normalizer.setPreferredVolume(f.video, 40, {preserveMute:true});
+    assert.equal(f.raw, 4);
+    f.nativeVolume(60);
+    assert.equal(f.raw, 6); assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 60);
+    f.normalizer.setEnabled(false); assert.equal(f.raw, 60);
+  }
+});
+
+test('the initial correction honors short-window energy even when capture ramps into its first frame', async () => {
+  const f = fixture(); f.audio.stalled = true; await f.start();
+  const port = f.audio.nodes[0].port;
+  port.onmessage({ data: { attackPower: 1 } });
+  assert.equal(f.raw, 5);
+  port.onmessage({ data: { power: .001, rawPower: .0005, momentaryPower: .001, duration:.05 } });
+  assert.ok(f.raw <= 7, 'a quiet/partial first average cannot override the measured loud onset');
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 50);
+  f.normalizer.setEnabled(false);
+});
+
+test('early startup samples cannot unmute or adjust paused, detached or unready playback', async () => {
+  for (const state of ['muted', 'paused', 'detached', 'unready', 'zero']) {
+    const f = fixture(); f.audio.stalled = true; await f.start();
+    if (state === 'muted') f.video.muted = true;
+    if (state === 'paused') f.audio.paused = true;
+    if (state === 'detached') f.video.isConnected = false;
+    if (state === 'unready') f.audio.readyState = 1;
+    if (state === 'zero') f.normalizer.setPreferredVolume(f.video, 0, {preserveMute:true});
+    const writes = f.writes.length;
+    f.audio.nodes[0].port.onmessage({data:{attackPower:1}});
+    assert.equal(f.raw, 0); assert.equal(f.writes.length, writes);
+    if (state === 'muted') assert.equal(f.video.muted, true);
+    f.normalizer.setEnabled(false); assert.equal(f.timers.size, 0);
+  }
+});
+
+test('short reports cannot extend the full-frame startup deadline indefinitely', async () => {
+  const f = fixture(); f.audio.stalled = true; await f.start();
+  const port = f.audio.nodes[0].port;
+  for (let i = 0; i < 62; i++) {
+    port.onmessage?.({data:{attackPower:.5}});
+    await f.advance(.05);
+  }
+  assert.equal(f.raw, 50);
+  assert.equal(f.normalizer.getStatus(), 'Audio unavailable — normal volume');
+  assert.equal(port.closed, true);
+  f.normalizer.setEnabled(false); assert.equal(f.timers.size, 0);
+});
+
+test('startup preserves user input and mute through pause, source reset, replacement and disable', async () => {
+  const f = fixture(); f.audio.stalled = true; f.audio.paused = true;
+  await f.start();
+  assert.equal(f.raw, 0, 'a paused player is protected before playback starts');
+  assert.equal(f.audio.captures, 0);
+  f.normalizer.setPreferredVolume(f.video, 40, { preserveMute: true });
+  assert.equal(f.raw, 0); assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 40);
+  f.audio.paused = false; f.video.dispatchEvent(new Event('playing'));
+  await f.advance(.05);
+  const port = f.audio.nodes[0].port;
+  f.video.muted = true;
+  port.onmessage({ data: { power: .5, rawPower: .25, momentaryPower: .5, duration: .05 } });
+  assert.equal(f.raw, 0, 'a frame received during user mute cannot release startup');
+  f.video.muted = false;
+  port.onmessage({ data: { power: .5, rawPower: .25, momentaryPower: .5, duration: .05 } });
+  assert.ok(f.raw > 0 && f.raw < 15);
+  const track = f.audio.streams[0].getAudioTracks()[0];
+  track.stop(); f.audio.streams[0].tracks.push(new track.constructor('audio'));
+  await f.advance(.05);
+  assert.equal(f.raw, 0, 'a replacement track must supply its own measurement');
+  f.video.dispatchEvent(new Event('loadstart'));
+  assert.equal(f.raw, 0); assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 40);
+  f.video.muted = true; f.normalizer.setEnabled(false);
+  assert.equal(f.raw, 40); assert.equal(f.video.muted, true);
+  assert.equal(f.timers.size, 0);
+});
+
+test('paused startup prepares analysis without capturing playback or leaking its context on disable', async () => {
+  const f = fixture(); f.audio.paused = true;
+  await f.start();
+  assert.equal(f.audio.contexts.length, 1);
+  assert.equal(f.audio.captures, 0); assert.equal(f.audio.nodes.length, 0);
+  assert.equal(f.raw, 0);
+  for (const type of ['emptied', 'loadstart', 'loadedmetadata']) f.video.dispatchEvent(new Event(type));
+  assert.equal(f.audio.contexts.length, 1, 'initial load events retain the prepared, source-free context');
+  assert.equal(f.audio.contexts[0].closed, false);
+  f.audio.paused = false; f.video.dispatchEvent(new Event('playing')); await f.advance(.1);
+  assert.equal(f.audio.contexts.length, 1); assert.equal(f.audio.captures, 1);
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  f.normalizer.setEnabled(false);
+  assert.equal(f.audio.contexts[0].closed, true); assert.equal(f.timers.size, 0);
+  const cancelled = fixture(); cancelled.audio.paused = true; await cancelled.start();
+  cancelled.normalizer.setEnabled(false); await cancelled.advance(.1);
+  assert.equal(cancelled.audio.contexts[0].closed, true);
+  assert.equal(cancelled.audio.nodes.length, 0); assert.equal(cancelled.audio.captures, 0);
+});
+
+test('site volume restoration during startup cannot expose ordinary output', async () => {
+  const f = fixture(); f.audio.stalled = true; await f.start();
+  f.siteVolume(50); f.video.dispatchEvent(new Event('volumechange'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.raw, 0);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 50);
+  f.nativeVolume(60);
+  assert.equal(f.raw, 0); assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 60);
+  f.normalizer.setEnabled(false);
+  f.siteVolume(30); f.video.dispatchEvent(new Event('volumechange'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.raw, 30, 'disable removes startup volume ownership');
+});
+
+test('startup waits for an accessible track, then restores ordinary volume with a warning on timeout', async () => {
+  for (const missing of [false, true]) {
+    const f = fixture(), capture = f.video.captureStream;
+    f.video.captureStream = () => {
+      const stream = capture();
+      if (missing) stream.tracks = stream.getVideoTracks();
+      else stream.getAudioTracks()[0].muted = true;
+      return stream;
+    };
+    await f.start(); await f.advance(.5);
+    assert.equal(f.raw, 0);
+    assert.equal(f.normalizer.getStatus(), 'Waiting for accessible audio');
+    await f.advance(2.6);
+    assert.equal(f.raw, 50);
+    assert.match(f.normalizer.getStatus(), /Audio unavailable — normal volume/);
+    f.normalizer.setEnabled(false);
+    assert.equal(f.timers.size, 0);
+  }
+});
+
+test('a pending context resume cannot release startup audio and an unresolved activation is bounded', async () => {
+  for (const activates of [false, true]) {
+    const f = fixture(), Context = f.window.AudioContext;
+    let finishResume;
+    f.window.AudioContext = class extends Context {
+      constructor() { super(); this.state = 'suspended'; }
+      resume() { return new Promise(resolve => { finishResume = () => { this.state = 'running'; resolve(); }; }); }
+    };
+    await f.start(); await f.advance(.2);
+    assert.equal(f.raw, 0, 'context activation is still pending');
+    if (activates) {
+      finishResume(); await f.advance(.2);
+      assert.ok(f.raw > 0 && f.raw < 20);
+      assert.equal(f.normalizer.getStatus(), 'Active');
+    } else {
+      await f.advance(3);
+      assert.equal(f.raw, 50);
+      assert.equal(f.normalizer.getStatus(), 'Click the player to activate');
+      await f.advance(.2);
+      assert.equal(f.normalizer.getStatus(), 'Click the player to activate');
+    }
+    f.normalizer.setEnabled(false);
+    assert.equal(f.timers.size, 0);
+  }
 });
 
 test('unsupported or blocked LUFS restores ordinary volume and releases capture', async () => {

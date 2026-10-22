@@ -1,6 +1,6 @@
 import { clampVolume } from './volume.js';
-import { createLufsAnalysis } from './lufs-analysis.js';
-import { createLufsGainController } from './lufs-meter.js';
+import { createLufsAnalysis, prepareLufsAnalysis } from './lufs-analysis.js';
+import { createLufsGainController, MIN_NORMALIZATION_GAIN } from './lufs-meter.js';
 
 // Player APIs round percentages; a positive preference must stay audible.
 const outputPercent = (value) => value > 0 ? Math.max(1, Math.round(clampVolume(value))) : 0;
@@ -64,7 +64,23 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
   function restore(owned) {
     const preferred = readPreferred(owned);
     owned.gain = 1;
+    owned.awaitingFrame = false;
+    owned.startupPower = 0;
     writeOutput(owned, preferred);
+    owned.lufsTracker = null;
+    owned.lastLufsFrame = null;
+    owned.catchUpAfter = 0;
+    owned.analysisStarted = window.performance.now();
+  }
+
+  function resetAnalysis(owned) {
+    readPreferred(owned);
+    // Capture ignores native volume, so samples can establish the first
+    // correction while playback is silent. Preserve the user's mute/intent.
+    owned.gain = 0;
+    owned.awaitingFrame = true;
+    owned.startupPower = 0;
+    writeOutput(owned, 0);
     owned.lufsTracker = null;
     owned.lastLufsFrame = null;
     owned.catchUpAfter = 0;
@@ -102,12 +118,9 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     for (const track of owned.stream.getVideoTracks()) track.stop();
     const track = owned.stream.getAudioTracks().find((item) => item.readyState === 'live');
     if (!track || track === owned.track) return;
-    if (owned.track) restore(owned);
+    resetAnalysis(owned);
     owned.lufs?.dispose();
-    owned.lastLufsFrame = null;
     owned.track = track;
-    owned.lufsTracker = null;
-    owned.analysisStarted = window.performance.now();
     owned.lufs = createLufsAnalysis({ window, context: owned.context, track,
       onFrame: frame => {
         if (session !== owned || !owned.video.isConnected || owned.blocked) return;
@@ -115,6 +128,18 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         owned.catchUpAfter = 0;
         if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== 'live' || owned.preferred === 0 || owned.lufs?.needsActivation) return;
         try {
+          if (owned.awaitingFrame && frame.attackPower != null) {
+            if (!Number.isFinite(frame.attackPower) || frame.attackPower <= 0 || isMuted(owned.video)) return;
+            owned.startupPower = Math.max(owned.startupPower, frame.attackPower);
+            // Make the first samples audible only at the controller's lowest
+            // possible output. Full loudness matching still needs its 50 ms frame.
+            if (owned.gain === 0) {
+              readPreferred(owned);
+              owned.gain = MIN_NORMALIZATION_GAIN;
+              writeOutput(owned, owned.preferred * owned.gain);
+            }
+            return;
+          }
           owned.lufsTracker ||= createLufsGainController();
           // Most fast measurements cannot change gain. Skip player API reads
           // for those; the ordinary frames/timer still track native intent.
@@ -123,10 +148,15 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
           // Respect native input before a fast cut, just as the polling path
           // does. Increases still wait for its regular 50 ms output tick.
           readPreferred(owned);
-          owned.lufsTracker ||= createLufsGainController();
-          owned.gain = owned.lufsTracker.update(frame, 100 / Math.max(1, owned.preferred));
+          const starting = owned.awaitingFrame;
+          // A fresh capture can ramp in during its first frame. Its loudest
+          // short measurement must also bound the initial audible correction.
+          owned.gain = owned.lufsTracker.update(starting
+            ? { ...frame, momentaryPower: Math.max(frame.momentaryPower ?? frame.power, owned.startupPower) } : frame,
+          100 / Math.max(1, owned.preferred));
           const output = owned.preferred * owned.gain;
-          if (outputPercent(output) < owned.applied) writeOutput(owned, output);
+          owned.awaitingFrame = false;
+          if (starting || outputPercent(output) < owned.applied) writeOutput(owned, output);
         } catch { unavailable(owned); }
       },
       onFailure: () => {
@@ -141,6 +171,17 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     if (!owned.context || !owned.lufs?.needsActivation || owned.context.state !== 'suspended' || owned.resuming) return;
     owned.resuming = true;
     owned.context.resume().catch(() => {}).finally(() => { owned.resuming = false; });
+  }
+
+  function prepareContext(owned) {
+    if (owned.context || owned.video.mediaKeys) return;
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const hasAnalysis = window.MediaStreamTrackProcessor || (window.AudioWorkletNode && window.Blob && window.URL?.createObjectURL);
+    if (!(owned.video.captureStream || owned.video.mozCaptureStream) || !AudioContext || !window.MediaStream || !hasAnalysis) return;
+    owned.context = new AudioContext();
+    // Load the processor before playback when possible. Input and failure
+    // handling still belong to connectTrack; preparation never attaches nodes.
+    prepareLufsAnalysis({window, context:owned.context}).catch(() => {});
   }
 
   function tick() {
@@ -169,12 +210,13 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         const hasAnalysis = window.MediaStreamTrackProcessor || (window.AudioWorkletNode && window.Blob && window.URL?.createObjectURL);
         if (!capture || !AudioContext || !window.MediaStream || !hasAnalysis) {
+          restore(owned);
           owned.blocked = true;
           report('Unavailable in this browser');
           return;
         }
         owned.stream = capture.call(video);
-        owned.context = new AudioContext();
+        owned.context ||= new AudioContext();
         owned.onTrack = () => {
           try { connectTrack(owned); } catch { unavailable(owned); }
         };
@@ -188,23 +230,29 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       if (!owned.track || owned.track.readyState !== 'live') connectTrack(owned);
       if (owned.blocked) return;
       readPreferred(owned);
+      if (owned.awaitingFrame) writeOutput(owned, owned.preferred * owned.gain);
       if (owned.lufs?.needsActivation) {
+        if (owned.awaitingFrame && owned.resuming && now - owned.analysisStarted < 3000) {
+          report('Starting audio analysis');
+          return;
+        }
         restore(owned);
         report('Click the player to activate');
         return;
       }
       if (!owned.track || owned.track.muted || owned.track.readyState !== 'live') {
-        restore(owned);
+        if (!owned.awaitingFrame) restore(owned);
+        else if (now - owned.analysisStarted > 3000) { unavailable(owned); return; }
         report('Waiting for accessible audio');
         return;
       }
       if (isMuted(video) || owned.preferred === 0) {
         owned.lastLufsFrame = null;
         owned.analysisStarted = window.performance.now();
-        report('Muted');
+        report('Waiting for audio');
         return;
       }
-      const starting = owned.lastLufsFrame == null;
+      const starting = owned.awaitingFrame || owned.lastLufsFrame == null;
       if (now - (starting ? owned.analysisStarted : owned.lastLufsFrame) > (starting ? 3000 : 500)) {
         // A long page task can run this overdue timer before queued audio.
         // Hold the correction for one bounded catch-up; genuine stalls still
@@ -237,6 +285,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       window.clearInterval(owned.timer);
       for (const type of ['emptied', 'loadstart']) owned.video.removeEventListener(type, owned.reset);
       for (const type of ['playing', 'loadedmetadata']) owned.video.removeEventListener(type, owned.retry);
+      owned.video.removeEventListener('volumechange', owned.holdOutput);
       window.document.removeEventListener('pointerdown', owned.gesture, true);
       window.document.removeEventListener('keydown', owned.gesture, true);
       releaseCapture(owned);
@@ -250,24 +299,39 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       video, preferred, applied: preferred, gain: 1, lastWriteAt: -Infinity, blocked: false, retryAt: 0, retryDelay: 1000
     };
     owned.reset = () => {
-      try { restore(owned); }
+      try { resetAnalysis(owned); }
       catch { /* the source can become inaccessible before its load event */ }
-      releaseCapture(owned);
+      // A prepared context has no source-specific graph to discard yet.
+      // Initial load events can reuse it instead of compiling the meter twice.
+      if (owned.stream) releaseCapture(owned);
       owned.blocked = false;
       owned.retryAt = 0;
       owned.retryDelay = 1000;
       report('Waiting for playback');
+      try { prepareContext(owned); } catch { unavailable(owned); }
     };
     owned.retry = () => { owned.blocked = false; owned.retryAt = 0; tick(); };
+    owned.holdOutput = () => {
+      if (!owned.awaitingFrame || owned.writing) return;
+      // Native-control intent is adopted in a microtask after its site handler.
+      // Let that run first; passive site writes still close in this same turn.
+      window.queueMicrotask(() => {
+        if (session !== owned || !owned.video.isConnected || !owned.awaitingFrame) return;
+        try { readPreferred(owned); writeOutput(owned, owned.preferred * owned.gain); }
+        catch { unavailable(owned); }
+      });
+    };
     owned.gesture = () => {
       if (owned.blocked && owned.retryAt) owned.retry();
       else { resume(owned); tick(); }
     };
     for (const type of ['emptied', 'loadstart']) video.addEventListener(type, owned.reset);
     for (const type of ['playing', 'loadedmetadata']) video.addEventListener(type, owned.retry);
+    video.addEventListener('volumechange', owned.holdOutput);
     window.document.addEventListener('pointerdown', owned.gesture, true);
     window.document.addEventListener('keydown', owned.gesture, true);
     owned.timer = window.setInterval(tick, 50);
+    try { resetAnalysis(owned); prepareContext(owned); } catch { unavailable(owned); }
     tick();
   }
 
@@ -289,12 +353,13 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       if (!owned || owned.writing) return;
       const actual = clampVolume(getVolume(video));
       if (Math.abs(actual - owned.applied) > .6) {
-        owned.preferred = Math.round(clampVolume(owned.applied > 0
+        owned.preferred = Math.round(clampVolume(owned.applied > 0 && !owned.awaitingFrame
           ? owned.preferred * actual / owned.applied : actual));
         owned.applied = actual;
         owned.lastWriteAt = window.performance.now();
       }
       owned.outputChanged = false;
+      if (owned.awaitingFrame) writeOutput(owned, owned.preferred * owned.gain);
     },
     setPreferredVolume(video, value, options) {
       let output = clampVolume(value);

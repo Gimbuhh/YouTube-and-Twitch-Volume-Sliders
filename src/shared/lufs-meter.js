@@ -1,3 +1,5 @@
+export const MIN_NORMALIZATION_GAIN = .1;
+
 // Self-contained so the same sample-clocked meter runs in Node tests and an
 // analysis-only AudioWorklet. BS.1770 K weighting, with EBU 400 ms / 3 s windows.
 export function createLufsMeter(sampleRate) {
@@ -140,7 +142,7 @@ export function createLufsGainController() {
         // Reserve the short-window cut for output >10 LU above target, so
         // ordinary speech peaks keep the established programme behavior.
         if (state === 2) fastUntil = time + .1;
-        gain = Math.min(gain, Math.max(.1, Math.sqrt(targetPower / power)));
+        gain = Math.min(gain, Math.max(MIN_NORMALIZATION_GAIN, Math.sqrt(targetPower / power)));
         return gain;
       }
       const dt = Math.min(0.25, Math.max(0, frame.duration));
@@ -166,7 +168,7 @@ export function createLufsGainController() {
       referenceHold *= 10 ** (-.5 * dt / 10);
       if (duration >= 1) referenceHold = Math.max(referenceHold, rollingReference);
       const reference = Math.max(rollingReference, referenceHold);
-      let desired = Math.min(maxGain, maxBoost, Math.max(0.1, Math.sqrt(targetPower / reference)));
+      let desired = Math.min(maxGain, maxBoost, Math.max(MIN_NORMALIZATION_GAIN, Math.sqrt(targetPower / reference)));
       // Silence may expire rolling history, but an established source must
       // not lose its boost and repeat the initial measurement gate afterward.
       if (!referenceHold) desired = Math.min(1, desired);
@@ -178,7 +180,7 @@ export function createLufsGainController() {
       // A jump >6 LU above the recent active reference bypasses the 400 ms
       // window, preserving the first-frame cut when loud audio returns.
       const safetyPower = Math.max(frame.momentaryPower ?? frame.power, frame.power > reference * 4 ? frame.power : 0);
-      const ceiling = Math.min(maxGain, Math.max(0.1, Math.sqrt(targetPower / safetyPower)));
+      const ceiling = Math.min(maxGain, Math.max(MIN_NORMALIZATION_GAIN, Math.sqrt(targetPower / safetyPower)));
       desired = Math.min(programmeGain, ceiling);
       if (desired < gain) gain = desired;
       else {

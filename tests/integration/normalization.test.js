@@ -87,6 +87,21 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
 }
 
 for (const config of platforms) {
+  test(`${config.file}: native input during startup changes the selection without releasing unmeasured output`, async t => {
+    const f = await prepare(config, t, { saved: true });
+    f.audio.stalled = true;
+    const mode = f.document.getElementById('tm-volume-options-mode');
+    mode.value = 'on'; mode.dispatchEvent(new f.window.Event('change', { bubbles: true }));
+    assert.equal(f.rawVolume(), 0);
+    const control = f.player.querySelector(config.file === 'youtube' ? '.ytp-volume-area' : '[data-a-target="player-volume-slider"]');
+    control.dispatchEvent(new f.window.Event('input', { bubbles: true }));
+    f.api.setVolume(config.file === 'youtube' ? 60 : .6);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.rawVolume(), 0);
+    await f.advance(.2); assert.equal(f.rawVolume(), 0);
+    f.toggle.click(); assert.equal(f.rawVolume(), 60, 'disable restores the new native selection');
+  });
+
   if (config.file === 'twitch') test('twitch: sustained startup volume keys supersede the delayed preference restore', async t => {
     const f = await prepare(config, t, { saved: true, controlledTime: true });
     f.document.getElementById('tm-volume-options-button').click();
@@ -208,11 +223,12 @@ for (const config of platforms) {
         f.document.documentElement.append(f.body);
         await new Promise(resolve => f.window.setTimeout(resolve, 50));
       }
+      assert.equal(f.rawVolume(), 0, 'startup is silent before the first audio measurement');
       await f.advance(.2);
       assert.equal(f.document.readyState, 'loading');
       assert.equal(f.document.getElementById('tm-volume-slider-overlay'), null);
       assert.equal(f.audio.captures, 1, 'the playing video does not wait for controls');
-      assert.ok(f.rawVolume() < 20, 'first measurements already reduce loud output');
+      assert.ok(f.rawVolume() > 0 && f.rawVolume() < 20, 'first measurements release corrected output');
       assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
       f.player.append(...f.controls);
       Object.defineProperty(f.document, 'readyState', { configurable: true, value: 'interactive' });
@@ -281,6 +297,7 @@ for (const config of platforms) {
     assert.equal(slider.value, '50');
     if (config.file === 'youtube') f.api.mute(); else f.api.setMuted(true);
     await f.advance(); assert.equal(indicator.innerHTML, artwork);
+    assert.equal(f.document.getElementById('tm-volume-options-normalization-status').textContent, 'Waiting for audio');
     assert.equal(indicator.hidden, false);
     assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
     if (config.file === 'youtube') f.api.unMute(); else f.api.setMuted(false);
@@ -290,6 +307,7 @@ for (const config of platforms) {
     // Volume zero is also an ordinary listening choice.
     slider.value = '0'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
     await f.advance(.2); assert.equal(indicator.hidden, false);
+    assert.equal(f.document.getElementById('tm-volume-options-normalization-status').textContent, 'Waiting for audio');
     slider.value = '50'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
     await f.advance(.2);
     f.audio.contexts[0].state = 'suspended'; await f.advance(.2);
@@ -402,7 +420,7 @@ for (const config of platforms) {
     const f = await prepare(config, t, { saved: true });
     await f.advance(); assert.ok(f.rawVolume() < 20);
     f.video.dispatchEvent(new f.window.Event('emptied'));
-    assert.equal(f.rawVolume(), 50); assert.equal(f.audio.contexts[0].closed, true);
+    assert.equal(f.rawVolume(), 0); assert.equal(f.audio.contexts[0].closed, true);
     f.audio.amplitude = 0.08;
     f.video.dispatchEvent(new f.window.Event('playing'));
     await f.advance(); assert.ok(f.rawVolume() > 50);

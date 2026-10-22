@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { createLufsAnalysis } from '../../src/shared/lufs-analysis.js';
+import { createLufsAnalysis, prepareLufsAnalysis } from '../../src/shared/lufs-analysis.js';
 
 function fixture() {
   let resolve, reject;
@@ -32,6 +32,33 @@ function fixture() {
 }
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test('preparation loads one module without attaching audio and reuses success or rejection for capture', async () => {
+  for (const blocked of [false, true]) {
+    const f = fixture();
+    const prepared = prepareLufsAnalysis({window:f.window, context:f.context});
+    const settled = prepared.catch(() => {});
+    await flush(); assert.equal(f.loads, 1); assert.equal(f.nodes.length, 0);
+    assert.equal(f.sourceBuilds, 0);
+    if (blocked) f.reject(new Error('CSP blocked module')); else f.resolve();
+    await settled;
+    const owned = f.create(); await flush();
+    assert.equal(f.loads, 1, 'capture reuses the prepared module outcome');
+    assert.equal(f.nodes.length, blocked ? 0 : 1);
+    assert.equal(f.revoked, 1); owned.dispose();
+  }
+});
+
+test('preparing a closed or native-only input never creates a late processor', async () => {
+  const f = fixture(), prepared = prepareLufsAnalysis({window:f.window, context:f.context});
+  const owned = f.create();
+  f.context.state = 'closed'; f.resolve(); await prepared; await flush();
+  assert.equal(f.nodes.length, 0); assert.equal(f.revoked, 1);
+  owned.dispose();
+  const native = fixture(); delete native.window.AudioWorkletNode;
+  await prepareLufsAnalysis({window:native.window, context:native.context});
+  assert.equal(native.loads, 0); assert.equal(native.sourceBuilds, 0);
+});
 
 function capturedFrames(f) {
   let input, cancelled = 0;

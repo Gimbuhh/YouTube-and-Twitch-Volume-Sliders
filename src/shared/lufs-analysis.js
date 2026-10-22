@@ -24,8 +24,13 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
   const loaded = Promise.resolve().then(() => context.audioWorklet.addModule(url))
     .finally(() => window.URL.revokeObjectURL(url));
   modules.set(context, loaded);
-  loaded.catch(() => modules.delete(context));
   return loaded;
+}
+
+export async function prepareLufsAnalysis({ window, context }) {
+  if (context.audioWorklet && window.AudioWorkletNode && window.URL?.createObjectURL && window.Blob) {
+    await loadMeter(window, context);
+  }
 }
 
 export function createLufsAnalysis({ window, context, track, onFrame, onFailure }) {
