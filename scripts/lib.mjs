@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
-export const ROOT = new URL('../', import.meta.url);
 export const platforms = ['youtube', 'twitch'];
 export const distPath = (platform) => new URL(`../dist/${platform}-volume-slider.user.js`, import.meta.url);
 export const entryPath = (platform) => new URL(`../src/entries/${platform}.user.js`, import.meta.url);

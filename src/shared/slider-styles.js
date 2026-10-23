@@ -9,6 +9,7 @@ const SLIDER_STYLE_TEMPLATE = String.raw`
   --tm-pill-expanded-width: clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width));
   --tm-label-row-width: 50px;
   --tm-slider-row-offset: 62px;
+  --tm-normalization-accent: {{normalizationAccent}};
   filter: {{panelDropShadow}};
 }
 {{platformFootprintCss}}
@@ -164,6 +165,55 @@ const SLIDER_STYLE_TEMPLATE = String.raw`
   outline: 2px solid #fff;
   outline-offset: -4px;
   border-radius: 50%;
+}
+
+#{{overlayId}}.tm-normalization-enabled {
+  /* Keep the inset waveform visible at the pill's rounded edge. */
+  overflow: clip !important;
+  overflow-clip-margin: 8px;
+}
+
+#{{overlayId}} .tm-normalization-icon {
+  position: absolute;
+  left: 28px;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  display: block;
+  pointer-events: auto;
+}
+
+#{{overlayId}} .tm-normalization-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#{{overlayId}} .tm-normalization-icon circle {
+  fill: #17171b;
+  stroke: var(--tm-normalization-accent);
+  stroke-width: 1;
+}
+
+#{{overlayId}} .tm-normalization-icon path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+#{{overlayId}} .tm-normalization-icon[hidden] {
+  display: none;
+}
+
+#{{overlayId}} .tm-normalization-description {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 #{{overlayId}} .tm-volume-indicator {
@@ -406,6 +456,7 @@ export function installVolumeSliderStyles({ document, platform, overlayId, value
     overlayId,
     valueLabelId,
     panelDropShadow,
+    normalizationAccent: platform === 'twitch' ? '#a970ff' : '#cc4444',
     ...getSliderPlatformStyles(platform, overlayId)
   });
 }

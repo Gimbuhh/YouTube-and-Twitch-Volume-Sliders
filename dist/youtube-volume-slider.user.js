@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.8.3
+// @version      2.9
 // @description  Compact in-bar volume indicator that expands into a wide YouTube volume slider.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://www.youtube.com/favicon.ico
@@ -76,6 +76,888 @@
       }, debounceMs);
     }
     return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
+  }
+
+  // src/shared/lufs-meter.js
+  var MIN_NORMALIZATION_GAIN = 0.1;
+  function createLufsMeter(sampleRate) {
+    if (!Number.isFinite(sampleRate) || sampleRate < 8e3) throw new RangeError("Invalid audio sample rate");
+    const shelfK = Math.tan(Math.PI * 1681.974450955533 / sampleRate);
+    const shelfQ = 0.7071752369554196;
+    const high = 10 ** (3.999843853973347 / 20);
+    const middle = high ** 0.4996667741545416;
+    const shelfDenominator = 1 + shelfK / shelfQ + shelfK * shelfK;
+    const shelf = [
+      (high + middle * shelfK / shelfQ + shelfK * shelfK) / shelfDenominator,
+      2 * (shelfK * shelfK - high) / shelfDenominator,
+      (high - middle * shelfK / shelfQ + shelfK * shelfK) / shelfDenominator,
+      2 * (shelfK * shelfK - 1) / shelfDenominator,
+      (1 - shelfK / shelfQ + shelfK * shelfK) / shelfDenominator
+    ];
+    const highPassK = Math.tan(Math.PI * 38.13547087602444 / sampleRate);
+    const highPassDenominator = 1 + highPassK / 0.5003270373238773 + highPassK * highPassK;
+    const highPass = [
+      1,
+      -2,
+      1,
+      2 * (highPassK * highPassK - 1) / highPassDenominator,
+      (1 - highPassK / 0.5003270373238773 + highPassK * highPassK) / highPassDenominator
+    ];
+    const frameLength = Math.round(sampleRate / 20);
+    const attackLength = Math.round(sampleRate / 200);
+    const powers = new Float64Array(60);
+    const [s0, s1, s2, sa1, sa2] = shelf;
+    const [h0, h1, h2, ha1, ha2] = highPass;
+    let states = [], weights = [], rawEnergy = [], frameEnergy = [], attackEnergy = [];
+    let frameSamples = 0, frameCount = 0, attackSamples = 0;
+    let previousAttack = 0, rapidSamples = 0, reportEnergy = 0, reportSamples = 0;
+    const lufs = (power) => power > 0 ? -0.691 + 10 * Math.log10(power) : -Infinity;
+    return {
+      process(channels, onFrame, onAttack) {
+        if (!channels.length || !channels[0]?.length) return;
+        if (channels.length !== states.length) {
+          if (channels.length > 6) throw new RangeError("Unsupported channel layout");
+          states = channels.map(() => new Float64Array(4));
+          weights = channels.length === 6 ? [1, 1, 1, 0, 1.41, 1.41] : channels.length === 5 ? [1, 1, 1, 1.41, 1.41] : channels.length === 4 ? [1, 1, 1.41, 1.41] : channels.map(() => 1);
+          rawEnergy = channels.map(() => 0);
+          frameEnergy = channels.map(() => 0);
+          attackEnergy = channels.map(() => 0);
+          powers.fill(0);
+          frameSamples = frameCount = attackSamples = 0;
+          previousAttack = rapidSamples = reportEnergy = reportSamples = 0;
+        }
+        let offset = 0;
+        while (offset < channels[0].length) {
+          const count = Math.min(channels[0].length - offset, frameLength - frameSamples, attackLength - attackSamples);
+          const end = offset + count;
+          for (let channel = 0; channel < channels.length; channel++) {
+            const input = channels[channel], state = states[channel], weight = weights[channel];
+            let z0 = state[0], z1 = state[1], z2 = state[2], z3 = state[3];
+            let raw = rawEnergy[channel], energy = frameEnergy[channel], attack = attackEnergy[channel];
+            for (let index = offset; index < end; index++) {
+              const value = input[index];
+              if (!Number.isFinite(value)) throw new RangeError("Invalid audio sample");
+              raw += value * value;
+              const filtered = s0 * value + z0;
+              z0 = s1 * value - sa1 * filtered + z1;
+              z1 = s2 * value - sa2 * filtered;
+              const weighted = h0 * filtered + z2;
+              z2 = h1 * filtered - ha1 * weighted + z3;
+              z3 = h2 * filtered - ha2 * weighted;
+              const power2 = weight * weighted * weighted;
+              energy += power2;
+              attack += power2;
+            }
+            state[0] = z0;
+            state[1] = z1;
+            state[2] = z2;
+            state[3] = z3;
+            rawEnergy[channel] = raw;
+            frameEnergy[channel] = energy;
+            attackEnergy[channel] = attack;
+          }
+          offset = end;
+          frameSamples += count;
+          attackSamples += count;
+          if (attackSamples === attackLength) {
+            const energy = attackEnergy.reduce((sum, value) => sum + value, 0);
+            const power2 = energy / attackLength;
+            if (power2 > 1e-8 && power2 > previousAttack * 2) rapidSamples = Math.round(sampleRate * 0.1);
+            previousAttack = power2;
+            reportEnergy += energy;
+            reportSamples += attackLength;
+            if (rapidSamples > 0) onAttack?.(power2);
+            else if (reportSamples >= attackLength * 4) onAttack?.(reportEnergy / reportSamples);
+            if (reportSamples >= attackLength * 4) reportEnergy = reportSamples = 0;
+            rapidSamples = Math.max(0, rapidSamples - attackLength);
+            attackSamples = 0;
+            attackEnergy.fill(0);
+          }
+          if (frameSamples !== frameLength) continue;
+          const power = frameEnergy.reduce((sum, value) => sum + value, 0) / frameLength;
+          powers[frameCount % powers.length] = power;
+          frameCount++;
+          let momentary = 0, shortTerm = 0;
+          for (let age = 0; age < Math.min(frameCount, powers.length); age++) {
+            const value = powers[(frameCount - 1 - age) % powers.length];
+            shortTerm += value;
+            if (age < 8) momentary += value;
+          }
+          onFrame({
+            power,
+            rawPower: Math.max(...rawEnergy) / frameLength,
+            duration: frameLength / sampleRate,
+            momentaryPower: momentary / Math.min(frameCount, 8),
+            momentaryLufs: frameCount >= 8 ? lufs(momentary / 8) : null,
+            shortTermLufs: frameCount >= 60 ? lufs(shortTerm / 60) : null
+          });
+          rawEnergy.fill(0);
+          frameSamples = 0;
+          frameEnergy.fill(0);
+        }
+      }
+    };
+  }
+  function createLufsGainController() {
+    const targetPower = 10 ** ((-18 + 0.691) / 10);
+    const maxBoost = 10 ** (6 / 20);
+    const history = [];
+    let time = 0, gain = 1, programmeGain = 1, fastUntil = -Infinity, referenceHold = 0;
+    const attackState = (power) => !Number.isFinite(power) || power <= 0 ? 0 : power * programmeGain * programmeGain > targetPower * 10 ? 2 : time < fastUntil ? 1 : 0;
+    return {
+      wantsAttack: (power) => attackState(power) !== 0,
+      update(frame, maxGain = 100) {
+        if (frame.attackPower != null) {
+          const power = frame.attackPower;
+          const state = attackState(power);
+          if (!state) return gain;
+          if (state === 2) fastUntil = time + 0.1;
+          gain = Math.min(gain, Math.max(MIN_NORMALIZATION_GAIN, Math.sqrt(targetPower / power)));
+          return gain;
+        }
+        const dt = Math.min(0.25, Math.max(0, frame.duration));
+        if (!Number.isFinite(dt) || !Number.isFinite(frame.power) || !Number.isFinite(frame.rawPower)) return gain;
+        time += dt;
+        while (history.length && history[0].time <= time - 3) history.shift();
+        if (dt === 0 || frame.rawPower < 1e-4 || frame.power <= 0) return gain;
+        history.push({ power: frame.power, duration: dt, time });
+        let duration = 0;
+        for (const item of history) duration += item.duration;
+        const ordered = history.slice().sort((a, b) => a.power - b.power);
+        let cumulative = 0, rollingReference = 0;
+        for (const item of ordered) {
+          cumulative += item.duration;
+          if (cumulative >= duration * 0.65) {
+            rollingReference = item.power;
+            break;
+          }
+        }
+        referenceHold *= 10 ** (-0.5 * dt / 10);
+        if (duration >= 1) referenceHold = Math.max(referenceHold, rollingReference);
+        const reference = Math.max(rollingReference, referenceHold);
+        let desired = Math.min(maxGain, maxBoost, Math.max(MIN_NORMALIZATION_GAIN, Math.sqrt(targetPower / reference)));
+        if (!referenceHold) desired = Math.min(1, desired);
+        if (desired < programmeGain) programmeGain = desired;
+        else {
+          const seconds = time < 3 ? 0.9 : 3;
+          programmeGain = Math.exp(Math.log(programmeGain) + (Math.log(desired) - Math.log(programmeGain)) * (1 - Math.exp(-dt / seconds)));
+        }
+        const safetyPower = Math.max(frame.momentaryPower ?? frame.power, frame.power > reference * 4 ? frame.power : 0);
+        const ceiling = Math.min(maxGain, Math.max(MIN_NORMALIZATION_GAIN, Math.sqrt(targetPower / safetyPower)));
+        desired = Math.min(programmeGain, ceiling);
+        if (desired < gain) gain = desired;
+        else {
+          const current = Math.log(gain), target = Math.log(desired);
+          const attenuation = Math.min(0, target) - Math.min(0, current);
+          const boost = Math.max(0, target) - Math.max(0, current);
+          gain = Math.exp(current + attenuation * (1 - Math.exp(-dt / 0.25)) + boost * (1 - Math.exp(-dt / 0.9)));
+        }
+        return gain;
+      }
+    };
+  }
+
+  // src/shared/lufs-analysis.js
+  var modules = /* @__PURE__ */ new WeakMap();
+  function loadMeter(window2, context) {
+    if (modules.has(context)) return modules.get(context);
+    const source = `const createLufsMeter = ${createLufsMeter.toString()};
+registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.meter = createLufsMeter(sampleRate);
+    this.send = frame => this.port.postMessage(frame);
+    this.attack = power => this.port.postMessage({ attackPower: power });
+    this.port.onmessage = () => { this.stopped = true; };
+  }
+  process(inputs) {
+    if (this.stopped) return false;
+    try { this.meter.process(inputs[0] || [], this.send, this.attack); }
+    catch { this.port.postMessage({ failed: true }); return false; }
+    return true;
+  }
+});`;
+    const url = window2.URL.createObjectURL(new window2.Blob([source], { type: "application/javascript" }));
+    const loaded = Promise.resolve().then(() => context.audioWorklet.addModule(url)).finally(() => window2.URL.revokeObjectURL(url));
+    modules.set(context, loaded);
+    return loaded;
+  }
+  async function prepareLufsAnalysis({ window: window2, context }) {
+    if (context.audioWorklet && window2.AudioWorkletNode && window2.URL?.createObjectURL && window2.Blob) {
+      await loadMeter(window2, context);
+    }
+  }
+  function createLufsAnalysis({ window: window2, context, track, onFrame, onFailure }) {
+    const hasWorklet = context.audioWorklet && window2.AudioWorkletNode && window2.URL?.createObjectURL && window2.Blob;
+    if (!hasWorklet && !window2.MediaStreamTrackProcessor) return null;
+    let disposed = false, node = null, reader = null, source = null;
+    function releaseNode() {
+      if (source) {
+        try {
+          source.disconnect();
+        } catch {
+        }
+        source = null;
+      }
+      if (!node) return;
+      node.disconnect();
+      node.port.onmessage = null;
+      node.onprocessorerror = null;
+      node.port.postMessage("stop");
+      node.port.close();
+      node = null;
+    }
+    const owned = {
+      // Native frames do not use the context's processing graph. Only a pending
+      // or connected worklet needs that context to run before it can analyze.
+      get needsActivation() {
+        return !reader && context.state !== "running";
+      },
+      dispose() {
+        disposed = true;
+        if (reader) {
+          reader.cancel().catch(() => {
+          });
+        }
+        releaseNode();
+      }
+    };
+    const fail = () => {
+      if (!disposed) {
+        owned.dispose();
+        onFailure();
+      }
+    };
+    const readTrack = async () => {
+      if (disposed) return;
+      releaseNode();
+      if (!window2.MediaStreamTrackProcessor) {
+        fail();
+        return;
+      }
+      try {
+        reader = new window2.MediaStreamTrackProcessor({ track, maxBufferSize: 1 }).readable.getReader();
+        let meter, rate, channels = [], input = [];
+        const send = (frame) => {
+          if (!disposed) onFrame(frame);
+        };
+        const onAttack = (power) => send({ attackPower: power });
+        while (!disposed) {
+          const { value: frame, done } = await reader.read();
+          if (done) break;
+          try {
+            if (disposed) break;
+            if (!meter || rate !== frame.sampleRate) {
+              rate = frame.sampleRate;
+              meter = createLufsMeter(rate);
+            }
+            if (channels.length !== frame.numberOfChannels || channels[0]?.length !== frame.numberOfFrames) {
+              channels = Array.from({ length: frame.numberOfChannels }, () => new Float32Array(frame.numberOfFrames));
+              input = channels.length === 1 ? [channels[0], channels[0]] : channels.length === 4 || channels.length === 6 ? Array.from({ length: 2 }, () => new Float32Array(frame.numberOfFrames)) : channels.slice(0, 2);
+            }
+            for (let planeIndex = 0; planeIndex < channels.length; planeIndex++) {
+              frame.copyTo(channels[planeIndex], { planeIndex, format: "f32-planar" });
+            }
+            if (channels.length === 4 || channels.length === 6) {
+              for (let i = 0; i < frame.numberOfFrames; i++) {
+                input[0][i] = channels.length === 4 ? 0.5 * (channels[0][i] + channels[2][i]) : channels[0][i] + Math.SQRT1_2 * (channels[2][i] + channels[4][i]);
+                input[1][i] = channels.length === 4 ? 0.5 * (channels[1][i] + channels[3][i]) : channels[1][i] + Math.SQRT1_2 * (channels[2][i] + channels[5][i]);
+              }
+            }
+            meter.process(input, send, onAttack);
+          } finally {
+            frame.close();
+          }
+        }
+      } catch {
+        fail();
+      } finally {
+        reader?.releaseLock();
+      }
+    };
+    if (!hasWorklet) {
+      readTrack();
+      return owned;
+    }
+    try {
+      loadMeter(window2, context).then(() => {
+        if (disposed || context.state === "closed") return;
+        node = new window2.AudioWorkletNode(context, "tm-lufs-analysis", {
+          numberOfInputs: 1,
+          numberOfOutputs: 0,
+          channelCount: 2,
+          channelCountMode: "explicit",
+          channelInterpretation: "speakers"
+        });
+        node.port.onmessage = (event) => {
+          if (disposed) return;
+          if (event.data.failed) fail();
+          else onFrame(event.data);
+        };
+        node.onprocessorerror = fail;
+        source = context.createMediaStreamSource(new window2.MediaStream([track]));
+        source.connect(node);
+      }).catch(readTrack);
+    } catch {
+      readTrack();
+    }
+    return owned;
+  }
+
+  // src/shared/normalization.js
+  var outputPercent = (value) => value > 0 ? Math.max(1, Math.round(clampVolume(value))) : 0;
+  function createVolumeNormalizer({ window: window2, getVolume, setVolume, isMuted, onStatusChanged = () => {
+  } }) {
+    let enabled = false;
+    let session = null;
+    let status = "Off";
+    let lastDetails = "";
+    let lastUiUpdate = -Infinity;
+    function getDetails() {
+      if (!session || !status.startsWith("Active")) return "";
+      const { preferred, applied } = session;
+      const action = applied < preferred ? "Reducing loud audio" : applied > preferred ? "Raising quiet audio" : "No volume adjustment";
+      return `${action}
+Output ${applied}% \xB7 Selected ${preferred}%`;
+    }
+    function report(next) {
+      const changed = status !== next;
+      status = next;
+      const details = getDetails();
+      const now = window2.performance.now();
+      if (!changed && (details === lastDetails || now - lastUiUpdate < 500)) return;
+      lastDetails = details;
+      lastUiUpdate = now;
+      onStatusChanged();
+    }
+    function readPreferred(owned, rawVolume) {
+      if (owned.writing) return owned.preferred;
+      const actual = clampVolume(rawVolume ?? getVolume(owned.video));
+      owned.outputChanged = Math.abs(actual - owned.applied) > 0.6;
+      return owned.preferred;
+    }
+    function writeOutput(owned, value, gradual = false) {
+      const next = outputPercent(value);
+      if (next === owned.applied && !owned.outputChanged) return;
+      const now = window2.performance.now();
+      if (gradual && next > owned.applied && owned.applied > 0 && next / owned.applied < 10 ** (0.5 / 20) && now - owned.lastWriteAt < 150) return;
+      const previous = owned.applied;
+      owned.applied = next;
+      owned.writing = true;
+      try {
+        setVolume(owned.video, next, { preserveMute: true });
+        owned.lastWriteAt = now;
+        owned.outputChanged = false;
+      } catch (error) {
+        owned.applied = previous;
+        throw error;
+      } finally {
+        owned.writing = false;
+      }
+    }
+    function restore(owned) {
+      const preferred = readPreferred(owned);
+      owned.gain = 1;
+      owned.awaitingFrame = false;
+      owned.startupPower = 0;
+      writeOutput(owned, preferred);
+      owned.lufsTracker = null;
+      owned.lastLufsFrame = null;
+      owned.catchUpAfter = 0;
+      owned.analysisStarted = window2.performance.now();
+    }
+    function resetAnalysis(owned) {
+      readPreferred(owned);
+      owned.gain = 0;
+      owned.awaitingFrame = true;
+      owned.startupPower = 0;
+      writeOutput(owned, 0);
+      owned.lufsTracker = null;
+      owned.lastLufsFrame = null;
+      owned.catchUpAfter = 0;
+      owned.analysisStarted = window2.performance.now();
+    }
+    function releaseCapture(owned) {
+      owned.lufs?.dispose();
+      owned.lufs = null;
+      owned.lastLufsFrame = null;
+      owned.track = null;
+      if (owned.stream) {
+        owned.stream.removeEventListener("addtrack", owned.onTrack);
+        for (const track of owned.stream.getTracks()) track.stop();
+        owned.stream = null;
+      }
+      if (owned.context) {
+        owned.context.close().catch(() => {
+        });
+        owned.context = null;
+      }
+    }
+    function unavailable(owned, retry = true) {
+      try {
+        restore(owned);
+      } catch {
+      }
+      releaseCapture(owned);
+      owned.blocked = true;
+      owned.retryAt = retry ? window2.performance.now() + owned.retryDelay : 0;
+      if (retry) owned.retryDelay = Math.min(3e4, owned.retryDelay * 2);
+      report("Audio unavailable \u2014 normal volume");
+    }
+    function connectTrack(owned) {
+      for (const track2 of owned.stream.getVideoTracks()) track2.stop();
+      const track = owned.stream.getAudioTracks().find((item) => item.readyState === "live");
+      if (!track || track === owned.track) return;
+      resetAnalysis(owned);
+      owned.lufs?.dispose();
+      owned.track = track;
+      owned.lufs = createLufsAnalysis({
+        window: window2,
+        context: owned.context,
+        track,
+        onFrame: (frame) => {
+          if (session !== owned || !owned.video.isConnected || owned.blocked) return;
+          owned.lastLufsFrame = window2.performance.now();
+          owned.catchUpAfter = 0;
+          if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || owned.preferred === 0 || owned.lufs?.needsActivation) return;
+          try {
+            if (owned.awaitingFrame && frame.attackPower != null) {
+              if (!Number.isFinite(frame.attackPower) || frame.attackPower <= 0 || isMuted(owned.video)) return;
+              owned.startupPower = Math.max(owned.startupPower, frame.attackPower);
+              if (owned.gain === 0) {
+                readPreferred(owned);
+                owned.gain = MIN_NORMALIZATION_GAIN;
+                writeOutput(owned, owned.preferred * owned.gain);
+              }
+              return;
+            }
+            owned.lufsTracker || (owned.lufsTracker = createLufsGainController());
+            if (frame.attackPower != null && !owned.lufsTracker.wantsAttack(frame.attackPower)) return;
+            if (isMuted(owned.video)) return;
+            readPreferred(owned);
+            const starting = owned.awaitingFrame;
+            owned.gain = owned.lufsTracker.update(
+              starting ? { ...frame, momentaryPower: Math.max(frame.momentaryPower ?? frame.power, owned.startupPower) } : frame,
+              100 / Math.max(1, owned.preferred)
+            );
+            const output = owned.preferred * owned.gain;
+            owned.awaitingFrame = false;
+            if (starting || outputPercent(output) < owned.applied) writeOutput(owned, output);
+          } catch {
+            unavailable(owned);
+          }
+        },
+        onFailure: () => {
+          if (session === owned) unavailable(owned);
+        }
+      });
+      if (owned.blocked) {
+        owned.lufs?.dispose();
+        owned.lufs = null;
+      } else if (!owned.lufs) unavailable(owned);
+    }
+    function resume(owned) {
+      if (!owned.context || !owned.lufs?.needsActivation || owned.context.state !== "suspended" || owned.resuming) return;
+      owned.resuming = true;
+      owned.context.resume().catch(() => {
+      }).finally(() => {
+        owned.resuming = false;
+      });
+    }
+    function prepareContext(owned) {
+      if (owned.context || owned.video.mediaKeys) return;
+      const AudioContext = window2.AudioContext || window2.webkitAudioContext;
+      const hasAnalysis = window2.MediaStreamTrackProcessor || window2.AudioWorkletNode && window2.Blob && window2.URL?.createObjectURL;
+      if (!(owned.video.captureStream || owned.video.mozCaptureStream) || !AudioContext || !window2.MediaStream || !hasAnalysis) return;
+      owned.context = new AudioContext();
+      prepareLufsAnalysis({ window: window2, context: owned.context }).catch(() => {
+      });
+    }
+    function tick() {
+      const owned = session;
+      if (!owned) return;
+      const now = window2.performance.now();
+      const delayed = owned.lastTick != null && now - owned.lastTick > 500;
+      owned.lastTick = now;
+      const video = owned.video;
+      if (!video.isConnected) {
+        bind(null);
+        return;
+      }
+      if (owned.blocked) {
+        if (!owned.retryAt || now < owned.retryAt || video.paused || video.ended || video.readyState < 2) return;
+        owned.blocked = false;
+        owned.retryAt = 0;
+      }
+      if (video.mediaKeys) {
+        unavailable(owned, false);
+        return;
+      }
+      if (video.paused || video.ended || video.readyState < 2) {
+        owned.lastLufsFrame = null;
+        owned.analysisStarted = window2.performance.now();
+        report("Waiting for playback");
+        return;
+      }
+      try {
+        if (!owned.stream) {
+          const capture = video.captureStream || video.mozCaptureStream;
+          const AudioContext = window2.AudioContext || window2.webkitAudioContext;
+          const hasAnalysis = window2.MediaStreamTrackProcessor || window2.AudioWorkletNode && window2.Blob && window2.URL?.createObjectURL;
+          if (!capture || !AudioContext || !window2.MediaStream || !hasAnalysis) {
+            restore(owned);
+            owned.blocked = true;
+            report("Unavailable in this browser");
+            return;
+          }
+          owned.stream = capture.call(video);
+          owned.context || (owned.context = new AudioContext());
+          owned.onTrack = () => {
+            try {
+              connectTrack(owned);
+            } catch {
+              unavailable(owned);
+            }
+          };
+          owned.stream.addEventListener("addtrack", owned.onTrack);
+          connectTrack(owned);
+          if (owned.blocked) return;
+          resume(owned);
+        }
+        if (!owned.track || owned.track.readyState !== "live") connectTrack(owned);
+        if (owned.blocked) return;
+        readPreferred(owned);
+        if (owned.awaitingFrame) writeOutput(owned, owned.preferred * owned.gain);
+        if (owned.lufs?.needsActivation) {
+          if (owned.awaitingFrame && owned.resuming && now - owned.analysisStarted < 3e3) {
+            report("Starting audio analysis");
+            return;
+          }
+          restore(owned);
+          report("Click the player to activate");
+          return;
+        }
+        if (!owned.track || owned.track.muted || owned.track.readyState !== "live") {
+          if (!owned.awaitingFrame) restore(owned);
+          else if (now - owned.analysisStarted > 3e3) {
+            unavailable(owned);
+            return;
+          }
+          report("Waiting for accessible audio");
+          return;
+        }
+        if (isMuted(video) || owned.preferred === 0) {
+          owned.lastLufsFrame = null;
+          owned.analysisStarted = window2.performance.now();
+          report("Waiting for audio");
+          return;
+        }
+        const starting = owned.awaitingFrame || owned.lastLufsFrame == null;
+        if (now - (starting ? owned.analysisStarted : owned.lastLufsFrame) > (starting ? 3e3 : 500)) {
+          if (delayed && !owned.catchUpAfter) owned.catchUpAfter = now + 100;
+          if (now < (owned.catchUpAfter || 0)) return;
+          unavailable(owned);
+          return;
+        }
+        if (starting) {
+          report("Starting audio analysis");
+          return;
+        }
+        writeOutput(owned, owned.preferred * owned.gain, true);
+        if (now - owned.analysisStarted >= 3e3) owned.retryDelay = 1e3;
+        report(owned.applied === 100 && owned.applied > owned.preferred ? "Active \u2014 at volume limit" : "Active");
+      } catch {
+        unavailable(owned);
+      }
+    }
+    function bind(video) {
+      if (session?.video === video) return;
+      if (session) {
+        const owned2 = session;
+        try {
+          if (owned2.video.isConnected) restore(owned2);
+        } catch {
+        }
+        session = null;
+        window2.clearInterval(owned2.timer);
+        for (const type of ["emptied", "loadstart"]) owned2.video.removeEventListener(type, owned2.reset);
+        for (const type of ["playing", "loadedmetadata"]) owned2.video.removeEventListener(type, owned2.retry);
+        owned2.video.removeEventListener("volumechange", owned2.holdOutput);
+        window2.document.removeEventListener("pointerdown", owned2.gesture, true);
+        window2.document.removeEventListener("keydown", owned2.gesture, true);
+        releaseCapture(owned2);
+      }
+      if (!enabled || !video) {
+        report(enabled ? "Waiting for playback" : "Off");
+        return;
+      }
+      const preferred = clampVolume(getVolume(video));
+      const owned = session = {
+        video,
+        preferred,
+        applied: preferred,
+        gain: 1,
+        lastWriteAt: -Infinity,
+        blocked: false,
+        retryAt: 0,
+        retryDelay: 1e3
+      };
+      owned.reset = () => {
+        try {
+          resetAnalysis(owned);
+        } catch {
+        }
+        if (owned.stream) releaseCapture(owned);
+        owned.blocked = false;
+        owned.retryAt = 0;
+        owned.retryDelay = 1e3;
+        report("Waiting for playback");
+        try {
+          prepareContext(owned);
+        } catch {
+          unavailable(owned);
+        }
+      };
+      owned.retry = () => {
+        owned.blocked = false;
+        owned.retryAt = 0;
+        tick();
+      };
+      owned.holdOutput = () => {
+        if (!owned.awaitingFrame || owned.writing) return;
+        window2.queueMicrotask(() => {
+          if (session !== owned || !owned.video.isConnected || !owned.awaitingFrame) return;
+          try {
+            readPreferred(owned);
+            writeOutput(owned, owned.preferred * owned.gain);
+          } catch {
+            unavailable(owned);
+          }
+        });
+      };
+      owned.gesture = () => {
+        if (owned.blocked && owned.retryAt) owned.retry();
+        else {
+          resume(owned);
+          tick();
+        }
+      };
+      for (const type of ["emptied", "loadstart"]) video.addEventListener(type, owned.reset);
+      for (const type of ["playing", "loadedmetadata"]) video.addEventListener(type, owned.retry);
+      video.addEventListener("volumechange", owned.holdOutput);
+      window2.document.addEventListener("pointerdown", owned.gesture, true);
+      window2.document.addEventListener("keydown", owned.gesture, true);
+      owned.timer = window2.setInterval(tick, 50);
+      try {
+        resetAnalysis(owned);
+        prepareContext(owned);
+      } catch {
+        unavailable(owned);
+      }
+      tick();
+    }
+    return {
+      bind,
+      isBoundTo: (video) => session?.video === video,
+      setEnabled(value) {
+        enabled = !!value;
+        if (!enabled) bind(null);
+        else if (!session) report("Waiting for playback");
+      },
+      getStatus: () => status,
+      getDetails,
+      getPreferredVolume(video, rawVolume) {
+        return session?.video === video ? readPreferred(session, rawVolume) : rawVolume;
+      },
+      acceptNativeVolume(video) {
+        const owned = session?.video === video ? session : null;
+        if (!owned || owned.writing) return;
+        const actual = clampVolume(getVolume(video));
+        if (Math.abs(actual - owned.applied) > 0.6) {
+          owned.preferred = Math.round(clampVolume(owned.applied > 0 && !owned.awaitingFrame ? owned.preferred * actual / owned.applied : actual));
+          owned.applied = actual;
+          owned.lastWriteAt = window2.performance.now();
+        }
+        owned.outputChanged = false;
+        if (owned.awaitingFrame) writeOutput(owned, owned.preferred * owned.gain);
+      },
+      setPreferredVolume(video, value, options) {
+        let output = clampVolume(value);
+        const owned = session?.video === video ? session : null;
+        if (owned) {
+          owned.preferred = output;
+          output = outputPercent(output * owned.gain);
+          owned.applied = output;
+          owned.outputChanged = false;
+          owned.lastWriteAt = window2.performance.now();
+          owned.writing = true;
+        }
+        try {
+          setVolume(video, output, options);
+        } finally {
+          if (owned) owned.writing = false;
+        }
+      }
+    };
+  }
+
+  // src/shared/native-volume-input.js
+  function bindNativeVolumeInput({ window: window2, video, player, selector, normalizer, onChange }) {
+    let active = true;
+    const types = ["pointerdown", "pointermove", "input", "change", "wheel", "keydown"];
+    const onInput = (event) => {
+      if (!event.target?.closest?.(selector) || !player.contains(event.target)) return;
+      if (event.type === "pointermove" && !event.buttons) return;
+      if (event.type === "keydown" && !["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) return;
+      window2.queueMicrotask(() => {
+        if (!active || !video.isConnected) return;
+        normalizer.acceptNativeVolume(video);
+        onChange();
+      });
+    };
+    for (const type of types) window2.document.addEventListener(type, onInput, true);
+    return () => {
+      active = false;
+      for (const type of types) window2.document.removeEventListener(type, onInput, true);
+    };
+  }
+
+  // src/shared/speaker-icon.js
+  function getSpeakerIconMode(pct, muted) {
+    if (muted || pct <= 0) return "muted";
+    if (pct >= 50) return "high";
+    return "low";
+  }
+  function createSpeakerIconGroup(document2, mode) {
+    const ns = "http://www.w3.org/2000/svg";
+    const group = document2.createElementNS(ns, "g");
+    const addPath = (d) => {
+      const path = document2.createElementNS(ns, "path");
+      path.setAttribute("fill", "currentColor");
+      path.setAttribute("d", d);
+      group.appendChild(path);
+    };
+    if (mode === "muted") {
+      addPath("M11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16C1 13.20 1.26 14.22 1.77 15.12C2.28 16.02 3.02 16.78 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.25 22 12.51 21.90 12.70 21.71C12.89 21.52 13 21.26 13 21V3C13 2.73 12.89 2.48 12.70 2.29C12.51 2.10 12.25 2 11.98 2C11.80 2 11.63 2.05 11.48 2.14ZM4.94 8.40L11 4.76V19.22L4.94 15.59C4.35 15.23 3.85 14.73 3.51 14.13C3.17 13.53 3 12.85 3 12.16V11.83C3 11.14 3.18 10.46 3.52 9.86C3.86 9.26 4.35 8.76 4.94 8.40Z");
+      addPath("M16.05 7.65L18.75 10.35L21.45 7.65L22.85 9.05L20.15 11.75L22.85 14.45L21.45 15.85L18.75 13.15L16.05 15.85L14.65 14.45L17.35 11.75L14.65 9.05L16.05 7.65Z");
+      return group;
+    }
+    addPath("M11.60 2.08L11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16L1.01 12.56C1.07 13.52 1.37 14.46 1.87 15.29C2.38 16.12 3.08 16.81 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.16 22 12.33 21.95 12.49 21.87C12.64 21.78 12.77 21.65 12.86 21.50C12.95 21.35 13 21.17 13 21V3C12.99 2.83 12.95 2.67 12.87 2.52C12.80 2.37 12.68 2.25 12.54 2.16C12.41 2.07 12.25 2.01 12.08 2C11.92 1.98 11.75 2.01 11.60 2.08Z");
+    addPath("M15.53 7.05C15.35 7.22 15.25 7.45 15.24 7.70C15.23 7.95 15.31 8.19 15.46 8.38L15.53 8.46L15.70 8.64C16.09 9.06 16.39 9.55 16.61 10.08L16.70 10.31C16.90 10.85 17 11.42 17 12L16.99 12.24C16.96 12.73 16.87 13.22 16.70 13.68L16.61 13.91C16.36 14.51 15.99 15.07 15.53 15.53C15.35 15.72 15.25 15.97 15.26 16.23C15.26 16.49 15.37 16.74 15.55 16.92C15.73 17.11 15.98 17.21 16.24 17.22C16.50 17.22 16.76 17.12 16.95 16.95C17.60 16.29 18.11 15.52 18.46 14.67L18.59 14.35C18.82 13.71 18.95 13.03 18.99 12.34L19 12C18.99 11.19 18.86 10.39 18.59 9.64L18.46 9.32C18.15 8.57 17.72 7.89 17.18 7.30L16.95 7.05L16.87 6.98C16.68 6.82 16.43 6.74 16.19 6.75C15.94 6.77 15.71 6.87 15.53 7.05Z");
+    if (mode === "high") {
+      addPath("M18.36 4.22C18.18 4.39 18.08 4.62 18.07 4.87C18.05 5.12 18.13 5.36 18.29 5.56L18.36 5.63L18.66 5.95C19.36 6.72 19.91 7.60 20.31 8.55L20.47 8.96C20.82 9.94 21 10.96 21 11.99L20.98 12.44C20.94 13.32 20.77 14.19 20.47 15.03L20.31 15.44C19.86 16.53 19.19 17.52 18.36 18.36C18.17 18.55 18.07 18.80 18.07 19.07C18.07 19.33 18.17 19.59 18.36 19.77C18.55 19.96 18.80 20.07 19.07 20.07C19.33 20.07 19.59 19.96 19.77 19.77C20.79 18.75 21.61 17.54 22.16 16.20L22.35 15.70C22.72 14.68 22.93 13.62 22.98 12.54L23 12C22.99 10.73 22.78 9.48 22.35 8.29L22.16 7.79C21.67 6.62 20.99 5.54 20.15 4.61L19.77 4.22L19.70 4.15C19.51 3.99 19.26 3.91 19.02 3.93C18.77 3.94 18.53 4.04 18.36 4.22Z");
+    }
+    return group;
+  }
+
+  // src/shared/volume-feedback.js
+  function createVolumeFeedback({ window: window2, player }) {
+    const document2 = player.ownerDocument;
+    let popup = null;
+    let timer = 0;
+    const clear = () => {
+      window2.clearTimeout(timer);
+      timer = 0;
+      popup?.remove();
+      popup = null;
+    };
+    const onKey = (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") clear();
+    };
+    player.addEventListener("pointerdown", clear, true);
+    player.addEventListener("keydown", onKey, true);
+    return {
+      show(value, muted = false) {
+        const percent = Math.round(clampVolume(value));
+        if (!popup) {
+          popup = document2.createElement("div");
+          popup.dataset.tmVolumeFeedback = "true";
+          popup.setAttribute("role", "status");
+          popup.setAttribute("aria-live", "polite");
+          popup.setAttribute("aria-atomic", "true");
+          Object.assign(popup.style, {
+            all: "initial",
+            position: "absolute",
+            top: "10%",
+            left: "50%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            boxSizing: "border-box",
+            maxWidth: "calc(100% - 24px)",
+            padding: "8px 12px",
+            borderRadius: "6px",
+            background: "rgba(0,0,0,.7)",
+            color: "#fff",
+            font: "600 20px/1.2 Arial,Helvetica,sans-serif",
+            fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+            zIndex: "20"
+          });
+          const icon = document2.createElementNS("http://www.w3.org/2000/svg", "svg");
+          icon.setAttribute("viewBox", "0 0 24 24");
+          icon.setAttribute("aria-hidden", "true");
+          icon.setAttribute("focusable", "false");
+          Object.assign(icon.style, { display: "block", flex: "none", width: "24px", height: "24px", color: "inherit" });
+          popup.append(icon, document2.createTextNode(""));
+          player.appendChild(popup);
+        }
+        const mode = getSpeakerIconMode(percent, muted);
+        if (popup.dataset.volumeIcon !== mode) {
+          popup.firstElementChild.replaceChildren(createSpeakerIconGroup(document2, mode));
+          popup.dataset.volumeIcon = mode;
+        }
+        popup.setAttribute("aria-label", `${muted ? "Muted, volume" : "Volume"} ${percent}%`);
+        popup.lastChild.nodeValue = `${percent}%`;
+        window2.clearTimeout(timer);
+        timer = window2.setTimeout(clear, 500);
+      },
+      clear,
+      dispose() {
+        clear();
+        player.removeEventListener("pointerdown", clear, true);
+        player.removeEventListener("keydown", onKey, true);
+      }
+    };
+  }
+
+  // src/shared/normalization-ui.js
+  function createNormalizationIcon(document2) {
+    const icon = document2.createElement("span");
+    icon.className = "tm-normalization-icon";
+    icon.hidden = true;
+    icon.title = "Auto-normalize volume is on";
+    icon.setAttribute("aria-hidden", "true");
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document2.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 14 14");
+    svg.setAttribute("focusable", "false");
+    const frame = document2.createElementNS(ns, "circle");
+    frame.setAttribute("cx", "7");
+    frame.setAttribute("cy", "7");
+    frame.setAttribute("r", "6.5");
+    const waveform = document2.createElementNS(ns, "path");
+    waveform.setAttribute("d", "M3.5 5.5v3 M7 3.5v7 M10.5 5.5v3");
+    svg.append(frame, waveform);
+    icon.append(svg);
+    return icon;
+  }
+  function updateNormalizationIcon(overlay, status) {
+    if (!overlay) return;
+    const visible = status.startsWith("Active") || status === "Waiting for playback" || status === "Starting audio analysis" || status === "Waiting for audio";
+    const icon = overlay.querySelector(".tm-normalization-icon");
+    const description = overlay.querySelector(".tm-normalization-description");
+    if (!icon || !description || icon.hidden === !visible) return;
+    overlay.classList.toggle("tm-normalization-enabled", visible);
+    icon.hidden = !visible;
+    for (const control of overlay.querySelectorAll('.tm-volume-icon-cell, input[type="range"]')) {
+      const ids = (control.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== description.id);
+      if (visible) ids.push(description.id);
+      if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
+      else control.removeAttribute("aria-describedby");
+    }
   }
 
   // src/shared/overlay-ui.js
@@ -322,31 +1204,6 @@
       setOverlayExpanded(overlay, true);
       scheduleExpandedHoldRelease(overlay);
     }
-    function getSpeakerIconMode(pct, muted) {
-      if (muted || pct <= 0) return "muted";
-      if (pct >= 50) return "high";
-      return "low";
-    }
-    function makeSpeakerIconGroup(ns, mode) {
-      const group = document2.createElementNS(ns, "g");
-      const addPath = (d) => {
-        const path = document2.createElementNS(ns, "path");
-        path.setAttribute("fill", "currentColor");
-        path.setAttribute("d", d);
-        group.appendChild(path);
-      };
-      if (mode === "muted") {
-        addPath("M11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16C1 13.20 1.26 14.22 1.77 15.12C2.28 16.02 3.02 16.78 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.25 22 12.51 21.90 12.70 21.71C12.89 21.52 13 21.26 13 21V3C13 2.73 12.89 2.48 12.70 2.29C12.51 2.10 12.25 2 11.98 2C11.80 2 11.63 2.05 11.48 2.14ZM4.94 8.40L11 4.76V19.22L4.94 15.59C4.35 15.23 3.85 14.73 3.51 14.13C3.17 13.53 3 12.85 3 12.16V11.83C3 11.14 3.18 10.46 3.52 9.86C3.86 9.26 4.35 8.76 4.94 8.40Z");
-        addPath("M16.05 7.65L18.75 10.35L21.45 7.65L22.85 9.05L20.15 11.75L22.85 14.45L21.45 15.85L18.75 13.15L16.05 15.85L14.65 14.45L17.35 11.75L14.65 9.05L16.05 7.65Z");
-        return group;
-      }
-      addPath("M11.60 2.08L11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16L1.01 12.56C1.07 13.52 1.37 14.46 1.87 15.29C2.38 16.12 3.08 16.81 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.16 22 12.33 21.95 12.49 21.87C12.64 21.78 12.77 21.65 12.86 21.50C12.95 21.35 13 21.17 13 21V3C12.99 2.83 12.95 2.67 12.87 2.52C12.80 2.37 12.68 2.25 12.54 2.16C12.41 2.07 12.25 2.01 12.08 2C11.92 1.98 11.75 2.01 11.60 2.08Z");
-      addPath("M15.53 7.05C15.35 7.22 15.25 7.45 15.24 7.70C15.23 7.95 15.31 8.19 15.46 8.38L15.53 8.46L15.70 8.64C16.09 9.06 16.39 9.55 16.61 10.08L16.70 10.31C16.90 10.85 17 11.42 17 12L16.99 12.24C16.96 12.73 16.87 13.22 16.70 13.68L16.61 13.91C16.36 14.51 15.99 15.07 15.53 15.53C15.35 15.72 15.25 15.97 15.26 16.23C15.26 16.49 15.37 16.74 15.55 16.92C15.73 17.11 15.98 17.21 16.24 17.22C16.50 17.22 16.76 17.12 16.95 16.95C17.60 16.29 18.11 15.52 18.46 14.67L18.59 14.35C18.82 13.71 18.95 13.03 18.99 12.34L19 12C18.99 11.19 18.86 10.39 18.59 9.64L18.46 9.32C18.15 8.57 17.72 7.89 17.18 7.30L16.95 7.05L16.87 6.98C16.68 6.82 16.43 6.74 16.19 6.75C15.94 6.77 15.71 6.87 15.53 7.05Z");
-      if (mode === "high") {
-        addPath("M18.36 4.22C18.18 4.39 18.08 4.62 18.07 4.87C18.05 5.12 18.13 5.36 18.29 5.56L18.36 5.63L18.66 5.95C19.36 6.72 19.91 7.60 20.31 8.55L20.47 8.96C20.82 9.94 21 10.96 21 11.99L20.98 12.44C20.94 13.32 20.77 14.19 20.47 15.03L20.31 15.44C19.86 16.53 19.19 17.52 18.36 18.36C18.17 18.55 18.07 18.80 18.07 19.07C18.07 19.33 18.17 19.59 18.36 19.77C18.55 19.96 18.80 20.07 19.07 20.07C19.33 20.07 19.59 19.96 19.77 19.77C20.79 18.75 21.61 17.54 22.16 16.20L22.35 15.70C22.72 14.68 22.93 13.62 22.98 12.54L23 12C22.99 10.73 22.78 9.48 22.35 8.29L22.16 7.79C21.67 6.62 20.99 5.54 20.15 4.61L19.77 4.22L19.70 4.15C19.51 3.99 19.26 3.91 19.02 3.93C18.77 3.94 18.53 4.04 18.36 4.22Z");
-      }
-      return group;
-    }
     function formatCssPx(value) {
       if (!Number.isFinite(value)) return "0px";
       const rounded = Number(value.toFixed(3));
@@ -458,7 +1315,7 @@
         return circle;
       };
       const appendSpeakerIcon = (className, mode, transform) => {
-        const group = makeSpeakerIconGroup(ns, mode);
+        const group = createSpeakerIconGroup(document2, mode);
         group.setAttribute("class", `${className} tm-volume-speaker-icon`);
         group.setAttribute("transform", transform);
         svg.appendChild(group);
@@ -516,6 +1373,10 @@
       setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
+      isNormalizationEnabled,
+      setNormalizationEnabled,
+      getNormalizationStatus,
+      getNormalizationDetails,
       getVolumeStep,
       setVolumeStep,
       isAlwaysExpandedEnabled,
@@ -565,6 +1426,21 @@
         });
       });
     }
+    function syncNormalizationStatus(popup) {
+      if (!popup) return;
+      const normalizationStatus = popup.querySelector("#tm-volume-options-normalization-status");
+      const status = getNormalizationStatus();
+      if (normalizationStatus && normalizationStatus.textContent !== status) normalizationStatus.textContent = status;
+      if (normalizationStatus) normalizationStatus.dataset.state = status.startsWith("Active") ? "active" : "idle";
+      const feedback = popup.querySelector(".tm-volume-options-normalization-feedback");
+      if (feedback) feedback.hidden = !isNormalizationEnabled();
+      const normalizationDetails = popup.querySelector("#tm-volume-options-normalization-details");
+      const details = getNormalizationDetails();
+      if (normalizationDetails) {
+        if (normalizationDetails.textContent !== details) normalizationDetails.textContent = details;
+        normalizationDetails.hidden = !details;
+      }
+    }
     function syncOptionsPopupState(popup) {
       if (!popup) return;
       const selectedMode = getVolumeSliderMode();
@@ -572,9 +1448,10 @@
       const selectedAppearance = getVolumeAppearance();
       const selectedStep = getVolumeStep();
       const onVideo = isSliderOnVideo();
-      ["on", "off", "replace-native"].forEach((mode) => {
-        popup.querySelector(`#tm-volume-options-mode-${mode}`)?.setAttribute("aria-checked", selectedMode === mode ? "true" : "false");
-      });
+      popup.querySelector("#tm-volume-options-normalization")?.setAttribute("aria-checked", isNormalizationEnabled() ? "true" : "false");
+      syncNormalizationStatus(popup);
+      const modeSelect = popup.querySelector("#tm-volume-options-mode");
+      if (modeSelect) modeSelect.value = selectedMode;
       const placementSection = popup.querySelector("#tm-volume-options-placement-section");
       const placementEnabled = selectedMode === "replace-native";
       if (placementSection) {
@@ -599,6 +1476,8 @@
       if (opacitySection) opacitySection.style.display = onVideoDisplay;
       const sizeSection = popup.querySelector("#tm-volume-options-size-section");
       if (sizeSection) sizeSection.style.display = onVideoDisplay;
+      const appearanceHint = popup.querySelector(".tm-volume-options-appearance-hint");
+      if (appearanceHint) appearanceHint.hidden = onVideo;
       syncOptionsRadioGroups(popup);
     }
     function handleRadioNavigation(event) {
@@ -687,42 +1566,32 @@
     }
     function createModeSection() {
       const section = document2.createElement("div");
-      section.className = "tm-volume-options-section";
-      section.appendChild(createOptionsSectionLabel("Mode"));
-      const stack = document2.createElement("div");
-      stack.className = "tm-volume-options-segment-stack";
-      stack.setAttribute("role", "radiogroup");
-      stack.setAttribute("aria-label", "Mode");
-      stack.appendChild(createOptionsSegment([
-        createOptionsRadio(
-          "tm-volume-options-mode-on",
-          "On",
-          getVolumeSliderMode() === "on",
-          () => setVolumeSliderMode("on")
-        ),
-        createOptionsRadio(
-          "tm-volume-options-mode-off",
-          "Off",
-          getVolumeSliderMode() === "off",
-          () => setVolumeSliderMode("off")
-        )
-      ]));
-      stack.appendChild(createOptionsSegment([
-        createOptionsRadio(
-          "tm-volume-options-mode-replace-native",
-          "Replace native",
-          getVolumeSliderMode() === "replace-native",
-          () => setVolumeSliderMode("replace-native")
-        )
-      ]));
-      section.appendChild(stack);
+      section.className = "tm-volume-options-mode";
+      const label = document2.createElement("label");
+      label.htmlFor = "tm-volume-options-mode";
+      label.textContent = "Mode";
+      const select = document2.createElement("select");
+      select.id = label.htmlFor;
+      for (const [value, text] of [["on", "On"], ["off", "Off"], ["replace-native", "Replace native"]]) {
+        const option = document2.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        select.appendChild(option);
+      }
+      select.value = getVolumeSliderMode();
+      select.addEventListener("change", () => {
+        setVolumeSliderMode(select.value);
+        refreshOptionsPopupState();
+      });
+      select.addEventListener("keydown", (event) => event.stopPropagation());
+      section.append(label, select);
       return section;
     }
     function createPlacementSection() {
       const section = document2.createElement("div");
       section.className = "tm-volume-options-section";
       section.id = "tm-volume-options-placement-section";
-      section.appendChild(createOptionsSectionLabel("Position when replacing native"));
+      section.appendChild(createOptionsSectionLabel("Placement"));
       const segment = createOptionsSegment([
         createOptionsRadio(
           "tm-volume-options-placement-native",
@@ -740,32 +1609,29 @@
       segment.setAttribute("role", "radiogroup");
       segment.setAttribute("aria-label", "Position when replacing native");
       section.appendChild(segment);
+      section.appendChild(createBehaviorRows());
       return section;
     }
-    function createBehaviorSection() {
-      const section = document2.createElement("div");
-      section.className = "tm-volume-options-section";
-      section.appendChild(createOptionsSectionLabel("Slider behavior"));
+    function createBehaviorRows() {
       const list = document2.createElement("div");
       list.className = "tm-volume-options-checklist";
-      list.appendChild(createOptionsCheckboxRow(
-        "tm-volume-options-always-expanded",
-        "Always expanded",
-        isAlwaysExpandedEnabled(),
-        (next) => setAlwaysExpandedEnabled(next)
-      ));
       list.appendChild(createOptionsCheckboxRow(
         "tm-volume-options-location-video",
         "Show on video",
         isSliderOnVideo(),
         (next) => setSliderLocation(next ? "video" : "controls")
       ));
-      section.appendChild(list);
-      return section;
+      list.appendChild(createOptionsCheckboxRow(
+        "tm-volume-options-always-expanded",
+        "Always expanded",
+        isAlwaysExpandedEnabled(),
+        (next) => setAlwaysExpandedEnabled(next)
+      ));
+      return list;
     }
     function createVolumeStepSection() {
       const section = document2.createElement("div");
-      section.className = "tm-volume-options-section";
+      section.className = "tm-volume-options-step-setting";
       section.id = "tm-volume-options-step-section";
       section.appendChild(createOptionsSectionLabel("Adjustment step"));
       const segment = createOptionsSegment(VOLUME_STEPS.map(
@@ -779,6 +1645,46 @@
       segment.setAttribute("role", "radiogroup");
       segment.setAttribute("aria-label", "Volume adjustment step");
       section.appendChild(segment);
+      return section;
+    }
+    function createNormalizationSection() {
+      const section = document2.createElement("div");
+      section.className = "tm-volume-options-section";
+      section.appendChild(createOptionsSectionLabel("Audio"));
+      const list = document2.createElement("div");
+      list.className = "tm-volume-options-checklist";
+      const toggle = createOptionsCheckboxRow(
+        "tm-volume-options-normalization",
+        "Auto-normalize volume",
+        isNormalizationEnabled(),
+        setNormalizationEnabled
+      );
+      toggle.setAttribute("aria-describedby", "tm-volume-options-normalization-help tm-volume-options-normalization-status");
+      list.appendChild(toggle);
+      section.appendChild(list);
+      const help = document2.createElement("p");
+      help.id = "tm-volume-options-normalization-help";
+      help.className = "tm-volume-options-help";
+      help.textContent = "Keeps sources closer in loudness. Your slider sets the listening level. Increases are limited to normal player volume.";
+      help.hidden = true;
+      section.appendChild(help);
+      const feedback = document2.createElement("div");
+      feedback.className = "tm-volume-options-normalization-feedback";
+      const status = document2.createElement("p");
+      status.id = "tm-volume-options-normalization-status";
+      status.className = "tm-volume-options-help";
+      status.setAttribute("role", "status");
+      status.textContent = getNormalizationStatus();
+      feedback.appendChild(status);
+      const details = document2.createElement("p");
+      details.id = "tm-volume-options-normalization-details";
+      details.className = "tm-volume-options-help";
+      details.setAttribute("aria-live", "off");
+      details.textContent = getNormalizationDetails();
+      details.hidden = !details.textContent;
+      feedback.appendChild(details);
+      section.appendChild(feedback);
+      section.appendChild(createVolumeStepSection());
       return section;
     }
     function createAppearanceSection() {
@@ -972,6 +1878,7 @@
       popup.id = OPTIONS_POPUP_ID;
       popup.setAttribute("role", "dialog");
       popup.setAttribute("aria-label", "Volume Slider Options");
+      popup.tabIndex = -1;
       popup.toggleAttribute("hidden", true);
       const header = document2.createElement("div");
       header.className = "tm-volume-options-header";
@@ -981,20 +1888,66 @@
       header.appendChild(title);
       const body = document2.createElement("div");
       body.className = "tm-volume-options-body";
-      body.appendChild(createModeSection());
-      body.appendChild(createPlacementSection());
-      body.appendChild(createAppearanceSection());
-      body.appendChild(createVolumeStepSection());
-      body.appendChild(createBehaviorSection());
-      body.appendChild(createThicknessSection());
-      body.appendChild(createOpacitySection());
-      body.appendChild(createSizeSection());
+      const tabList = document2.createElement("div");
+      tabList.className = "tm-volume-options-tabs";
+      tabList.setAttribute("role", "tablist");
+      tabList.setAttribute("aria-label", "Volume settings");
+      const panels = ["general", "appearance"].map((name) => {
+        const panel = document2.createElement("div");
+        panel.id = `tm-volume-options-panel-${name}`;
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-labelledby", `tm-volume-options-tab-${name}`);
+        body.appendChild(panel);
+        return panel;
+      });
+      const tabs = panels.map((panel, index) => {
+        const tab = document2.createElement("button");
+        tab.type = "button";
+        tab.id = panel.getAttribute("aria-labelledby");
+        tab.className = "tm-volume-options-tab";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-controls", panel.id);
+        tab.appendChild(createOptionsButtonLabel(index ? "Appearance" : "General"));
+        tab.addEventListener("click", () => selectTab(index));
+        tab.addEventListener("keydown", (event) => {
+          let next;
+          if (event.key === "ArrowLeft") next = (index + panels.length - 1) % panels.length;
+          else if (event.key === "ArrowRight") next = (index + 1) % panels.length;
+          else if (event.key === "Home") next = 0;
+          else if (event.key === "End") next = panels.length - 1;
+          else return;
+          event.preventDefault();
+          event.stopPropagation();
+          selectTab(next);
+          tabs[next].focus();
+        });
+        tabList.appendChild(tab);
+        return tab;
+      });
+      function selectTab(index) {
+        stopOptionsPreview();
+        tabs.forEach((tab, i) => {
+          tab.setAttribute("aria-selected", i === index ? "true" : "false");
+          tab.tabIndex = i === index ? 0 : -1;
+          panels[i].hidden = i !== index;
+        });
+        body.scrollTop = 0;
+      }
+      panels[0].append(createNormalizationSection(), createPlacementSection());
+      panels[1].append(createAppearanceSection(), createThicknessSection(), createSizeSection(), createOpacitySection());
+      const hint = document2.createElement("p");
+      hint.className = "tm-volume-options-help tm-volume-options-appearance-hint";
+      hint.append("To adjust size and opacity,", document2.createElement("br"), "enable \u201CShow on video\u201D in General.");
+      panels[1].appendChild(hint);
+      selectTab(0);
       popup.appendChild(header);
+      popup.appendChild(createModeSection());
+      popup.appendChild(tabList);
       popup.appendChild(body);
       popup.addEventListener("click", (event) => event.stopPropagation());
       return popup;
     }
-    return { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview };
+    return { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview };
   }
 
   // src/shared/settings.js
@@ -1048,6 +2001,8 @@
     overlayId,
     onPlacementChanged,
     onModeChanged,
+    onNormalizationChanged = () => {
+    },
     clearExpandedHold,
     setOverlayExpanded,
     collapseOverlayIfIdle,
@@ -1184,6 +2139,13 @@
       if (keys.legacySnap) remove(keys.legacySnap);
       updateVolumeStepUi(getOverlay());
     }
+    function isNormalizationEnabled() {
+      return normalizeBooleanSetting(userSettings.normalizeVolume) ?? read(keys.normalization) === "true";
+    }
+    function setNormalizationEnabled(enabled) {
+      write(keys.normalization, enabled ? "true" : "false");
+      onNormalizationChanged();
+    }
     function isAlwaysExpandedEnabled() {
       const override = normalizeBooleanSetting(userSettings.alwaysExpanded);
       return override ?? read(keys.expanded) === "true";
@@ -1316,6 +2278,8 @@
     const isNativeVolumeReplacementEnabled = () => getVolumeSliderMode() === "replace-native";
     const shouldUseNativeReplacementSlot = () => isNativeVolumeReplacementEnabled() && getReplaceNativePlacement() === "native";
     return {
+      isNormalizationEnabled,
+      setNormalizationEnabled,
       getVolumeSliderMode,
       getReplaceNativePlacement,
       isSliderOnVideo,
@@ -1389,10 +2353,10 @@
       }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document2.activeElement === first) {
+      if (event.shiftKey && (document2.activeElement === first || document2.activeElement === popup)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document2.activeElement === last) {
+      } else if (!event.shiftKey && (document2.activeElement === last || document2.activeElement === popup)) {
         event.preventDefault();
         first.focus();
       }
@@ -1534,12 +2498,13 @@
                 font-size: 14px;
                 line-height: 1;
                 max-height: 70vh;
-                max-width: 320px;
+                max-width: calc(100vw - 16px);
                 min-width: 288px;
+                outline: none;
                 overflow: hidden;
                 position: absolute;
                 user-select: none;
-                width: 288px;
+                width: 320px;
                 z-index: 10001;
             }
             #{{optionsPopupId}},
@@ -1563,18 +2528,127 @@
             #{{optionsPopupId}}[hidden] {
                 display: none;
             }
+            #{{optionsPopupId}} [hidden] {
+                display: none !important;
+            }
+            #{{optionsPopupId}} .tm-volume-options-mode {
+                align-items: center;
+                display: flex;
+                flex-shrink: 0;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 8px 16px 10px;
+                line-height: 20px;
+            }
+            #{{optionsPopupId}} select {
+                -webkit-appearance: none;
+                appearance: none;
+                background-color: rgba(255, 255, 255, 0.08);
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+                background-position: right 12px center;
+                background-repeat: no-repeat;
+                background-size: 12px 12px;
+                border: 0;
+                border-radius: 6px;
+                color: #fff;
+                color-scheme: dark;
+                cursor: pointer;
+                font: inherit;
+                line-height: 20px;
+                outline: none;
+                padding: 7px 32px 7px 10px;
+                width: 176px;
+            }
+            #{{optionsPopupId}} select:open {
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 7.5 3-3 3 3' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            }
+            #{{optionsPopupId}} select:focus-visible {
+                background-color: rgba(255, 255, 255, 0.16);
+            }
+            #{{optionsPopupId}} select option {
+                background-color: #242424;
+                color: #fff;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tabs {
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                display: grid;
+                flex-shrink: 0;
+                grid-template-columns: 1fr 1fr;
+                padding: 0 16px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab {
+                background: transparent;
+                border: 0;
+                color: rgba(255, 255, 255, 0.65);
+                cursor: pointer;
+                display: grid;
+                padding: 11px 0;
+                place-items: center;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab[aria-selected="true"] {
+                box-shadow: inset 0 -2px {{accentDark}};
+                color: #fff;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab:hover {
+                color: #fff;
+            }
+            #{{optionsPopupId}} :is(button, input):focus-visible {
+                outline: 2px solid {{accentDark}};
+                outline-offset: -2px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-normalization-feedback {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.09);
+                border-radius: 6px;
+                margin-top: 6px;
+                padding: 8px 10px;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status {
+                color: rgba(255, 255, 255, 0.9);
+                margin: 0;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status::before {
+                background: rgba(255, 255, 255, 0.45);
+                border-radius: 50%;
+                content: '';
+                display: inline-block;
+                height: 6px;
+                margin-right: 7px;
+                vertical-align: 1px;
+                width: 6px;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status[data-state="active"]::before {
+                background: #60cf83;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-details {
+                white-space: pre-line;
+            }
+            #{{optionsPopupId}} .tm-volume-options-step-setting {
+                margin-top: 14px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-step-setting .tm-volume-options-section-label {
+                color: rgba(255, 255, 255, 0.75);
+                font-size: 12px;
+                font-weight: 400;
+                margin-bottom: 8px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-appearance-hint {
+                padding: 8px 16px 0;
+            }
+            #{{optionsPopupId}} #tm-volume-options-placement-section > .tm-volume-options-checklist {
+                margin-top: 8px;
+            }
 {{platformOptionsCss}}
             .tm-volume-options-header {
                 align-items: center;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
                 display: flex;
                 flex-shrink: 0;
-                padding: 12px 16px;
+                padding: 10px 16px 4px;
             }
             .tm-volume-options-title {
                 color: #fff;
-                font-size: 14px;
-                font-weight: 500;
+                font-size: 15px;
+                font-weight: 600;
                 line-height: 20px;
             }
             .tm-volume-options-body {
@@ -1618,26 +2692,31 @@
                 padding-top: 12px;
             }
             .tm-volume-options-section-label {
-                color: rgba(255, 255, 255, 0.55);
-                font-size: 11px;
-                font-weight: 500;
-                letter-spacing: 0.04em;
-                line-height: 14px;
+                color: #fff;
+                font-size: 14px;
+                font-weight: 600;
+                line-height: 20px;
                 margin: 0 0 10px;
-                text-transform: uppercase;
             }
             .tm-volume-options-checklist {
                 display: flex;
                 flex-direction: column;
             }
+            #{{optionsPopupId}} .tm-volume-options-help {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                line-height: 1.4;
+                margin: 6px 0 0;
+                white-space: normal;
+            }
             #{{optionsPopupId}} .tm-volume-options-checklist .tm-volume-options-row {
                 align-items: center;
                 column-gap: 12px;
                 display: grid;
-                grid-template-columns: 1fr 18px;
+                grid-template-columns: 1fr 32px;
                 justify-content: stretch;
                 margin: 0 -8px;
-                min-height: 32px;
+                min-height: 36px;
                 padding: 5px 8px;
                 width: calc(100% + 16px);
             }
@@ -1678,33 +2757,30 @@
                 opacity: 0.45;
             }
             .tm-volume-options-checkbox {
-                background: transparent;
-                border: 1.5px solid rgba(255, 255, 255, 0.45);
-                border-radius: 3px;
-                display: grid;
+                background: rgba(255, 255, 255, 0.22);
+                border: 0;
+                border-radius: 10px;
+                display: block;
                 flex-shrink: 0;
                 height: 18px;
-                place-items: center;
-                transition: all 0.12s ease;
-                width: 18px;
+                position: relative;
+                width: 32px;
+            }
+            .tm-volume-options-checkbox::after {
+                background: #fff;
+                border-radius: 50%;
+                content: '';
+                height: 14px;
+                left: 2px;
+                position: absolute;
+                top: 2px;
+                width: 14px;
             }
             .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox {
                 background: {{accentDark}};
-                border-color: {{accentDark}};
             }
             .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox::after {
-                border: solid #fff;
-                border-width: 0 0 3px 3px;
-                box-sizing: border-box;
-                content: '';
-                height: 6px;
-                transform: translateY(-1px) rotate(-45deg);
-                width: 10px;
-            }
-            .tm-volume-options-segment-stack {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
+                left: 16px;
             }
             .tm-volume-options-section-label + * {
                 padding-top: 2px;
@@ -1936,6 +3012,7 @@
   --tm-pill-expanded-width: clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width));
   --tm-label-row-width: 50px;
   --tm-slider-row-offset: 62px;
+  --tm-normalization-accent: {{normalizationAccent}};
   filter: {{panelDropShadow}};
 }
 {{platformFootprintCss}}
@@ -2091,6 +3168,55 @@
   outline: 2px solid #fff;
   outline-offset: -4px;
   border-radius: 50%;
+}
+
+#{{overlayId}}.tm-normalization-enabled {
+  /* Keep the inset waveform visible at the pill's rounded edge. */
+  overflow: clip !important;
+  overflow-clip-margin: 8px;
+}
+
+#{{overlayId}} .tm-normalization-icon {
+  position: absolute;
+  left: 28px;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  display: block;
+  pointer-events: auto;
+}
+
+#{{overlayId}} .tm-normalization-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#{{overlayId}} .tm-normalization-icon circle {
+  fill: #17171b;
+  stroke: var(--tm-normalization-accent);
+  stroke-width: 1;
+}
+
+#{{overlayId}} .tm-normalization-icon path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+#{{overlayId}} .tm-normalization-icon[hidden] {
+  display: none;
+}
+
+#{{overlayId}} .tm-normalization-description {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 #{{overlayId}} .tm-volume-indicator {
@@ -2330,6 +3456,7 @@
       overlayId,
       valueLabelId,
       panelDropShadow,
+      normalizationAccent: platform === "twitch" ? "#a970ff" : "#cc4444",
       ...getSliderPlatformStyles(platform, overlayId)
     });
   }
@@ -2351,6 +3478,12 @@
     indicator.className = "tm-volume-indicator";
     indicator.appendChild(makeVolumeIndicatorSvg());
     iconCell.appendChild(indicator);
+    const normalizationIcon = createNormalizationIcon(document2);
+    const normalizationDescription = document2.createElement("span");
+    normalizationDescription.className = "tm-normalization-description";
+    normalizationDescription.id = `${overlay.id}-normalization-description`;
+    normalizationDescription.textContent = normalizationIcon.title;
+    iconCell.append(normalizationIcon, normalizationDescription);
     const panelBg = document2.createElement("div");
     panelBg.className = "tm-volume-panel-bg";
     const topRow = document2.createElement("div");
@@ -2520,6 +3653,7 @@
       return value;
     };
     const finish = (event) => {
+      if (!pointerActive) return;
       const wasDragging = overlay.dataset.tmDragging === "true";
       if (event?.type === "pointerup" && wasDragging) snapDirectClickIfNeeded();
       overlay.dataset.tmDragging = "false";
@@ -2555,9 +3689,7 @@
     };
     slider.addEventListener("pointerdown", start);
     slider.addEventListener("pointermove", move);
-    slider.addEventListener("pointerup", finish);
     slider.addEventListener("click", snapDirectClickIfNeeded);
-    slider.addEventListener("pointercancel", finish);
     window2.addEventListener("pointerup", finish, true);
     window2.addEventListener("pointercancel", finish, true);
     window2.addEventListener("blur", finish);
@@ -2566,9 +3698,7 @@
       dispose() {
         slider.removeEventListener("pointerdown", start);
         slider.removeEventListener("pointermove", move);
-        slider.removeEventListener("pointerup", finish);
         slider.removeEventListener("click", snapDirectClickIfNeeded);
-        slider.removeEventListener("pointercancel", finish);
         window2.removeEventListener("pointerup", finish, true);
         window2.removeEventListener("pointercancel", finish, true);
         window2.removeEventListener("blur", finish);
@@ -2645,9 +3775,13 @@
       // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 75
       sliderThickness: "saved",
       // Volume icon style: 'saved', 'new', or 'classic'. Default: 'saved'
-      volumeAppearance: "saved"
+      volumeAppearance: "saved",
+      // Loudness normalization: 'saved', true, or false. Default: off
+      normalizeVolume: "saved"
     };
     let cachedYtPlayer = null;
+    const nativeVolumeOwners = /* @__PURE__ */ new WeakSet();
+    const nativeMuteOwners = /* @__PURE__ */ new WeakSet();
     let navReattachTimer = 0;
     let navDebounceTimer = 0;
     let attachObserver = null;
@@ -2658,17 +3792,18 @@
     let requestedVolumeIntent = null;
     const overlayLifecycle = createOverlayLifecycle();
     const { getVideoElement, resetVideoElement, ensurePlayerPositioning } = createVideoLocator(document, window);
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
       document,
       storage,
       userSettings: USER_SETTINGS,
       overlayId: OVERLAY_ID,
-      keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+      keys: { normalization: "tm-yt-volume-slider-normalization", mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
       defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
       onPlacementChanged: () => {
         attachSliderIfPossible();
         applyNativeVolumeVisibility();
       },
+      onNormalizationChanged: () => syncNormalization(),
       onModeChanged: (mode) => {
         if (mode === "off") removeOverlay();
         else attachSliderIfPossible();
@@ -2676,6 +3811,7 @@
         injectVolumeOptionsButton();
         refreshOptionsPopupState();
         updateOptionsButtonState();
+        syncNormalization();
       },
       clearExpandedHold: (overlay) => clearExpandedHold(overlay),
       setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
@@ -2685,6 +3821,26 @@
         return document.getElementById(OVERLAY_ID);
       }
     });
+    const normalizer = createVolumeNormalizer({
+      window,
+      getVolume: getRawVolume,
+      setVolume: setRawVolume,
+      isMuted,
+      onStatusChanged: () => {
+        syncNormalizationStatus(getOptionsPopup());
+        syncNormalizationIcon();
+      }
+    });
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
+      const enabled = isNormalizationEnabled() && isOverlayEnabled();
+      normalizer.setEnabled(enabled);
+      normalizer.bind(video);
+      refreshOptionsPopupState();
+      syncNormalizationIcon();
+    }
+    function syncNormalizationIcon() {
+      updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
+    }
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
       window,
       storage,
@@ -2853,11 +4009,11 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       }, 0);
     }
     function getYouTubePlayer() {
-      if (cachedYtPlayer && cachedYtPlayer.isConnected && typeof cachedYtPlayer.getVolume === "function") {
+      if (cachedYtPlayer && cachedYtPlayer.isConnected && typeof cachedYtPlayer.getVolume === "function" && typeof cachedYtPlayer.setVolume === "function") {
         return cachedYtPlayer;
       }
       const player = document.getElementById("movie_player");
-      if (player && typeof player.getVolume === "function") {
+      if (player && typeof player.getVolume === "function" && typeof player.setVolume === "function") {
         cachedYtPlayer = player;
         return player;
       }
@@ -2865,64 +4021,65 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       return null;
     }
     function getVolume(video) {
-      const ytPlayer = getYouTubePlayer();
-      if (ytPlayer) {
-        const isMuted2 = ytPlayer.isMuted();
-        if (isMuted2) {
-          return 0;
-        }
-        return ytPlayer.getVolume();
-      }
-      const vol = (video.muted ? 0 : video.volume) || 0;
-      return Math.round(vol * 100);
+      return isMuted(video) ? 0 : getUnderlyingVolume(video);
     }
     function getUnderlyingVolume(video) {
-      const ytPlayer = getYouTubePlayer();
-      if (ytPlayer) return Math.round(ytPlayer.getVolume());
+      return normalizer.getPreferredVolume(video, getRawVolume(video));
+    }
+    function getRawVolume(video) {
+      if (!nativeVolumeOwners.has(video)) {
+        try {
+          const ytPlayer = getYouTubePlayer();
+          if (ytPlayer) return Math.round(ytPlayer.getVolume());
+        } catch {
+        }
+      }
       return Math.round((Number(video?.volume) || 0) * 100);
     }
     function isMuted(video) {
-      const ytPlayer = getYouTubePlayer();
-      if (ytPlayer && typeof ytPlayer.isMuted === "function") {
-        return ytPlayer.isMuted();
+      if (!nativeMuteOwners.has(video)) {
+        try {
+          const ytPlayer = getYouTubePlayer();
+          if (ytPlayer && typeof ytPlayer.isMuted === "function") return ytPlayer.isMuted();
+        } catch {
+        }
       }
       return !!video.muted;
     }
     function toggleMute(video) {
-      const ytPlayer = getYouTubePlayer();
-      if (ytPlayer) {
-        if (ytPlayer.isMuted()) {
-          ytPlayer.unMute();
-        } else {
-          ytPlayer.mute();
-        }
-      } else {
-        video.muted = !video.muted;
-      }
+      setMuted(video, !isMuted(video));
     }
     function setMuted(video, muted) {
-      const ytPlayer = getYouTubePlayer();
-      if (ytPlayer) {
-        if (muted) {
-          ytPlayer.mute();
-        } else {
-          ytPlayer.unMute();
+      try {
+        const ytPlayer = getYouTubePlayer();
+        const method = muted ? "mute" : "unMute";
+        if (typeof ytPlayer?.[method] === "function") {
+          ytPlayer[method]();
+          nativeMuteOwners.delete(video);
+          return;
         }
-      } else {
-        video.muted = !!muted;
+      } catch {
       }
+      nativeMuteOwners.add(video);
+      video.muted = !!muted;
     }
-    function setVolume(video, value) {
+    function setVolume(video, value, options = {}) {
+      normalizer.setPreferredVolume(video, value, options);
+    }
+    function setRawVolume(video, value, options = {}) {
+      if (!options.preserveMute && isMuted(video)) setMuted(video, false);
       const ytPlayer = getYouTubePlayer();
-      if (ytPlayer) {
-        if (ytPlayer.isMuted()) {
-          ytPlayer.unMute();
+      try {
+        if (ytPlayer) {
+          ytPlayer.setVolume(value);
+          nativeVolumeOwners.delete(video);
+          return;
         }
-        ytPlayer.setVolume(value);
-      } else {
-        video.volume = value / 100;
-        video.muted = false;
+      } catch {
       }
+      nativeVolumeOwners.add(video);
+      video.volume = value / 100;
+      if (!options.preserveMute) video.muted = false;
     }
     function restoreSavedVolume(video) {
       const wasMuted = isMuted(video);
@@ -3044,7 +4201,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       const popup = getOptionsPopup();
       return !!popup && !popup.hasAttribute("hidden");
     }
-    const { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview } = createOptionsUi({
       document,
       optionsPopupId: OPTIONS_POPUP_ID,
       refreshOptionsPopupState,
@@ -3054,6 +4211,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
+      isNormalizationEnabled,
+      setNormalizationEnabled,
+      getNormalizationStatus: () => normalizer.getStatus(),
+      getNormalizationDetails: () => normalizer.getDetails(),
       getVolumeStep,
       setVolumeStep,
       isAlwaysExpandedEnabled,
@@ -3096,19 +4257,16 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       if (!btn || !player || !popup) return;
       const playerRect = player.getBoundingClientRect();
       const btnRect = btn.getBoundingClientRect();
-      const progressBar = document.querySelector(".ytp-progress-bar-padding");
-      const barEl = progressBar ? progressBar.closest(".ytp-progress-bar") || progressBar.parentElement : null;
-      const barRect = barEl?.getBoundingClientRect?.();
+      const barRect = Array.from(player.querySelectorAll(".ytp-progress-bar-padding")).map((bar) => (bar.closest(".ytp-progress-bar") || bar.parentElement)?.getBoundingClientRect()).find((rect) => rect && rect.width > 0 && rect.height > 0);
       const bottomPx = barRect ? playerRect.bottom - barRect.top + 8 : playerRect.bottom - btnRect.top + 8;
       popup.style.right = `${Math.max(8, playerRect.right - btnRect.right)}px`;
       popup.style.bottom = `${Math.max(8, bottomPx)}px`;
       popup.style.left = "auto";
       popup.style.top = "auto";
       const margin = 8;
-      const viewportTop = window.visualViewport?.offsetTop ?? 0;
-      const popupBottomY = playerRect.bottom - Math.max(margin, bottomPx);
-      const minTop = Math.max(playerRect.top + margin, viewportTop + margin);
-      popup.style.maxHeight = `${Math.floor(Math.max(120, popupBottomY - minTop))}px`;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const playerHeight = playerRect.height - Math.max(margin, bottomPx) - margin;
+      popup.style.maxHeight = `${Math.floor(Math.max(120, Math.min(playerHeight, viewportHeight - margin * 2)))}px`;
       const body = popup.querySelector(".tm-volume-options-body");
       if (!body) return;
       if (resetScroll) body.scrollTop = 0;
@@ -3119,13 +4277,13 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       if (!player) return;
       clearOptionsCloseControlsHide();
       player.classList.add("tm-volume-options-controls-hold");
-      player.classList.remove("ytp-autohide", "ytp-hide-controls");
       if (typeof player.showControls === "function") {
         try {
           player.showControls();
         } catch (e) {
         }
       }
+      player.classList.remove("ytp-autohide", "ytp-hide-controls");
     }
     function releaseYouTubeControlsVisibility() {
       getPlayerContainer()?.classList?.remove("tm-volume-options-controls-hold");
@@ -3177,8 +4335,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       getPlayerContainer()?.classList?.add("tm-volume-options-open");
       startOptionsControlsHold();
       document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute("aria-expanded", "true");
-      const initialFocus = popup.querySelector('[id^="tm-volume-options-mode-"][role="radio"][aria-checked="true"]:not(:disabled)') || getOptionsPopupFocusable(popup)[0];
-      initialFocus?.focus();
+      popup.focus({ preventScroll: true });
       if (!optionsPopupOutsideHandler) {
         optionsPopupOutsideHandler = (event) => {
           const btn = document.getElementById(OPTIONS_BUTTON_ID);
@@ -3268,9 +4425,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       }
     }
     function createOverlay(video, player, controlsHost) {
-      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) {
-        disposeActiveOverlay();
-      }
       const existing = document.getElementById(OVERLAY_ID);
       if (existing) {
         return existing;
@@ -3278,6 +4432,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       createStylesIfNeeded();
       const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
       const cleanupRegistry = createCleanupRegistry();
+      const keyboardFeedback = createVolumeFeedback({ window, player });
+      cleanupRegistry.add(() => keyboardFeedback.dispose());
       let hasPointerIntent = false;
       const markPointerIntent = () => {
         hasPointerIntent = true;
@@ -3340,7 +4496,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       } else {
         syncInitialSliderState(getVolume(video), isMuted(video));
       }
-      const applySliderValue = (value) => {
+      const applySliderValue = (value, { markInteraction = true } = {}) => {
         requestedVolumeIntent = { value, until: Date.now() + USER_VOLUME_INTENT_GRACE_MS, overlay };
         setVolume(video, value);
         saveMute(false);
@@ -3348,7 +4504,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         updateSliderBar(slider);
         updateVolumeIndicator(overlay, value, isMuted(video));
         scheduleSaveVolume(value);
-        markVolumeChangedWhileExpanded(overlay);
+        if (markInteraction) markVolumeChangedWhileExpanded(overlay);
       };
       cleanupRegistry.add(bindWheelVolumeStep({
         target: iconCell,
@@ -3377,7 +4533,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         cancelScheduledSaveVolume();
         saveVolume(Number(slider.value) || 0);
       });
-      const applyKeyboardVolumeStep = (event) => {
+      const applyKeyboardVolumeStep = (event, { markInteraction = true } = {}) => {
         const direction = event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
         if (!direction) return;
         event.preventDefault();
@@ -3387,9 +4543,21 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         const nextValue = clampVolume(currentValue + direction * KEYBOARD_VOLUME_STEP);
         if (nextValue === currentValue) return;
         slider.value = String(nextValue);
-        applySliderValue(nextValue);
+        applySliderValue(nextValue, { markInteraction });
       };
       slider.addEventListener("keydown", applyKeyboardVolumeStep);
+      const applyPlayerKeyboardVolumeStep = (event) => {
+        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        if (isOptionsPopupOpen()) return;
+        if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+        if (!player.contains(event.target) && !player.contains(document.activeElement)) return;
+        slider.value = String(getUnderlyingVolume(video));
+        applyKeyboardVolumeStep(event, { markInteraction: false });
+        keyboardFeedback.show(Number(slider.value), isMuted(video));
+      };
+      document.addEventListener("keydown", applyPlayerKeyboardVolumeStep, true);
+      cleanupRegistry.add(() => document.removeEventListener("keydown", applyPlayerKeyboardVolumeStep, true));
       const onVideoVolumeChange = () => {
         if (!document.getElementById(OVERLAY_ID)) return;
         const muted = isMuted(video);
@@ -3409,6 +4577,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!muted) scheduleSaveVolume(playerVolume);
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
+      cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: ".ytp-volume-area", normalizer, onChange: onVideoVolumeChange }));
       updateOverlayAppearance(overlay);
       if (isAlwaysExpandedEnabled()) {
         setOverlayExpanded(overlay, true, true);
@@ -3438,6 +4607,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       return overlay;
     }
     function disposeActiveOverlay() {
+      normalizer.bind(null);
       stopOptionsPreview();
       requestedVolumeIntent = null;
       overlayLifecycle.dispose();
@@ -3468,15 +4638,24 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         injectVolumeOptionsButton();
         return !!document.getElementById(OPTIONS_BUTTON_ID);
       }
-      if (!video || !player || !controlsHost && !isSliderOnVideo()) {
+      if (!video) {
         injectVolumeOptionsButton();
         return false;
       }
+      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) disposeActiveOverlay();
       let existingOverlay = document.getElementById(OVERLAY_ID);
       if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
         disposeActiveOverlay();
         existingOverlay.remove();
         existingOverlay = null;
+      }
+      if (!existingOverlay && isNormalizationEnabled() && !normalizer.isBoundTo(video)) {
+        restoreSavedVolume(video);
+        syncNormalization(video);
+      }
+      if (!controlsHost && !isSliderOnVideo()) {
+        injectVolumeOptionsButton();
+        return false;
       }
       if (existingOverlay) {
         placeOverlay(existingOverlay, player, controlsHost);
@@ -3489,6 +4668,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       injectVolumeOptionsButton();
       ensurePlayerControlsObserver();
       ensureAttachObserver();
+      syncNormalization();
       return true;
     }
     function getAttachObserverRoot() {

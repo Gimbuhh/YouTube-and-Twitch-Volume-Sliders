@@ -60,6 +60,7 @@ export function createVolumeSettings({
   overlayId,
   onPlacementChanged,
   onModeChanged,
+  onNormalizationChanged = () => {},
   clearExpandedHold,
   setOverlayExpanded,
   collapseOverlayIfIdle,
@@ -216,6 +217,15 @@ export function createVolumeSettings({
     write(keys.step, String(normalizeVolumeStep(step) || 1));
     if (keys.legacySnap) remove(keys.legacySnap);
     updateVolumeStepUi(getOverlay());
+  }
+
+  function isNormalizationEnabled() {
+    return normalizeBooleanSetting(userSettings.normalizeVolume) ?? (read(keys.normalization) === 'true');
+  }
+
+  function setNormalizationEnabled(enabled) {
+    write(keys.normalization, enabled ? 'true' : 'false');
+    onNormalizationChanged();
   }
 
   function isAlwaysExpandedEnabled() {
@@ -381,6 +391,7 @@ export function createVolumeSettings({
   const shouldUseNativeReplacementSlot = () => isNativeVolumeReplacementEnabled() && getReplaceNativePlacement() === 'native';
 
   return {
+    isNormalizationEnabled, setNormalizationEnabled,
     getVolumeSliderMode, getReplaceNativePlacement,
     isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance,
     updateOverlayAppearance, getVolumeStep, setVolumeStep,

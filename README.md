@@ -13,12 +13,12 @@ Both scripts replace or complement the sites' native controls with a small indic
   <tr>
     <td align="center" valign="middle" width="58%">
       <strong>New</strong><br>
-      <img src="docs/images/demo-youtube-volume-slider-expanded.svg" alt="New expanded YouTube volume slider with 25 shown inside the circular control and a red slider track" width="420"><br><br>
+      <img src="docs/images/demo-youtube-volume-slider-expanded.png" alt="New expanded YouTube volume slider with 30 inside the circle, the static normalization icon, and a red slider track" width="420"><br><br>
       <strong>Classic</strong><br>
-      <img src="docs/images/demo-youtube-volume-slider-classic.svg" alt="Classic expanded YouTube volume slider with a speaker icon, 25 percent volume label, and red slider track" width="420">
+      <img src="docs/images/demo-youtube-volume-slider-classic.png" alt="Classic YouTube volume slider with a speaker, 30 percent label, normalization icon, and red slider track" width="420">
     </td>
     <td align="center" valign="middle" width="42%">
-      <img src="docs/images/demo-youtube-settings-menu.svg" alt="YouTube Volume Slider Options menu showing mode, native replacement position, icon style, adjustment-step choices, and behavior toggles" width="240"><br>
+      <img src="docs/images/demo-youtube-settings-menu.png" alt="Current YouTube Volume Slider Options menu, including the Audio section with normalization enabled" width="240"><br>
       <img src="docs/images/demo-youtube-options-controls.svg" alt="YouTube player controls showing the Volume Slider Options button next to the settings gear" width="240">
     </td>
   </tr>
@@ -32,17 +32,19 @@ Both scripts replace or complement the sites' native controls with a small indic
   <tr>
     <td align="center" valign="middle" width="58%">
       <strong>New</strong><br>
-      <img src="docs/images/demo-twitch-volume-slider-expanded.svg" alt="New expanded Twitch volume slider with 25 shown inside the circular control and a purple slider track" width="420"><br><br>
+      <img src="docs/images/demo-twitch-volume-slider-expanded.png" alt="New expanded Twitch volume slider with 30 inside the circle, the static normalization icon, and a purple slider track" width="420"><br><br>
       <strong>Classic</strong><br>
-      <img src="docs/images/demo-twitch-volume-slider-classic.svg" alt="Classic expanded Twitch volume slider with a speaker icon, 25 percent volume label, and purple slider track" width="420">
+      <img src="docs/images/demo-twitch-volume-slider-classic.png" alt="Classic Twitch volume slider with a speaker, 30 percent label, normalization icon, and purple slider track" width="420">
     </td>
     <td align="center" valign="middle" width="42%">
-      <img src="docs/images/demo-twitch-settings-menu.svg" alt="Twitch Volume Slider Options menu showing mode, native replacement position, icon style, adjustment-step choices, and behavior toggles" width="240"><br>
+      <img src="docs/images/demo-twitch-settings-menu.png" alt="Current Twitch Volume Slider Options menu, including the Audio section with normalization enabled" width="240"><br>
       <img src="docs/images/demo-twitch-options-controls.svg" alt="Twitch player controls showing the Volume Slider Options button next to the settings button" width="240">
     </td>
   </tr>
 </table>
 </details>
+
+The control and settings screenshots come from the built 2.9 scripts in local player fixtures, with normalization enabled. The feature is off by default. See [testing](docs/testing.md) to regenerate them.
 
 ## Install
 
@@ -51,11 +53,15 @@ Both scripts replace or complement the sites' native controls with a small indic
 - A modern browser
 - A current userscript manager, such as [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/)
 
+### Version 2.9
+
+Version 2.9 introduces opt-in **Auto-normalize volume**. Enable it in **Volume Slider Options → General → Audio**. See the [2.9 release notes](release-notes/2.9.md) for changes and limitations.
+
 ### GitHub Releases
 
 Download: [GitHub Releases](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases)
 
-Install version 2.8.3: [YouTube userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.8.3/YouTube.Volume.Slider.2.8.3.user.js) or [Twitch userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.8.3/Twitch.Volume.Slider.2.8.3.user.js). Approve the install prompt in your userscript manager, then reload the video page.
+Install version **2.9**: [YouTube userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.9/YouTube.Volume.Slider.2.9.user.js) or [Twitch userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v2.9/Twitch.Volume.Slider.2.9.user.js). Approve the install prompt in your userscript manager, then reload the video page.
 
 ### Tampermonkey Setup
 
@@ -67,6 +73,7 @@ Install version 2.8.3: [YouTube userscript](https://github.com/Gimbuhh/YouTube-a
 
 - Compact control that expands to a full range slider
 - Optional native-control replacement and persistent volume settings
+- Opt-in loudness normalization for supported browsers and streams
 - Configurable 1%, 2%, 5%, or 10% adjustment steps for dragging and scrolling
 - Adaptive slider marks with easy-to-press 10% targets at fine adjustment steps
 - Consistent 5% Arrow Up and Arrow Down volume changes
@@ -74,6 +81,19 @@ Install version 2.8.3: [YouTube userscript](https://github.com/Gimbuhh/YouTube-a
 - Mute-safe restoration across reloads and single-page navigation
 - Keyboard and screen-reader accessible mute and options controls
 - Site-specific YouTube and Twitch adapters backed by shared UI and lifecycle code
+
+## Settings
+
+Open **Volume Slider Options** beside the player’s native settings button. **Mode** stays above the tabs: choose On, Off, or Replace native. Its arrow points up while choices are open and down when closed. **General** contains audio normalization, adjustment step, placement, and behavior. **Appearance** contains icon style and bar thickness, plus size and opacity when **General → Show on video** is enabled.
+
+Options opens with the menu focused. Press Tab to enter the first setting, or Shift+Tab to enter the last. With a tab focused, Left/Right Arrow switches tabs; Home/End selects the first/last tab. Tab moves through the visible controls, and Escape closes Options.
+
+<table>
+  <tr>
+    <td align="center"><strong>YouTube · Appearance</strong><br><img src="docs/images/demo-youtube-appearance-settings.png" alt="YouTube Appearance tab with icon style, bar thickness, and the on-video settings hint" width="288"></td>
+    <td align="center"><strong>Twitch · Appearance</strong><br><img src="docs/images/demo-twitch-appearance-settings.png" alt="Twitch Appearance tab with icon style, bar thickness, and the on-video settings hint" width="288"></td>
+  </tr>
+</table>
 
 ## Volume adjustment
 
@@ -89,6 +109,33 @@ Small trackpad movements accumulate before changing volume; normal mouse-wheel i
 | 10% | Taller marks every 10% |
 
 With the 1% or 2% setting, pressing on or close to a taller mark selects that 10% value directly. Moving the grabber still uses the selected fine step. Arrow Up and Arrow Down remain fixed at 5% whenever the custom volume control handles them, independent of the adjustment-step setting.
+
+The Twitch script also runs a small keyboard relay in Twitch's official extension frames (`*.ext-twitch.tv`). This keeps Space and volume arrows working when an extension overlay has focus. Text fields, buttons, and keys handled by the extension keep their normal behavior; audio analysis runs only in the player page.
+
+## Loudness normalization (2.9)
+
+Open **Volume Slider Options → General → Audio → Auto-normalize volume** to enable it. It starts off and is saved separately for YouTube and Twitch. On later page loads, analysis can start from the playing video before the player controls finish loading. Startup audio comes in softly under protection as soon as samples arrive, then moves to the measured level; source restarts use the same protection. The slider continues to set your preferred listening level; automatic corrections do not move it or replace the saved percentage.
+
+Stream restarts keep that selected level. Player Up/Down keys change it in five-point steps, rather than stepping from the automatically adjusted output. Native volume controls can still change your listening level.
+
+The mode measures a local copy of the playing audio using LUFS-based loudness analysis and adjusts the native player volume. Frequency weighting better matches how people perceive loudness across speech, music, and effects. It reacts quickly to loud passages, raises quieter sources gradually, ignores silence and very low background levels, and relearns after a source change. Automatic boost stops at 6 dB to reduce sudden jumps, so especially quiet recordings may remain below target. The player's normal 100% maximum also applies. Channels are measured separately so stereo cancellation does not hide audible sound.
+
+The source reference is −18 LUFS before your selected volume: 30% gives a nominal steady target near −28.5 LUFS, and 40% near −26 LUFS. These are digital audio levels, not a fixed speaker loudness. Dynamic content, available volume headroom, and live adaptation affect the result. This is not a peak limiter or advance analysis of a whole recording; the first moments of a new source can still differ. LUFS is the only normalization method. If analysis cannot start or fails, playback continues at your selected volume and settings show normalization as unavailable. See [normalization](docs/normalization.md) for behavior and limitations, and [testing](docs/testing.md#loudness-comparison) to reproduce the comparison.
+
+The status below the toggle shows whether normalization is active, waiting, or unavailable. While active, it also shows whether audio is being raised or reduced. **Output** is the volume currently applied to the player; **Selected** is your chosen slider percentage. Browser audio capture support and stream restrictions vary. If capture fails or becomes inaccessible, ordinary playback continues at your chosen volume. You may need to click the player to activate analysis after a reload. Turning normalization off, or setting the slider mode to **Off**, releases analysis and restores your chosen volume while preserving mute. The opt-in remains saved when slider mode is Off.
+
+A small, static waveform icon tucked into the volume ring's upper-right edge shows normalization is on. It stays visible during normal startup, pause, buffering, mute, and zero volume. It hides if audio analysis is blocked or unavailable, or the option is off. It slightly overlaps the outer arc while leaving the volume number clear and keeps the control's original size and round background. The main number remains your chosen volume; current status and adjusted output are available under Audio in Volume Slider Options. Temporary audio access failures retry automatically.
+
+<table>
+  <tr>
+    <td align="center"><strong>YouTube</strong><br><img src="docs/images/demo-youtube-normalization-settings.png" alt="YouTube Audio settings showing Auto-normalize volume enabled, Active, and output 17 percent for a 30 percent setting" width="288"></td>
+    <td align="center"><strong>Twitch</strong><br><img src="docs/images/demo-twitch-normalization-settings.png" alt="Twitch Audio settings showing Auto-normalize volume enabled, Active, and output 17 percent for a 30 percent setting" width="288"></td>
+  </tr>
+</table>
+
+**Active** means the audio capture is connected and being analyzed. Quiet passages and silence hold the current correction without making the status search for a source again.
+
+Analysis stays on your device and uses only the playing media element. It does not request microphone access, record audio, send audio anywhere, or route a second copy to your speakers. For implementation and test details, see [normalization](docs/normalization.md).
 
 ## Development
 

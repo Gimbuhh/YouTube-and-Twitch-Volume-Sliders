@@ -2,6 +2,39 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 2.9 - 2026-10-21
+
+### Added
+
+- **Both:** **Auto-normalize volume** keeps sources closer in loudness, limits boost during quiet audio to reduce sudden jumps, and preserves the chosen slider value and mute state.
+  - The option starts disabled, saves separately for each site, and shows its current status under General → Audio in Volume Slider Options.
+  - Audio settings show adjusted output separately from the selected level. Stream restarts preserve the selection, and player volume arrows adjust it in five-point steps. Native volume controls still work.
+  - Normalization keeps speech steady between words, remembers the usual listening level through quiet passages and silent gaps, and recovers promptly after brief loud sounds.
+  - Audio starts softly under protection as soon as samples arrive. Analysis starts before player controls load; native capture needs no extra activation click.
+  - Temporary audio access failures retry automatically.
+  - A waveform icon shows normalization is on, including during pause and mute, and hides if analysis is blocked or unavailable.
+  - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.
+
+### Changed
+
+- **Both:** Volume arrows show a compact on-video percentage and matching speaker icon with normalization on or off.
+- **Both:** Volume Slider Options groups listening and placement settings in **General**, with visual controls in **Appearance**, clearer toggles, and compact audio feedback. The borderless Mode dropdown stays above both tabs, keeps choices readable across browser themes, and points its arrow up while open and down when closed.
+
+### Fixed
+
+- **Both:** Slider drags finish once, without reacting to unrelated page releases.
+- **Both:** Volume Slider Options keeps its normal height on scrolled pages and stays attached above the player controls.
+- **YouTube:** Volume and mute controls keep working when the player API is temporarily unavailable.
+- **YouTube:** The playback time keeps updating while Volume Slider Options is open.
+- **YouTube:** Volume Slider Options stays visible when YouTube retains a hidden progress bar before the active controls. The popup anchors to a rendered progress bar in the current player, falling back to its own button when none is available.
+- **Twitch:** Space and volume arrows work through extension overlays once per keypress, without scrolling the page or taking input from extension controls.
+- **Twitch:** Volume changes made during startup take priority over the saved-level restore.
+- **Twitch:** Narrow channel, video, and clip players keep the custom slider and Options button when zooming or resizing. Compact preview detection applies only on browsing pages, preventing native volume controls from appearing beside or replacing the custom slider.
+
+### Known limitations
+
+- **Both:** Normalization requires supported browser audio capture and an accessible stream. Approximate loudness leveling cannot eliminate every short peak or perceived difference.
+
 ## 2.8.3 - 2026-09-11
 
 ### Fixed

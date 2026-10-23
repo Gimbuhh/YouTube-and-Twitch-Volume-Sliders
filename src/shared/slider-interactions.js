@@ -1,4 +1,5 @@
 import { stepVolume } from './volume.js';
+import { createNormalizationIcon } from './normalization-ui.js';
 
 export function createVolumeControlElements({
   document,
@@ -17,6 +18,13 @@ export function createVolumeControlElements({
   indicator.className = 'tm-volume-indicator';
   indicator.appendChild(makeVolumeIndicatorSvg());
   iconCell.appendChild(indicator);
+
+  const normalizationIcon = createNormalizationIcon(document);
+  const normalizationDescription = document.createElement('span');
+  normalizationDescription.className = 'tm-normalization-description';
+  normalizationDescription.id = `${overlay.id}-normalization-description`;
+  normalizationDescription.textContent = normalizationIcon.title;
+  iconCell.append(normalizationIcon, normalizationDescription);
 
   const panelBg = document.createElement('div');
   panelBg.className = 'tm-volume-panel-bg';
@@ -211,6 +219,7 @@ export function bindRangePointerInteraction({
   };
 
   const finish = (event) => {
+    if (!pointerActive) return;
     const wasDragging = overlay.dataset.tmDragging === 'true';
     if (event?.type === 'pointerup' && wasDragging) snapDirectClickIfNeeded();
     overlay.dataset.tmDragging = 'false';
@@ -248,9 +257,8 @@ export function bindRangePointerInteraction({
 
   slider.addEventListener('pointerdown', start);
   slider.addEventListener('pointermove', move);
-  slider.addEventListener('pointerup', finish);
   slider.addEventListener('click', snapDirectClickIfNeeded);
-  slider.addEventListener('pointercancel', finish);
+  // Capture releases on the slider and outside it through one completion path.
   window.addEventListener('pointerup', finish, true);
   window.addEventListener('pointercancel', finish, true);
   window.addEventListener('blur', finish);
@@ -260,9 +268,7 @@ export function bindRangePointerInteraction({
     dispose() {
       slider.removeEventListener('pointerdown', start);
       slider.removeEventListener('pointermove', move);
-      slider.removeEventListener('pointerup', finish);
       slider.removeEventListener('click', snapDirectClickIfNeeded);
-      slider.removeEventListener('pointercancel', finish);
       window.removeEventListener('pointerup', finish, true);
       window.removeEventListener('pointercancel', finish, true);
       window.removeEventListener('blur', finish);

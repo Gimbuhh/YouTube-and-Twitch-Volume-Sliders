@@ -354,11 +354,13 @@ test('Twitch: arrow keys use fixed five-percent steps while preserving mute and 
     assert.equal(slider.value,'50');
     assert.equal(fixture.state.volume,.5);
   }
-  slider.value='100';
+  for(let step=0;step<10;step++){
+    slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  }
   slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
   assert.equal(slider.value,'100');
   await waitForTimers(runtime,180);
-  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'50');
+  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'100');
   runtime.close();
 });
 
@@ -485,6 +487,129 @@ test('Twitch: volume API remains usable when optional mute methods are missing',
   runtime.close();
 });
 
+test('YouTube: incomplete player API retains volume controls and native mute fallback',async()=>{
+  const errors=[];
+  const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+    current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+    for(const method of ['isMuted','mute','unMute']) delete playerFixture.player[method];
+    playerFixture.video.muted=true;
+  });
+  try {
+    assert.deepEqual(errors,[]);
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    assert.ok(slider);
+    slider.value='60';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(fixture.state.volume,60);
+    assert.equal(fixture.video.muted,false);
+    const muteButton=runtime.document.querySelector('.tm-volume-icon-cell');
+    muteButton.click();
+    assert.equal(fixture.video.muted,true);
+    muteButton.click();
+    assert.equal(fixture.video.muted,false);
+    assert.deepEqual(errors,[]);
+  } finally {
+    runtime.close();
+  }
+});
+
+test('YouTube: throwing player API restores and changes volume through native video',async()=>{
+  const errors=[];
+  const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+    current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+    for(const method of ['getVolume','setVolume','isMuted','mute','unMute']) {
+      playerFixture.player[method]=()=>{throw new Error('player API is unavailable during replacement');};
+    }
+    current.window.localStorage.setItem(platforms[0].volumeKey,'35');
+    current.window.localStorage.setItem(platforms[0].muteKey,'true');
+  });
+  try {
+    assert.deepEqual(errors,[]);
+    assert.equal(fixture.video.volume,.35);
+    assert.equal(fixture.video.muted,true);
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    assert.ok(slider);
+    assert.equal(slider.value,'35');
+    slider.value='60';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(fixture.video.volume,.6);
+    assert.equal(fixture.video.muted,false);
+    runtime.document.querySelector('.tm-volume-icon-cell').click();
+    assert.equal(fixture.video.muted,true);
+    assert.deepEqual(errors,[]);
+  } finally {
+    runtime.close();
+  }
+});
+
+for(const setter of ['missing','throwing']) test(`YouTube: ${setter} volume setter keeps native fallback as the readback source`,async()=>{
+  const errors=[];
+  let healthySetter;
+  const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+    current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+    playerFixture.video.volume=.5;
+    healthySetter=playerFixture.player.setVolume;
+    if(setter==='missing') delete playerFixture.player.setVolume;
+    else playerFixture.player.setVolume=()=>{throw new Error('volume setter is unavailable');};
+  });
+  try {
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    slider.value='60';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    const now=runtime.window.Date.now();
+    runtime.window.Date.now=()=>now+6000;
+    fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+    assert.equal(fixture.video.volume,.6);
+    assert.equal(slider.value,'60');
+    assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'60%');
+    assert.deepEqual(errors,[]);
+
+    fixture.player.setVolume=healthySetter;
+    slider.value='70';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(fixture.state.volume,70,'a later adjustment retries a recovered player API');
+    runtime.window.Date.now=()=>now+12000;
+    fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+    assert.equal(slider.value,'70','successful API writes restore API readback');
+    assert.deepEqual(errors,[]);
+  } finally {
+    runtime.close();
+  }
+});
+
+for(const method of ['mute','unMute']) for(const failure of ['missing','throwing']) {
+  test(`YouTube: ${failure} ${method} keeps native mute state until an API write succeeds`,async()=>{
+    const errors=[];
+    const initiallyMuted=method==='unMute';
+    let healthyMethod;
+    const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+      current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+      playerFixture.video.muted=initiallyMuted;
+      if(initiallyMuted) playerFixture.player.mute();
+      healthyMethod=playerFixture.player[method];
+      if(failure==='missing') delete playerFixture.player[method];
+      else playerFixture.player[method]=()=>{throw new Error(`${method} is unavailable`);};
+    });
+    try {
+      const muteButton=runtime.document.querySelector('.tm-volume-icon-cell');
+      muteButton.click();
+      assert.equal(fixture.video.muted,!initiallyMuted);
+      assert.equal(muteButton.getAttribute('aria-label'),initiallyMuted?'Mute':'Unmute');
+      assert.equal(runtime.window.localStorage.getItem(platforms[0].muteKey),String(!initiallyMuted));
+
+      fixture.player[method]=healthyMethod;
+      muteButton.click();
+      assert.equal(fixture.state.muted,initiallyMuted,'the opposite API action recovers after a native toggle');
+      muteButton.click();
+      assert.equal(fixture.state.muted,!initiallyMuted,'a recovered API method is retried on the same player');
+      assert.equal(muteButton.getAttribute('aria-label'),initiallyMuted?'Mute':'Unmute');
+      assert.deepEqual(errors,[]);
+    } finally {
+      runtime.close();
+    }
+  });
+}
+
 test('Twitch: options button mounts when native controls appear before video',async()=>{
   const config=platforms[1];
   const runtime=await startBuiltArtifact(config);
@@ -505,7 +630,7 @@ test('Twitch: options button mounts when native controls appear before video',as
 
 test('Twitch: compact preview remains native and attaches after expanding to a main player',async()=>{
   const config=platforms[1];
-  const runtime=await startBuiltArtifact(config);
+  const runtime=await startBuiltArtifact({...config,url:'https://www.twitch.tv/directory'});
   runtime.window.localStorage.setItem(config.volumeKey,'40');
   runtime.window.localStorage.setItem(config.modeKey,'replace-native');
   runtime.window.localStorage.setItem(config.locationKey,'video');
@@ -544,6 +669,27 @@ test('Twitch: compact preview remains native and attaches after expanding to a m
   assert.equal(volume,.4);
   runtime.close();
 });
+
+for (const path of ['/test', '/videos/12345', '/test/clip/example']) {
+  test(`Twitch: a narrow watch player keeps custom controls on ${path}`, async () => {
+    const config = {...platforms[1], url: `https://www.twitch.tv${path}`};
+    const {runtime, fixture} = await loadPlatform(config, (current, {player}) => {
+      current.window.localStorage.setItem(config.modeKey, 'replace-native');
+      player.getBoundingClientRect = () => ({left:0, top:0, right:533, bottom:300, width:533, height:300});
+    });
+    try {
+      assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+      assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+      runtime.window.dispatchEvent(new runtime.window.Event('resize'));
+      fixture.player.appendChild(runtime.document.createElement('span'));
+      await waitForTimers(runtime, 60);
+      assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+      assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+    } finally {
+      runtime.close();
+    }
+  });
+}
 
 test('Twitch: volume mouse interactions do not keep keyboard focus',async()=>{
   const config=platforms[1];
@@ -627,6 +773,23 @@ test('Twitch: active player video switch rebinds the custom slider',async()=>{
   slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
   assert.equal(secondVolume,.25);
   assert.equal(fixture.state.volume,firstVolumeBeforeInput);
+  runtime.close();
+});
+
+test('YouTube: Options lets the native player resume hidden controls before changing their classes',async()=>{
+  const {runtime,fixture}=await loadPlatform(platforms[0]);
+  let resumes=0;
+  fixture.player.showControls=()=>{
+    if (fixture.player.classList.contains('ytp-autohide') || fixture.player.classList.contains('ytp-hide-controls')) resumes++;
+    fixture.player.classList.remove('ytp-autohide','ytp-hide-controls');
+  };
+  fixture.player.classList.add('ytp-autohide');
+  runtime.document.getElementById('tm-volume-options-button').click();
+  assert.equal(resumes,1,'native visibility and time updates resume when Options opens');
+  fixture.player.classList.add('ytp-hide-controls');
+  await waitForTimers(runtime,20);
+  assert.equal(resumes,2,'a later native autohide goes through the same player API');
+  assert.ok(fixture.player.classList.contains('tm-volume-options-controls-hold'));
   runtime.close();
 });
 

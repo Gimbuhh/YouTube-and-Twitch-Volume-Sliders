@@ -1,8 +1,12 @@
+import { createVolumeNormalizer } from '../shared/normalization.js';
+import { bindNativeVolumeInput } from '../shared/native-volume-input.js';
+import { createVolumeFeedback } from '../shared/volume-feedback.js';
+import { updateNormalizationIcon } from '../shared/normalization-ui.js';
 import { createOverlayUi, createVolumeOverlay } from '../shared/overlay-ui.js';
 import { createOptionsUi } from '../shared/options-ui.js';
 import { createVolumeSettings } from '../shared/settings.js';
 import { clampVolume, createVolumePersistence, snapToStep } from '../shared/volume.js';
-import { bindOptionsPopupKeyboard, createOptionsButtonIconSvg, getOptionsPopupFocusable } from '../shared/options.js';
+import { bindOptionsPopupKeyboard, createOptionsButtonIconSvg } from '../shared/options.js';
 import { createCleanupRegistry, createOverlayLifecycle, createVideoLocator } from '../shared/lifecycle.js';
 import { createStyleElement } from '../shared/styles.js';
 import { installOptionsStyles } from '../shared/options-styles.js';
@@ -78,10 +82,14 @@ export function startYouTubeVolumeSlider() {
         // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 75
         sliderThickness: 'saved',
         // Volume icon style: 'saved', 'new', or 'classic'. Default: 'saved'
-        volumeAppearance: 'saved'
+        volumeAppearance: 'saved',
+        // Loudness normalization: 'saved', true, or false. Default: off
+        normalizeVolume: 'saved'
     };
 
     let cachedYtPlayer = null;
+    const nativeVolumeOwners = new WeakSet();
+    const nativeMuteOwners = new WeakSet();
     let navReattachTimer = 0;
     let navDebounceTimer = 0;
     let attachObserver = null;
@@ -101,12 +109,13 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
         document, storage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+        keys: { normalization: 'tm-yt-volume-slider-normalization', mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
-        onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); },
+        onNormalizationChanged: () => syncNormalization(),
+        onModeChanged: (mode) => { if (mode === 'off') removeOverlay(); else attachSliderIfPossible(); applyNativeVolumeVisibility(); injectVolumeOptionsButton(); refreshOptionsPopupState(); updateOptionsButtonState(); syncNormalization(); },
         clearExpandedHold: (overlay) => clearExpandedHold(overlay),
         setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
         collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force),
@@ -115,6 +124,23 @@ export function startYouTubeVolumeSlider() {
             return document.getElementById(OVERLAY_ID);
         }
     });
+    const normalizer = createVolumeNormalizer({
+        window, getVolume: getRawVolume, setVolume: setRawVolume, isMuted,
+        onStatusChanged: () => { syncNormalizationStatus(getOptionsPopup()); syncNormalizationIcon(); }
+    });
+
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
+        const enabled = isNormalizationEnabled() && isOverlayEnabled();
+        normalizer.setEnabled(enabled);
+        normalizer.bind(video);
+        refreshOptionsPopupState();
+        syncNormalizationIcon();
+    }
+
+    function syncNormalizationIcon() {
+        updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
+    }
+
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
         window, storage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
         getVolumeStep
@@ -328,11 +354,13 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Get the YouTube player API object if available.
      */
     function getYouTubePlayer() {
-        if (cachedYtPlayer && cachedYtPlayer.isConnected && typeof cachedYtPlayer.getVolume === 'function') {
+        if (cachedYtPlayer && cachedYtPlayer.isConnected &&
+            typeof cachedYtPlayer.getVolume === 'function' && typeof cachedYtPlayer.setVolume === 'function') {
             return cachedYtPlayer;
         }
         const player = document.getElementById('movie_player');
-        if (player && typeof player.getVolume === 'function') {
+        if (player &&
+            typeof player.getVolume === 'function' && typeof player.setVolume === 'function') {
             cachedYtPlayer = player;
             return player;
         }
@@ -344,22 +372,20 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Get volume from YouTube's player API (0-100), falling back to video element.
      */
     function getVolume(video) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) {
-            const isMuted = ytPlayer.isMuted();
-            if (isMuted) {
-                return 0;
-            }
-            return ytPlayer.getVolume();
-        }
-        // Fallback to video element
-        const vol = (video.muted ? 0 : video.volume) || 0;
-        return Math.round(vol * 100);
+        return isMuted(video) ? 0 : getUnderlyingVolume(video);
     }
 
     function getUnderlyingVolume(video) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) return Math.round(ytPlayer.getVolume());
+        return normalizer.getPreferredVolume(video, getRawVolume(video));
+    }
+
+    function getRawVolume(video) {
+        if (!nativeVolumeOwners.has(video)) {
+            try {
+                const ytPlayer = getYouTubePlayer();
+                if (ytPlayer) return Math.round(ytPlayer.getVolume());
+            } catch { /* use the video while the player API is unavailable */ }
+        }
         return Math.round((Number(video?.volume) || 0) * 100);
     }
 
@@ -367,9 +393,11 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Check muted state via YouTube API or video element.
      */
     function isMuted(video) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer && typeof ytPlayer.isMuted === 'function') {
-            return ytPlayer.isMuted();
+        if (!nativeMuteOwners.has(video)) {
+            try {
+                const ytPlayer = getYouTubePlayer();
+                if (ytPlayer && typeof ytPlayer.isMuted === 'function') return ytPlayer.isMuted();
+            } catch { /* use the native mute state during player replacement */ }
         }
         return !!video.muted;
     }
@@ -378,46 +406,45 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
      * Toggle mute via YouTube API or video element.
      */
     function toggleMute(video) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) {
-            if (ytPlayer.isMuted()) {
-                ytPlayer.unMute();
-            } else {
-                ytPlayer.mute();
-            }
-        } else {
-            video.muted = !video.muted;
-        }
+        setMuted(video, !isMuted(video));
     }
 
     function setMuted(video, muted) {
-        const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) {
-            if (muted) {
-                ytPlayer.mute();
-            } else {
-                ytPlayer.unMute();
+        try {
+            const ytPlayer = getYouTubePlayer();
+            const method = muted ? 'mute' : 'unMute';
+            if (typeof ytPlayer?.[method] === 'function') {
+                ytPlayer[method]();
+                nativeMuteOwners.delete(video);
+                return;
             }
-        } else {
-            video.muted = !!muted;
-        }
+        } catch { /* use the native mute control while the API is unavailable */ }
+        nativeMuteOwners.add(video);
+        video.muted = !!muted;
     }
 
     /**
      * Set volume using YouTube's player API (0-100), falling back to video element.
      */
-    function setVolume(video, value) {
+    function setVolume(video, value, options = {}) {
+        normalizer.setPreferredVolume(video, value, options);
+    }
+
+    function setRawVolume(video, value, options = {}) {
+        if (!options.preserveMute && isMuted(video)) setMuted(video, false);
         const ytPlayer = getYouTubePlayer();
-        if (ytPlayer) {
-            if (ytPlayer.isMuted()) {
-                ytPlayer.unMute();
+        try {
+            if (ytPlayer) {
+                ytPlayer.setVolume(value);
+                nativeVolumeOwners.delete(video);
+                return;
             }
-            ytPlayer.setVolume(value);
-        } else {
-            // Fallback to video element
-            video.volume = value / 100;
-            video.muted = false;
-        }
+        } catch { /* use the native volume control while the API is unavailable */ }
+        // Keep subsequent volumechange reads on the same native fallback until
+        // a later successful API write establishes ownership again.
+        nativeVolumeOwners.add(video);
+        video.volume = value / 100;
+        if (!options.preserveMute) video.muted = false;
     }
 
 
@@ -574,10 +601,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
 
-    const { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
         getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
         getVolumeAppearance, setVolumeAppearance,
+        isNormalizationEnabled, setNormalizationEnabled, getNormalizationStatus: () => normalizer.getStatus(),
+        getNormalizationDetails: () => normalizer.getDetails(),
         getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
         isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
         setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
@@ -622,9 +651,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!btn || !player || !popup) return;
         const playerRect = player.getBoundingClientRect();
         const btnRect = btn.getBoundingClientRect();
-        const progressBar = document.querySelector('.ytp-progress-bar-padding');
-        const barEl = progressBar ? (progressBar.closest('.ytp-progress-bar') || progressBar.parentElement) : null;
-        const barRect = barEl?.getBoundingClientRect?.();
+        // YouTube can retain hidden progress bars before the active controls.
+        const barRect = Array.from(player.querySelectorAll('.ytp-progress-bar-padding'))
+            .map((bar) => (bar.closest('.ytp-progress-bar') || bar.parentElement)?.getBoundingClientRect())
+            .find((rect) => rect && rect.width > 0 && rect.height > 0);
         const bottomPx = barRect
             ? playerRect.bottom - barRect.top + 8
             : playerRect.bottom - btnRect.top + 8;
@@ -635,10 +665,10 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         popup.style.top = 'auto';
 
         const margin = 8;
-        const viewportTop = window.visualViewport?.offsetTop ?? 0;
-        const popupBottomY = playerRect.bottom - Math.max(margin, bottomPx);
-        const minTop = Math.max(playerRect.top + margin, viewportTop + margin);
-        popup.style.maxHeight = `${Math.floor(Math.max(120, popupBottomY - minTop))}px`;
+        // Scrolling must not change the player's menu height or its anchor.
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+        const playerHeight = playerRect.height - Math.max(margin, bottomPx) - margin;
+        popup.style.maxHeight = `${Math.floor(Math.max(120, Math.min(playerHeight, viewportHeight - margin * 2)))}px`;
 
         const body = popup.querySelector('.tm-volume-options-body');
         if (!body) return;
@@ -651,10 +681,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!player) return;
         clearOptionsCloseControlsHide();
         player.classList.add('tm-volume-options-controls-hold');
-        player.classList.remove('ytp-autohide', 'ytp-hide-controls');
+        // Let YouTube resume its controls (including the playback clock) while
+        // their native hidden state is intact. Clearing it first skips that work.
         if (typeof player.showControls === 'function') {
             try { player.showControls(); } catch (e) { /* ignore player API errors */ }
         }
+        player.classList.remove('ytp-autohide', 'ytp-hide-controls');
     }
 
     function releaseYouTubeControlsVisibility() {
@@ -717,8 +749,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         getPlayerContainer()?.classList?.add('tm-volume-options-open');
         startOptionsControlsHold();
         document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute('aria-expanded', 'true');
-        const initialFocus = popup.querySelector('[id^="tm-volume-options-mode-"][role="radio"][aria-checked="true"]:not(:disabled)') || getOptionsPopupFocusable(popup)[0];
-        initialFocus?.focus();
+        popup.focus({ preventScroll: true });
 
         if (!optionsPopupOutsideHandler) {
             optionsPopupOutsideHandler = (event) => {
@@ -816,9 +847,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function createOverlay(video, player, controlsHost) {
-        if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) {
-            disposeActiveOverlay();
-        }
         // Prevent duplicates
         const existing = document.getElementById(OVERLAY_ID);
         if (existing) {
@@ -829,6 +857,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
         const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
         const cleanupRegistry = createCleanupRegistry();
+        const keyboardFeedback = createVolumeFeedback({ window, player });
+        cleanupRegistry.add(() => keyboardFeedback.dispose());
 
         let hasPointerIntent = false;
         const markPointerIntent = () => {
@@ -897,7 +927,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             syncInitialSliderState(getVolume(video), isMuted(video));
         }
 
-        const applySliderValue = (value) => {
+        const applySliderValue = (value, { markInteraction = true } = {}) => {
             requestedVolumeIntent = { value, until: Date.now() + USER_VOLUME_INTENT_GRACE_MS, overlay };
             setVolume(video, value);
             saveMute(false);
@@ -905,7 +935,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             updateSliderBar(slider);
             updateVolumeIndicator(overlay, value, isMuted(video));
             scheduleSaveVolume(value);
-            markVolumeChangedWhileExpanded(overlay);
+            if (markInteraction) markVolumeChangedWhileExpanded(overlay);
         };
 
         cleanupRegistry.add(bindWheelVolumeStep({
@@ -938,7 +968,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             saveVolume(Number(slider.value) || 0);
         });
 
-        const applyKeyboardVolumeStep = (event) => {
+        const applyKeyboardVolumeStep = (event, { markInteraction = true } = {}) => {
             const direction = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
             if (!direction) return;
             event.preventDefault();
@@ -948,9 +978,22 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             const nextValue = clampVolume(currentValue + (direction * KEYBOARD_VOLUME_STEP));
             if (nextValue === currentValue) return;
             slider.value = String(nextValue);
-            applySliderValue(nextValue);
+            applySliderValue(nextValue, { markInteraction });
         };
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
+
+        const applyPlayerKeyboardVolumeStep = event => {
+            if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+            if (isOptionsPopupOpen()) return;
+            if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+            if (!player.contains(event.target) && !player.contains(document.activeElement)) return;
+            slider.value = String(getUnderlyingVolume(video));
+            applyKeyboardVolumeStep(event, { markInteraction: false });
+            keyboardFeedback.show(Number(slider.value), isMuted(video));
+        };
+        document.addEventListener('keydown', applyPlayerKeyboardVolumeStep, true);
+        cleanupRegistry.add(() => document.removeEventListener('keydown', applyPlayerKeyboardVolumeStep, true));
 
         const onVideoVolumeChange = () => {
             if (!document.getElementById(OVERLAY_ID)) return;
@@ -971,6 +1014,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             if (!muted) scheduleSaveVolume(playerVolume);
         };
         video.addEventListener('volumechange', onVideoVolumeChange);
+        cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: '.ytp-volume-area', normalizer, onChange: onVideoVolumeChange }));
 
         updateOverlayAppearance(overlay);
         if (isAlwaysExpandedEnabled()) {
@@ -1004,6 +1048,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
 
     function disposeActiveOverlay() {
+        normalizer.bind(null);
         stopOptionsPreview();
         requestedVolumeIntent = null;
         overlayLifecycle.dispose();
@@ -1040,15 +1085,27 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             return !!document.getElementById(OPTIONS_BUTTON_ID);
         }
 
-        if (!video || !player || (!controlsHost && !isSliderOnVideo())) {
+        if (!video) {
             injectVolumeOptionsButton();
             return false;
         }
+        // Dispose the outgoing UI before starting analysis for the new video.
+        if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) disposeActiveOverlay();
         let existingOverlay = document.getElementById(OVERLAY_ID);
         if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
             disposeActiveOverlay();
             existingOverlay.remove();
             existingOverlay = null;
+        }
+        // A playing video can precede its controls. Restore intent once and
+        // analyze immediately; mounting the slider retains this same session.
+        if (!existingOverlay && isNormalizationEnabled() && !normalizer.isBoundTo(video)) {
+            restoreSavedVolume(video);
+            syncNormalization(video);
+        }
+        if (!controlsHost && !isSliderOnVideo()) {
+            injectVolumeOptionsButton();
+            return false;
         }
         if (existingOverlay) {
             placeOverlay(existingOverlay, player, controlsHost);
@@ -1061,6 +1118,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         injectVolumeOptionsButton();
         ensurePlayerControlsObserver();
         ensureAttachObserver();
+        syncNormalization();
         return true;
     }
 

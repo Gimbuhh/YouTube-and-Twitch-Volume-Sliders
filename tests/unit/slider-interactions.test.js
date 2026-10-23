@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
 import { bindRangePointerInteraction, bindWheelVolumeStep, getMajorTickPressValue } from '../../src/shared/slider-interactions.js';
 
 function createWheelFixture() {
@@ -153,4 +154,53 @@ test('major-tick presses snap but fine dragging remains unsnapped', () => {
   assert.equal(applied.includes(50), false);
 
   rangePointer.dispose();
+});
+
+test('range completion belongs to the active slider press and runs once through DOM propagation', () => {
+  const dom = new JSDOM('<div id="overlay"><input type="range" value="50"></div><button id="outside">Outside</button>');
+  const { window } = dom;
+  const slider = window.document.querySelector('input');
+  const overlay = window.document.getElementById('overlay');
+  const outside = window.document.getElementById('outside');
+  const completed = [];
+  let layouts = 0;
+  const rangePointer = bindRangePointerInteraction({
+    window, slider, overlay,
+    getVolumeStep: () => 5,
+    readSteppedValue: control => Number(control.value),
+    snapValue: value => value,
+    applyValue: () => assert.fail('releasing without changing volume must not apply a value'),
+    setExpanded: () => {},
+    updateOpacity: () => {},
+    onFinish: (event, wasDragging) => completed.push([event.type, wasDragging]),
+    finishLayout: () => layouts++
+  });
+  const pointer = (target, type) => target.dispatchEvent(new window.MouseEvent(type, {
+    bubbles: true, clientX: 50, clientY: 10
+  }));
+
+  try {
+    pointer(outside, 'pointerup');
+    pointer(outside, 'pointercancel');
+    window.dispatchEvent(new window.Event('blur'));
+    assert.deepEqual(completed, [], 'unrelated page events do not complete slider interactions');
+    assert.equal(layouts, 0);
+
+    for (const [target, type] of [[slider, 'pointerup'], [outside, 'pointerup'], [slider, 'pointercancel'], [window, 'blur']]) {
+      pointer(slider, 'pointerdown');
+      assert.equal(overlay.dataset.tmDragging, 'true');
+      pointer(target, type);
+      assert.equal(overlay.dataset.tmDragging, 'false');
+    }
+    assert.deepEqual(completed, [['pointerup', true], ['pointerup', true], ['pointercancel', true], ['blur', true]]);
+    assert.equal(layouts, 4);
+
+    rangePointer.dispose();
+    pointer(slider, 'pointerdown');
+    pointer(slider, 'pointerup');
+    assert.equal(layouts, 4, 'disposed controls do not receive interaction callbacks');
+  } finally {
+    rangePointer.dispose();
+    window.close();
+  }
 });

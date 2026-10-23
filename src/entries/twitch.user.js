@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Twitch Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.8.3
+// @version      2.9
 // @description  Compact in-bar volume indicator that expands into a wide Twitch volume slider.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
 // @match        https://www.twitch.tv/*
+// @match        https://*.ext-twitch.tv/*
 // @updateURL    https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
 // @downloadURL  https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
 // @run-at       document-start
@@ -13,5 +14,7 @@
 // ==/UserScript==
 
 import { startTwitchVolumeSlider } from '../platforms/twitch.js';
+import { startTwitchExtensionKeys } from '../platforms/twitch-extension-keys.js';
 
-startTwitchVolumeSlider();
+if (location.hostname.endsWith('.ext-twitch.tv')) startTwitchExtensionKeys(window);
+else startTwitchVolumeSlider();

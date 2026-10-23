@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { distPath, parseMetadata, platforms } from './lib.mjs';
 
-const singular = ['name', 'namespace', 'version', 'description', 'author', 'icon', 'match', 'updateURL', 'downloadURL', 'run-at', 'grant'];
+const singular = ['name', 'namespace', 'version', 'description', 'author', 'icon', 'updateURL', 'downloadURL', 'run-at', 'grant'];
 const repoRawBase = 'https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist';
 const expectedNames = new Map([
   ['youtube', 'YouTube Volume Slider'],
@@ -17,6 +17,8 @@ for (const platform of platforms) {
   for (const key of singular) {
     if ((fields.get(key) ?? []).length !== 1) throw new Error(`${platform}: expected exactly one @${key}`);
   }
+  const matches = platform === 'twitch' ? ['https://www.twitch.tv/*', 'https://*.ext-twitch.tv/*'] : ['https://www.youtube.com/*'];
+  if (JSON.stringify(fields.get('match')) !== JSON.stringify(matches)) throw new Error(`${platform}: unexpected @match scope`);
   if (fields.get('name')[0] !== expectedNames.get(platform)) throw new Error(`${platform}: invalid @name`);
   if (fields.get('run-at')[0] !== expectedRunAt.get(platform)) throw new Error(`${platform}: invalid @run-at`);
   if (fields.get('grant')[0] !== 'none') throw new Error(`${platform}: invalid @grant`);
