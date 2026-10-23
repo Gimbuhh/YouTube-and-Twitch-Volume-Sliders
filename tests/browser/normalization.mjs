@@ -36,6 +36,10 @@ const screamReturn = wav(time => time >= 4 && time < 4.5 ? .7 : .1);
 // An ordinary background only 5 LU below speech catches reference loss that
 // the previous very quiet background (20 LU below speech) did not expose.
 const speechReturn = wav(time => time < 4 || time >= 9 ? .2 : .2 * 10 ** (-5 / 20));
+const speechWords = wav(time => {
+  const phase = time % .4;
+  return phase < .005 ? .45 : phase < .15 ? .2 : phase < .35 ? .06 : 0;
+}, 1, 1000);
 // Continuous audible tone with a changing envelope, never digital silence.
 const soft = wav(time => 0.016 + 0.012 * Math.sin(2 * Math.PI * time));
 const bass = wav(0.2, 1, 80), high = wav(0.2, 1, 4000);
@@ -173,7 +177,7 @@ try {
       if (path === '/finish-document.js') {
         return documentGate.then(() => route.fulfill({ contentType: 'text/javascript', body: 'document.querySelector("video").parentElement.append(...window.__startupControls);' }));
       }
-      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('scream-return') ? screamReturn : path.includes('speech-return') ? speechReturn : path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
+      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('scream-return') ? screamReturn : path.includes('speech-return') ? speechReturn : path.includes('speech-words') ? speechWords : path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
       // YouTube can send a policy without blob: in script-src. Reproduce the
       // actual module rejection, rather than mocking addModule's return value.
       const headers = engine.startsWith('csp') ? { 'Content-Security-Policy': "script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none'" } : {};
@@ -452,6 +456,22 @@ try {
       assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
       assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
       console.log(`${platform} (${engine}): brief-scream recovery ${recoveryDb.toFixed(2)} dB from the established level after 1.5 seconds`);
+      await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/speech-words.wav'; await v.play(); });
+      await page.waitForFunction(() => document.querySelector('video').currentTime >= 8);
+      const wordVolumes = await page.evaluate(() => new Promise(resolve => {
+        const video = document.querySelector('video'), volumes = [];
+        const timer = setInterval(() => volumes.push(video.volume), 10);
+        setTimeout(() => { clearInterval(timer); resolve(volumes); }, 1200);
+      }));
+      const wordMinimum = Math.min(...wordVolumes), wordMaximum = Math.max(...wordVolumes);
+      assert.ok(wordVolumes.length >= 20, 'the trace covers repeated consonants and quieter word tails');
+      assert.ok(wordMinimum > preferred / 100 * .5, 'ordinary speech avoids a deep transient cut');
+      assert.ok(wordMaximum < preferred / 100 * .8, 'speech keeps a conservative gain before the next consonant');
+      const wordSwingDb = 20 * Math.log10(wordMaximum / wordMinimum);
+      assert.ok(wordSwingDb < 1, `native volume stays steady through repeated word onsets: ${wordSwingDb.toFixed(2)} dB`);
+      assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+      assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
+      console.log(`${platform} (${engine}): repeated word onsets keep native volume within ${wordSwingDb.toFixed(2)} dB`);
       // The old mono analyser reads this audible stereo source as silence.
       await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/stereo.wav'; await v.play(); });
       await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred, { timeout: 3000 });

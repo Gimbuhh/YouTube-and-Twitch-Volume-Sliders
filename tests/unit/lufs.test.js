@@ -218,6 +218,33 @@ test('quiet word endings and speech gaps do not drive LUFS gain upward', () => {
   assert.ok(Math.abs(20 * Math.log10(gain / before)) < 0.2);
 });
 
+test('short consonants do not cause repeated deep cuts after quieter word tails', () => {
+  for (const rate of [44100, 48000, 96000]) for (const phaseMs of [0, 5, 10, 15, 20, 25, 30, 35, 40, 45]) {
+    const controller = createLufsGainController(), meter = createLufsMeter(rate);
+    // Voiced speech occupies less than half the active samples. A median of
+    // these frames follows the word tails and raises gain before each onset.
+    const signal = Float32Array.from({ length: rate * 12 }, (_, index) => {
+      const phase = (index / rate + phaseMs / 1000) % .4;
+      const amplitude = phase < .005 ? .45 : phase < .15 ? .2 : phase < .35 ? .06 : 0;
+      return amplitude * Math.sin(2 * Math.PI * 1000 * index / rate);
+    });
+    let gain = 1, minimum = Infinity, maximum = 0;
+    const update = frame => { gain = controller.update(frame, 4); };
+    const chunkSize = Math.round(rate / 1000);
+    for (let offset = 0; offset < signal.length; offset += chunkSize) {
+      const chunk = signal.subarray(offset, offset + chunkSize);
+      meter.process([chunk, chunk], update, attackPower => update({ attackPower }));
+      if (offset < rate * 8) continue;
+      minimum = Math.min(minimum, gain);
+      maximum = Math.max(maximum, gain);
+    }
+    assert.ok(minimum > .5, 'ordinary voiced audio must not be held at a deep transient cut');
+    assert.ok(maximum < .8, 'the established voice must keep a conservative gain before its next word');
+    assert.ok(20 * Math.log10(maximum / minimum) < .5,
+      `${rate} Hz, ${phaseMs} ms phase: consonants and quieter word tails retain a stable programme gain`);
+  }
+});
+
 test('an established LUFS source keeps cautious recovery after a long quiet passage', () => {
   const controller = createLufsGainController();
   const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: 0.05 }, 5);

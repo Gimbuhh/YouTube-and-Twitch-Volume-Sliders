@@ -228,7 +228,7 @@
         let cumulative = 0, rollingReference = 0;
         for (const item of ordered) {
           cumulative += item.duration;
-          if (cumulative >= duration / 2) {
+          if (cumulative >= duration * 0.65) {
             rollingReference = item.power;
             break;
           }

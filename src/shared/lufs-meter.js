@@ -151,16 +151,16 @@ export function createLufsGainController() {
       while (history.length && history[0].time <= time - 3) history.shift();
       if (dt === 0 || frame.rawPower < 0.0001 || frame.power <= 0) return gain;
       history.push({ power: frame.power, duration: dt, time });
-      // Use the typical measured level, not a mean that a brief scream can
-      // dominate. Fast and momentary protection still cuts every loud frame;
-      // only sustained louder material should raise the remembered reference.
+      // Favor the voiced part of speech over its quieter tails. The 65th
+      // percentile avoids boosting into a word and then cutting its consonant,
+      // while brief loud events still cannot dominate the programme reference.
       let duration = 0;
       for (const item of history) duration += item.duration;
       const ordered = history.slice().sort((a, b) => a.power - b.power);
       let cumulative = 0, rollingReference = 0;
       for (const item of ordered) {
         cumulative += item.duration;
-        if (cumulative >= duration / 2) { rollingReference = item.power; break; }
+        if (cumulative >= duration * .65) { rollingReference = item.power; break; }
       }
       // Remember established programme loudness across quieter backgrounds,
       // including ordinary game audio only a few LU below speech. Release
