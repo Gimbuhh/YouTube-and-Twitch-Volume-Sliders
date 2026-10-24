@@ -189,8 +189,10 @@ export function createLufsGainController() {
         const current = Math.log(gain), target = Math.log(desired);
         const attenuation = Math.min(0, target) - Math.min(0, current);
         const boost = Math.max(0, target) - Math.max(0, current);
-        gain = Math.exp(current + attenuation * (1 - Math.exp(-dt / .25))
-          + boost * (1 - Math.exp(-dt / .9)));
+        // Bound the steep start of recovery after a deep cut. The existing
+        // curves still ease into the target; downward protection stays instant.
+        gain = Math.exp(current + Math.min(40 * Math.LN10 / 20 * dt,
+          attenuation * (1 - Math.exp(-dt / .2)) + boost * (1 - Math.exp(-dt / .9))));
       }
       return gain;
     }

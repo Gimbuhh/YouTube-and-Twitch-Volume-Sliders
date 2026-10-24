@@ -399,6 +399,47 @@ test('gradual recovery coalesces small writes, settles promptly and never delays
   assert.equal(f.raw, 50, 'restoration is immediate');
 });
 
+test('tiny level variations cannot repeatedly toggle neighboring output percentages', async () => {
+  const target = 10 ** ((-18 + .691) / 10);
+  for (const output of [3.5, 5.5, 10.5, 20.5]) {
+    const f = fixture();
+    let nativeVolume = .3;
+    Object.defineProperty(f.video, 'volume', {
+      get: () => nativeVolume,
+      set: value => {
+        if (value === nativeVolume) return;
+        nativeVolume = value;
+        // Browsers deliver our own volume notifications after the write ends.
+        setImmediate(() => f.video.dispatchEvent(new Event('volumechange')));
+      }
+    });
+    f.nativeVolume(30); f.audio.stalled = true; await f.start();
+    const port = f.audio.nodes[0].port, outputs = new Set();
+    for (let i = 0; i < 840; i++) {
+      const power = target * (30 / output) ** 2 * 10 ** ((.05 * Math.sin(2 * Math.PI * i * .05 / 8) - .02) / 10);
+      port.onmessage({ data: { power, rawPower: power / 2, momentaryPower: power, duration: .05 } });
+      await f.advance(.05);
+      if (i >= 200) outputs.add(f.raw);
+    }
+    assert.deepEqual([...outputs], [Math.floor(output)], `${output}% boundary stays steady after startup`);
+    assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 30);
+    const power = target * (30 / (Math.floor(output) + .55)) ** 2;
+    for (let i = 0; i < 100; i++) {
+      port.onmessage({ data: { power, rawPower: power / 2, momentaryPower: power, duration: .05 } });
+      await f.advance(.05);
+    }
+    const held = f.raw;
+    f.video.volume = .5; await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.raw, held, 'passive restoration repairs the last applied output without undoing the rounding guard');
+    assert.equal(f.video.volume, held / 100);
+    port.onmessage({ data: { attackPower: 100 } });
+    assert.equal(f.raw, 3, 'loud-sound protection bypasses the rounding guard');
+    f.normalizer.setPreferredVolume(f.video, 50, { preserveMute: true });
+    assert.equal(f.raw, 5, 'explicit input bypasses the guard');
+    f.normalizer.setEnabled(false); assert.equal(f.raw, 50, 'restoration stays immediate');
+  }
+});
+
 test('pause and mute stop adjustments; zero preference remains zero', async () => {
   const f = fixture(); await f.start(); await f.advance();
   const before = f.raw;
@@ -520,6 +561,63 @@ test('startup opens at maximum attenuation on short samples before full LUFS mat
   assert.equal(f.raw, 50);
 });
 
+test('silent startup frames cannot release unmeasured audio or fail healthy capture', async () => {
+  const f = fixture(); f.audio.amplitude = 0; await f.start();
+  await f.advance(4);
+  assert.equal(f.raw, 0, 'decoder silence cannot open ordinary output');
+  assert.equal(f.audio.captures, 1, 'healthy silent frames do not trigger unavailable/retry cycles');
+  assert.equal(f.normalizer.getStatus(), 'Waiting for audio');
+  f.audio.amplitude = .5; await f.advance(.1);
+  assert.ok(f.raw > 0 && f.raw < 20, 'the first measurable audio opens at its own correction');
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  f.audio.amplitude = 0; const output = f.raw; await f.advance(1);
+  assert.equal(f.raw, output, 'established silence retains normal pause-free behavior');
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  f.normalizer.setEnabled(false); assert.equal(f.raw, 50);
+});
+
+test('genuine quiet recordings remain audible without lifting the noise floor', async () => {
+  const f = fixture(); f.audio.amplitude = .002; await f.start(); await f.advance(4);
+  assert.equal(f.raw, 50, 'measurable low-level audio opens without automatic boost');
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.equal(f.audio.captures, 1);
+  f.normalizer.setEnabled(false);
+});
+
+test('source transition rejects outgoing samples and preserves preference and mute', async () => {
+  const f = fixture(); await f.start(); await f.advance(.2);
+  const outgoing = f.audio.nodes[0].port.onmessage;
+  f.normalizer.setSourceChanging(true);
+  assert.equal(f.raw, 0); assert.equal(f.audio.contexts[0].closed, true);
+  outgoing({ data: { power: .001, rawPower: .0005, momentaryPower: .001, duration: .05 } });
+  await f.advance(.3);
+  assert.equal(f.raw, 0); assert.equal(f.audio.captures, 1);
+  f.video.muted = true;
+  f.normalizer.setPreferredVolume(f.video, 60, {preserveMute:true});
+  f.normalizer.setSourceChanging(false); await f.advance(.1);
+  assert.equal(f.raw, 0); assert.equal(f.video.muted, true);
+  f.video.muted = false; await f.advance(.1);
+  assert.ok(f.raw > 0 && f.raw < 20);
+  assert.equal(f.audio.captures, 2);
+  assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 60);
+  f.normalizer.setEnabled(false); assert.equal(f.raw, 60); assert.equal(f.timers.size, 0);
+});
+
+test('navigation hold releases on native loading and is bounded if navigation stalls', async () => {
+  for (const nativeLoad of [true, false]) {
+    const f = fixture(); await f.start(); await f.advance(.2);
+    f.normalizer.setSourceChanging(true);
+    if (nativeLoad) {
+      f.video.dispatchEvent(new Event('loadstart')); await f.advance(.1);
+      assert.ok(f.raw > 0 && f.raw < 20, 'a confirmed new source need not wait for navigation UI');
+    } else {
+      await f.advance(3.1);
+      assert.equal(f.raw, 50); assert.match(f.normalizer.getStatus(), /Audio unavailable/);
+    }
+    f.normalizer.setEnabled(false); assert.equal(f.timers.size, 0);
+  }
+});
+
 test('early startup output never exceeds the controller minimum, including native rounding and input', async () => {
   for (const preferred of [1, 2, 20, 30, 40, 100]) {
     const f = fixture(); f.audio.stalled = true; f.nativeVolume(preferred); await f.start();
@@ -540,6 +638,19 @@ test('early startup output never exceeds the controller minimum, including nativ
     assert.equal(f.raw, 6); assert.equal(f.normalizer.getPreferredVolume(f.video, f.raw), 60);
     f.normalizer.setEnabled(false); assert.equal(f.raw, 60);
   }
+});
+
+test('a partial first frame cannot raise output before queued onset measurements arrive', async () => {
+  const f = fixture(); f.audio.stalled = true; await f.start();
+  const port = f.audio.nodes[0].port;
+  port.onmessage({ data: { attackPower: .001 } });
+  assert.equal(f.raw, 5);
+  port.onmessage({ data: { power: .006, rawPower: .003, momentaryPower: .006, duration: .05 } });
+  assert.equal(f.raw, 5, 'keep protected output while the remaining capture messages drain');
+  port.onmessage({ data: { attackPower: .8 } });
+  await f.advance(.05);
+  assert.ok(f.raw <= 8, 'the ordinary output timer uses the corrected onset gain');
+  f.normalizer.setEnabled(false);
 });
 
 test('the initial correction honors short-window energy even when capture ramps into its first frame', async () => {

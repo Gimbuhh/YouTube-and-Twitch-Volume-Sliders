@@ -86,7 +86,145 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
   return { ...runtime, video, player, state, api, audio, toggle, advance, rawVolume, volumeKey, optionKey, controls, body };
 }
 
+test('youtube: an incoming player is protected before first playback and navigation completion', async t => {
+  const f = createRuntime('https://www.youtube.com/', {runScripts:'outside-only'});
+  t.after(() => f.close());
+  f.window.localStorage.setItem('tm-yt-volume', '30');
+  f.window.localStorage.setItem('tm-yt-volume-slider-normalization', 'true');
+  f.window.eval(await readFile(new URL('../../dist/youtube-volume-slider.user.js', import.meta.url), 'utf8'));
+  f.window.dispatchEvent(new f.window.Event('yt-navigate-start'));
+  f.window.history.replaceState(null, '', '/watch?v=incoming');
+  const {video, state} = youtubeFixture(f.document);
+  mockAudioCapture(f.window, video);
+  video.dispatchEvent(new f.window.Event('loadstart'));
+  video.dispatchEvent(new f.window.Event('play'));
+  assert.equal(state.volume, 0, 'a late navigation-finish event cannot expose the selected volume');
+  assert.equal(video.volume, 0, 'actual media output is zero before the first playing event');
+  assert.equal(f.document.getElementById('tm-volume-slider-range').value, '30');
+});
+
+test('youtube: an asynchronous player API cannot defer zero-output protection', async t => {
+  const f = createRuntime('https://www.youtube.com/watch?v=async', {runScripts:'outside-only'});
+  t.after(() => f.close());
+  const {video, player, state} = youtubeFixture(f.document);
+  const audio = mockAudioCapture(f.window, video);
+  audio.stalled = true;
+  video.volume = .3;
+  // The API accepts a command before its playback worker updates the element.
+  const commands = [], setVolume = player.setVolume;
+  player.setVolume = value => { commands.push(value); setVolume(value); };
+  f.window.localStorage.setItem('tm-yt-volume', '30');
+  f.window.localStorage.setItem('tm-yt-volume-slider-normalization', 'true');
+  f.window.eval(await readFile(new URL('../../dist/youtube-volume-slider.user.js', import.meta.url), 'utf8'));
+  assert.equal(state.volume, 0, 'the player API has accepted the hold');
+  assert.equal(video.volume, 0, 'protection cannot wait for the playback worker');
+  assert.ok(commands.every(value => value === 0), 'binding cannot queue ordinary-volume restoration before protection');
+  video.volume = .3;
+  video.dispatchEvent(new f.window.Event('volumechange'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(video.volume, 0, 'a delayed native restoration is repaired while the API still reports zero');
+  const port = audio.nodes[0].port;
+  port.onmessage({data:{attackPower:.5}});
+  port.onmessage({data:{power:.5,rawPower:.25,momentaryPower:.5,duration:.05}});
+  video.volume = .3;
+  video.dispatchEvent(new f.window.Event('volumechange'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(video.volume <= .105, 'late worker restoration cannot reopen ordinary output after the first frame');
+});
+
 for (const config of platforms) {
+  if (config.file === 'twitch') test('twitch: source initialization cannot replace saved mute intent during normalization', async t => {
+    for (const muted of [false, true]) for (const notifyBeforeReset of [false, true]) {
+      const f = await prepare(config, t, { saved: true, controlledTime: true });
+      await f.advance(7);
+      f.window.localStorage.setItem('tm-twitch-muted', String(muted));
+      // Twitch sets its initial mute flag before emptied. Native notifications
+      // can arrive on either side of that source-reset event.
+      const deferVolumeChange = event => event.stopImmediatePropagation();
+      f.video.addEventListener('volumechange', deferVolumeChange, true);
+      f.api.setMuted(!muted);
+      f.video.removeEventListener('volumechange', deferVolumeChange, true);
+      if (notifyBeforeReset) f.video.dispatchEvent(new f.window.Event('volumechange'));
+      f.video.dispatchEvent(new f.window.Event('emptied'));
+      f.video.dispatchEvent(new f.window.Event('volumechange'));
+      assert.equal(f.rawVolume(), 0, 'mute restoration retains startup output protection');
+      assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), String(muted));
+      f.video.dispatchEvent(new f.window.Event('loadedmetadata'));
+      assert.equal(f.state.muted, muted, 'restore the saved choice, not Twitch initialization mute');
+      assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), String(muted));
+      await f.advance(.2);
+      assert.equal(f.state.muted, muted);
+      if (!muted) {
+        assert.ok(f.rawVolume() > 0 && f.rawVolume() < 20);
+        assert.equal(f.document.getElementById('tm-volume-options-normalization-status').textContent, 'Active');
+      }
+      assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
+      assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
+    }
+  });
+
+  if (config.file === 'twitch') test('twitch: native mute button and M key still save explicit mute choices', async t => {
+    const f = await prepare(config, t, { saved: true, controlledTime: true });
+    await f.advance(7);
+    f.document.getElementById('tm-volume-options-button').click();
+    const button = f.document.createElement('button');
+    button.dataset.aTarget = 'player-mute-unmute-button';
+    button.addEventListener('click', () => f.api.setMuted(true));
+    f.player.append(button);
+    button.click(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), 'true');
+    f.player.tabIndex = 0; f.player.focus();
+    f.player.addEventListener('keydown', event => { if (event.key === 'm') f.api.setMuted(false); });
+    f.player.dispatchEvent(new f.window.KeyboardEvent('keydown', {key:'m',bubbles:true}));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), 'false');
+    assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
+  });
+
+  if (config.file === 'youtube') test('youtube: a replacement video is protected before deferred control reattachment', async t => {
+    const f = await prepare(config, t, { saved: true, controlledTime: true });
+    f.audio.amplitude = .06; await f.advance(7);
+    const slider = f.document.getElementById('tm-volume-slider-range');
+    slider.value = '60'; slider.dispatchEvent(new f.window.Event('input', {bubbles:true}));
+    assert.equal(f.window.localStorage.getItem(f.volumeKey), '50', 'the latest input is still waiting for its debounced save');
+    const frames = [];
+    f.window.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
+    const incoming = f.document.createElement('video'); incoming.className = 'html5-main-video';
+    const audio = mockAudioCapture(f.window, incoming);
+    f.video.replaceWith(incoming);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.rawVolume(), 0, 'the new video is guarded before any queued layout frame runs');
+    assert.equal(f.audio.contexts[0].closed, true);
+    assert.equal(f.document.getElementById('tm-volume-slider-range').value, '60');
+    await f.advance(.1);
+    assert.ok(f.rawVolume() > 0 && f.rawVolume() < 20);
+    assert.equal(audio.captures, 1);
+    assert.equal(f.window.localStorage.getItem(f.volumeKey), '60');
+  });
+
+  if (config.file === 'youtube') test('youtube: same-element navigation holds startup until the incoming source is ready', async t => {
+    const f = await prepare(config, t, { saved: true, controlledTime: true });
+    f.audio.amplitude = .06; await f.advance(7);
+    assert.ok(f.rawVolume() > 50, 'the outgoing video has quiet-source boost');
+    f.window.dispatchEvent(new f.window.Event('yt-navigate-start'));
+    assert.equal(f.rawVolume(), 0, 'navigation protects output before any native load event');
+    await f.advance(.3);
+    assert.equal(f.rawVolume(), 0, 'outgoing samples must not end the startup hold');
+    f.api.setVolume(50); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.rawVolume(), 0, 'site restoration cannot release the protected output');
+    f.audio.amplitude = .5;
+    f.window.history.replaceState(null, '', '/watch?v=incoming');
+    f.window.dispatchEvent(new f.window.Event('yt-navigate-finish'));
+    assert.equal(f.rawVolume(), 0, 'reusing the video element still requires fresh measurements');
+    await f.advance(.1);
+    assert.ok(f.rawVolume() > 0 && f.rawVolume() < 20);
+    assert.equal(f.audio.captures, 2);
+    assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
+    assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
+    f.window.dispatchEvent(new f.window.Event('yt-page-data-updated')); await f.advance(.1);
+    assert.equal(f.audio.captures, 2, 'repeated completion events do not restart healthy analysis');
+  });
+
   test(`${config.file}: native input during startup changes the selection without releasing unmeasured output`, async t => {
     const f = await prepare(config, t, { saved: true });
     f.audio.stalled = true;

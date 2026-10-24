@@ -11,6 +11,7 @@ const outputPercent = (value) => value > 0 ? Math.max(1, Math.round(clampVolume(
 // mediacapture-fromelement), so adjusting native volume creates no feedback loop.
 export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, onStatusChanged = () => {} }) {
   let enabled = false;
+  let sourceChanging = false;
   let session = null;
   let status = 'Off';
   let lastDetails = '';
@@ -46,17 +47,30 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
 
   function writeOutput(owned, value, gradual = false) {
     const next = outputPercent(value);
-    if (next === owned.applied && !owned.outputChanged) return;
+    const nativeChanged = owned.applied === 0 ? owned.video.volume !== 0
+      : Math.abs(owned.video.volume - owned.applied / 100) > 1e-6;
+    if (next === owned.applied && !owned.outputChanged && !nativeChanged) return;
+    // A small margin above the rounding boundary prevents tiny fluctuations
+    // from toggling whole percentages. Cuts and explicit input stay immediate.
+    if (gradual && !owned.outputChanged && !nativeChanged && next > owned.applied &&
+        value < owned.applied + .6) return;
     const now = window.performance.now();
     // Coalesce sub-0.5 dB recovery steps for at most 150 ms. Cuts, explicit
     // input and restoration stay immediate; the existing timer finishes even
     // the last small increase without allocating another timer or queue.
-    if (gradual && next > owned.applied && owned.applied > 0 &&
+    if (gradual && !owned.outputChanged && !nativeChanged && next > owned.applied && owned.applied > 0 &&
         next / owned.applied < 10 ** (.5 / 20) && now - owned.lastWriteAt < 150) return;
     const previous = owned.applied;
     owned.applied = next; // Own synchronous and queued volumechange events.
     owned.writing = true;
-    try { setVolume(owned.video, next, { preserveMute: true }); owned.lastWriteAt = now; owned.outputChanged = false; }
+    try {
+      // Apply audible output now; a player API can acknowledge a command before
+      // its playback worker applies it. Keep that API in sync for site controls.
+      owned.video.volume = next / 100;
+      setVolume(owned.video, next, { preserveMute: true });
+      owned.lastWriteAt = now;
+      owned.outputChanged = false;
+    }
     catch (error) { owned.applied = previous; throw error; }
     finally { owned.writing = false; }
   }
@@ -66,6 +80,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     owned.gain = 1;
     owned.awaitingFrame = false;
     owned.startupPower = 0;
+    owned.hasProgrammeFrame = false;
     writeOutput(owned, preferred);
     owned.lufsTracker = null;
     owned.lastLufsFrame = null;
@@ -80,6 +95,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     owned.gain = 0;
     owned.awaitingFrame = true;
     owned.startupPower = 0;
+    owned.hasProgrammeFrame = false;
     writeOutput(owned, 0);
     owned.lufsTracker = null;
     owned.lastLufsFrame = null;
@@ -123,11 +139,18 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     owned.track = track;
     owned.lufs = createLufsAnalysis({ window, context: owned.context, track,
       onFrame: frame => {
-        if (session !== owned || !owned.video.isConnected || owned.blocked) return;
+        if (session !== owned || !owned.video.isConnected || owned.blocked || sourceChanging) return;
         owned.lastLufsFrame = window.performance.now();
         owned.catchUpAfter = 0;
         if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== 'live' || owned.preferred === 0 || owned.lufs?.needsActivation) return;
         try {
+          if (frame.attackPower == null) {
+            if (!Number.isFinite(frame.power) || !Number.isFinite(frame.rawPower) || !Number.isFinite(frame.duration) || frame.duration <= 0) return;
+            owned.hasProgrammeFrame = true;
+            // Healthy decoder silence is not a loudness estimate. Quiet but
+            // measurable recordings must still open instead of staying silent.
+            if (owned.awaitingFrame && (frame.rawPower <= 0 || frame.power <= 0)) return;
+          }
           if (owned.awaitingFrame && frame.attackPower != null) {
             if (!Number.isFinite(frame.attackPower) || frame.attackPower <= 0 || isMuted(owned.video)) return;
             owned.startupPower = Math.max(owned.startupPower, frame.attackPower);
@@ -156,7 +179,10 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
           100 / Math.max(1, owned.preferred));
           const output = owned.preferred * owned.gain;
           owned.awaitingFrame = false;
-          if (starting || outputPercent(output) < owned.applied) writeOutput(owned, output);
+          // A partial first frame can precede louder measurements already in
+          // the capture queue. Open softly; increases use the existing tick.
+          if (starting) writeOutput(owned, Math.min(output, owned.preferred * MIN_NORMALIZATION_GAIN));
+          else if (outputPercent(output) < owned.applied) writeOutput(owned, output);
         } catch { unavailable(owned); }
       },
       onFailure: () => {
@@ -205,6 +231,17 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       return;
     }
     try {
+      if (sourceChanging) {
+        if (now - owned.analysisStarted > 3000) {
+          sourceChanging = false;
+          unavailable(owned);
+        } else {
+          readPreferred(owned);
+          writeOutput(owned, 0);
+          report('Waiting for playback');
+        }
+        return;
+      }
       if (!owned.stream) {
         const capture = video.captureStream || video.mozCaptureStream;
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -252,7 +289,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         report('Waiting for audio');
         return;
       }
-      const starting = owned.awaitingFrame || owned.lastLufsFrame == null;
+      const starting = !owned.hasProgrammeFrame || owned.lastLufsFrame == null;
       if (now - (starting ? owned.analysisStarted : owned.lastLufsFrame) > (starting ? 3000 : 500)) {
         // A long page task can run this overdue timer before queued audio.
         // Hold the correction for one bounded catch-up; genuine stalls still
@@ -261,8 +298,8 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         if (now < (owned.catchUpAfter || 0)) return;
         unavailable(owned); return;
       }
-      if (starting) {
-        report('Starting audio analysis');
+      if (starting || owned.awaitingFrame) {
+        report(owned.hasProgrammeFrame && owned.awaitingFrame ? 'Waiting for audio' : 'Starting audio analysis');
         return;
       }
       writeOutput(owned, owned.preferred * owned.gain, true);
@@ -274,7 +311,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     }
   }
 
-  function bind(video) {
+  function bind(video, preferredVolume) {
     if (session?.video === video) return;
     if (session) {
       const owned = session;
@@ -294,11 +331,13 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       report(enabled ? 'Waiting for playback' : 'Off');
       return;
     }
-    const preferred = clampVolume(getVolume(video));
+    const preferred = clampVolume(preferredVolume ?? getVolume(video));
     const owned = session = {
       video, preferred, applied: preferred, gain: 1, lastWriteAt: -Infinity, blocked: false, retryAt: 0, retryDelay: 1000
     };
-    owned.reset = () => {
+    owned.reset = event => {
+      // A native load event confirms that the outgoing source has been cleared.
+      if (event) sourceChanging = false;
       try { resetAnalysis(owned); }
       catch { /* the source can become inaccessible before its load event */ }
       // A prepared context has no source-specific graph to discard yet.
@@ -312,12 +351,14 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     };
     owned.retry = () => { owned.blocked = false; owned.retryAt = 0; tick(); };
     owned.holdOutput = () => {
-      if (!owned.awaitingFrame || owned.writing) return;
+      if (owned.blocked || owned.writing) return;
       // Native-control intent is adopted in a microtask after its site handler.
       // Let that run first; passive site writes still close in this same turn.
       window.queueMicrotask(() => {
-        if (session !== owned || !owned.video.isConnected || !owned.awaitingFrame) return;
-        try { readPreferred(owned); writeOutput(owned, owned.preferred * owned.gain); }
+        if (session !== owned || !owned.video.isConnected || owned.blocked) return;
+        // Repair the last applied output; recalculating here could bypass the
+        // gradual timer and rounding guard on an unrelated site notification.
+        try { readPreferred(owned); writeOutput(owned, owned.applied); }
         catch { unavailable(owned); }
       });
     };
@@ -337,6 +378,14 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
 
   return {
     bind,
+    setSourceChanging(value) {
+      const next = !!value;
+      if (next === sourceChanging) return;
+      sourceChanging = next;
+      if (!session) return;
+      if (next) session.reset();
+      else tick();
+    },
     isBoundTo: video => session?.video === video,
     setEnabled(value) {
       enabled = !!value;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { access, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium } from 'playwright-core';
+import { createLufsMeter } from '../../src/shared/lufs-meter.js';
 
 const candidates = [process.env.VOLUME_SLIDER_CHROME,
   join(process.env.ProgramFiles || 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe'),
@@ -31,8 +32,12 @@ function wav(amplitude, channels = 1, frequency = 440) {
 }
 
 const loud = wav(0.7), quiet = wav(0.06), stereo = wav(0.7, 2);
-const burst = wav(time => time < 4 ? 0.06 : 0.7);
+// Allow native capture to establish boost before testing the loud return.
+// The required pre-onset boost and post-onset deadlines stay unchanged.
+const burstOnset = 5;
+const burst = wav(time => time < burstOnset ? 0.06 : 0.7);
 const screamReturn = wav(time => time >= 4 && time < 4.5 ? .7 : .1);
+const silentStart = wav(time => time < .8 ? 0 : .7);
 // An ordinary background only 5 LU below speech catches reference loss that
 // the previous very quiet background (20 LU below speech) did not expose.
 const speechReturn = wav(time => time < 4 || time >= 9 ? .2 : .2 * 10 ** (-5 / 20));
@@ -43,6 +48,23 @@ const speechWords = wav(time => {
 // Continuous audible tone with a changing envelope, never digital silence.
 const soft = wav(time => 0.016 + 0.012 * Math.sin(2 * Math.PI * time));
 const bass = wav(0.2, 1, 80), high = wav(0.2, 1, 4000);
+// Place a barely varying real tone at a native rounding boundary. Calibrate
+// its energy for the existing mono-to-stereo analysis contract, not for latency.
+function roundingFixture(preferred) {
+  const signal = Float32Array.from({ length: 48000 }, (_, i) => .1 * Math.sin(2 * Math.PI * 1000 * i / 48000));
+  let power;
+  createLufsMeter(48000).process([signal, signal], frame => { power = frame.power; });
+  const boundary = preferred === 30 ? 5.5 : 7.5;
+  const amplitude = .1 * Math.sqrt(10 ** ((-18 + .691) / 10) / power) * preferred / boundary;
+  return wav(time => amplitude * 10 ** ((.05 * Math.sin(2 * Math.PI * time / 8) - .02) / 20), 1, 1000);
+}
+const audioFixtures = new Map([
+  ['/loud.wav', loud], ['/quiet.wav', quiet], ['/stereo.wav', stereo],
+  ['/burst.wav', burst], ['/scream-return.wav', screamReturn],
+  ['/silent-start.wav', silentStart], ['/speech-return.wav', speechReturn],
+  ['/speech-words.wav', speechWords], ['/soft.wav', soft],
+  ['/bass.wav', bass], ['/high.wav', high]
+]);
 const browser = await chromium.launch({ headless: true, executablePath, args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--no-first-run'] });
 const attackResults = [];
 const startupResults = [];
@@ -52,17 +74,26 @@ try {
   cases.push(['youtube', 30, 'csp-suspended'], ['twitch', 40, 'native-suspended'], ['youtube', 30, 'worklet-suspended']);
   cases.push(['youtube', 30, 'lufs-retry'], ['twitch', 40, 'native-retry']);
   cases.push(['youtube', 30, 'csp-startup'], ['youtube', 30, 'lufs-startup'], ['twitch', 40, 'lufs-startup'], ['twitch', 40, 'native-startup']);
+  cases.push(['youtube', 30, 'lufs-navigation'], ['youtube', 30, 'csp-navigation']);
+  cases.push(['twitch', 40, 'lufs-restart'], ['twitch', 40, 'native-restart']);
+  cases.push(['youtube', 30, 'lufs-arrival'], ['youtube', 30, 'csp-arrival']);
   const selectedCases = process.env.VOLUME_SLIDER_NORMALIZATION_CASES?.split(',');
   const startupRepeats = Number(process.env.VOLUME_SLIDER_STARTUP_REPEATS || 1);
+  const navigationRepeats = Number(process.env.VOLUME_SLIDER_NAVIGATION_REPEATS || 1);
   const startupLeadMs = Number(process.env.VOLUME_SLIDER_STARTUP_LEAD_MS || 0);
   assert.ok(Number.isInteger(startupRepeats) && startupRepeats >= 1 && startupRepeats <= 20);
+  assert.ok(Number.isInteger(navigationRepeats) && navigationRepeats >= 1 && navigationRepeats <= 20);
   assert.ok(Number.isFinite(startupLeadMs) && startupLeadMs >= 0 && startupLeadMs <= 1000);
   for (const [platform, preferred, engine] of cases.filter(parts => !selectedCases || selectedCases.includes(parts.join('/')))
-    .flatMap(parts => Array.from({length: parts[2].endsWith('-startup') ? startupRepeats : 1}, () => parts))) {
+    .flatMap(parts => Array.from({length: parts[2].endsWith('-startup') ? startupRepeats : parts[2].endsWith('-navigation') ? navigationRepeats : 1}, () => parts))) {
     const youtube = platform === 'youtube';
+    audioFixtures.set('/rounding.wav', roundingFixture(preferred));
     const suspended = engine.endsWith('-suspended');
     const retrying = engine.endsWith('-retry');
     const startup = engine.endsWith('-startup');
+    const navigation = engine.endsWith('-navigation');
+    const restarting = engine.endsWith('-restart');
+    const arrival = engine.endsWith('-arrival');
     const prefix = youtube ? 'yt' : 'twitch';
     const origin = youtube ? 'https://www.youtube.com' : 'https://www.twitch.tv';
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -98,13 +129,16 @@ try {
         if (${startup} && window.__startupCorrectionAt == null && video.volume > 0 && video.volume < ${preferred / 100 * .35}) window.__startupCorrectionAt = performance.now();
       });
       window.__startupWrites = [];
-      const api = {getVolume:()=>video.volume * ${youtube ? 100 : 1},setVolume:v=>{
-        video.volume=v / ${youtube ? 100 : 1};
-        if (${startup}) window.__startupWrites.push({volume:video.volume,measured:window.__lufsSeconds,time:performance.now()});
+      let apiVolume = ${preferred / 100};
+      const api = {getVolume:()=>(${arrival} ? apiVolume : video.volume) * ${youtube ? 100 : 1},setVolume:v=>{
+        const output=v / ${youtube ? 100 : 1};
+        if (${arrival}) { apiVolume=output; setTimeout(()=>{video.volume=output},80); }
+        else video.volume=output;
+        if (${startup || navigation || arrival}) window.__startupWrites.push({volume:output,measured:window.__lufsSeconds,time:performance.now(),mediaTime:video.currentTime,frame:window.__lastProgrammeFrame});
       },isMuted:()=>video.muted,mute:()=>{video.muted=true},unMute:()=>{video.muted=false},setMuted:v=>{video.muted=v}};
       ${youtube ? 'Object.assign(player,api);' : 'player.__reactFiber$fixture={return:{memoizedProps:{mediaPlayerInstance:api},return:null}};'}
       localStorage.setItem('tm-${prefix}-volume','${preferred}');
-      if (${suspended || retrying || startup}) localStorage.setItem('tm-${prefix}-volume-slider-normalization','true');
+      if (${suspended || retrying || startup || navigation || restarting || arrival}) localStorage.setItem('tm-${prefix}-volume-slider-normalization','true');
       AudioContext.prototype.createMediaElementSource = () => {throw new Error('Must never reroute original playback')};
       window.__normalizationCaptures = 0;
       window.__retryPlaybackEvents = 0;
@@ -120,7 +154,12 @@ try {
         constructor(...args) {
           super(...args);
           window.__lufsOutputs.push(this.numberOfOutputs);
-          this.port.addEventListener('message', event => { if (Number.isFinite(event.data.power)) window.__lufsSeconds += event.data.duration; });
+          this.port.addEventListener('message', event => {
+            if (Number.isFinite(event.data.power)) {
+              window.__lufsSeconds += event.data.duration;
+              if (${navigation}) window.__lastProgrammeFrame = {power:event.data.power,rawPower:event.data.rawPower};
+            }
+          });
           this.port.start();
         }
       };
@@ -177,14 +216,106 @@ try {
       if (path === '/finish-document.js') {
         return documentGate.then(() => route.fulfill({ contentType: 'text/javascript', body: 'document.querySelector("video").parentElement.append(...window.__startupControls);' }));
       }
-      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: path.includes('scream-return') ? screamReturn : path.includes('speech-return') ? speechReturn : path.includes('speech-words') ? speechWords : path.includes('burst') ? burst : path.includes('quiet') ? quiet : path.includes('stereo') ? stereo : path.includes('soft') ? soft : path.includes('bass') ? bass : path.includes('high') ? high : loud });
+      if (path.endsWith('.wav')) return route.fulfill({ status: 200, contentType: 'audio/wav', body: audioFixtures.get(path) ?? loud });
       // YouTube can send a policy without blob: in script-src. Reproduce the
       // actual module rejection, rather than mocking addModule's return value.
       const headers = engine.startsWith('csp') ? { 'Content-Security-Policy': "script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none'" } : {};
       return route.fulfill({ status: 200, contentType: 'text/html', headers, body: html });
     });
     try {
-      await page.goto(`${origin}/${youtube ? 'watch?v=normalization' : 'normalization'}`, {waitUntil: startup ? 'commit' : 'load'});
+      await page.goto(`${origin}/${arrival ? '' : youtube ? 'watch?v=normalization' : 'normalization'}`, {waitUntil: startup ? 'commit' : 'load'});
+      if (arrival) {
+        await page.evaluate(async () => {
+          window.dispatchEvent(new Event('yt-navigate-start'));
+          history.replaceState(null, '', '/watch?v=incoming');
+          await document.querySelector('video').play();
+        });
+        assert.equal(await page.evaluate(() => window.__startupPlayingVolume), 0, 'actual media output is held before its first playing event');
+        await page.waitForFunction(() => document.querySelector('video').currentTime > .4 && document.querySelector('video').volume > 0);
+        const repaired = await page.evaluate(() => new Promise(resolve => {
+          const v = document.querySelector('video');
+          v.addEventListener('volumechange', () => queueMicrotask(() => resolve(v.volume)), {once:true});
+          v.volume = .3;
+        }));
+        assert.ok(repaired <= preferred / 100 * .35, 'a stale native restoration is repaired after the first measurement too');
+        assert.ok(await page.evaluate(maximum => window.__startupWrites.every(write => write.volume <= maximum), preferred / 100 * .35), 'no ordinary-volume command is queued before startup protection');
+        await page.evaluate(() => window.dispatchEvent(new Event('yt-navigate-finish')));
+        await page.locator('#tm-volume-options-button').click();
+        await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent === 'Active');
+        assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+        assert.equal(await page.evaluate(() => localStorage.getItem('tm-yt-volume')), String(preferred));
+        await page.locator('#tm-volume-options-normalization').click();
+        await page.waitForFunction(() => window.__normalizationContexts.every(context => context.state === 'closed'));
+        assert.deepEqual(errors, []);
+        console.log(`${platform} (${engine}): first playing event is silent before navigation completion; delayed API commands, stale native restoration, selection and cleanup passed`);
+        continue;
+      }
+      if (restarting) {
+        await page.evaluate(() => document.querySelector('video').play());
+        await page.waitForFunction(preference => document.querySelector('video').volume > 0 && document.querySelector('video').volume < preference / 100 * .35, preferred);
+        await page.locator('#tm-volume-options-button').click();
+        await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent === 'Active');
+        await page.waitForTimeout(2100);
+        await page.evaluate(async () => { const v = document.querySelector('video'); v.muted = true; v.src = '/loud.wav'; await v.play(); });
+        await page.waitForFunction(() => !document.querySelector('video').muted && document.querySelector('video').volume > 0 && document.querySelector('#tm-volume-options-normalization-status').textContent === 'Active');
+        assert.equal(await page.evaluate(() => localStorage.getItem('tm-twitch-muted')), 'false');
+        assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+        await page.locator('#tm-volume-slider-overlay .tm-volume-icon-cell').click();
+        assert.equal(await page.evaluate(() => localStorage.getItem('tm-twitch-muted')), 'true');
+        await page.evaluate(async () => { const v = document.querySelector('video'); v.muted = false; v.src = '/quiet.wav'; await v.play(); });
+        await page.waitForFunction(() => document.querySelector('video').readyState >= 2 && document.querySelector('video').muted);
+        assert.equal(await page.evaluate(() => localStorage.getItem('tm-twitch-muted')), 'true');
+        await page.locator('#tm-volume-options-button').click();
+        await page.locator('#tm-volume-options-normalization').click();
+        await page.waitForFunction(() => window.__normalizationContexts.every(context => context.state === 'closed'));
+        assert.equal(await page.evaluate(() => document.querySelector('video').muted), true);
+        assert.equal(await page.evaluate(() => document.querySelector('video').volume), preferred / 100);
+        assert.deepEqual(errors, []);
+        console.log(`${platform} (${engine}): initialization mute after source restart restores saved intent; intentional mute, selected volume and cleanup passed`);
+        continue;
+      }
+      if (navigation) {
+        await page.waitForSelector('#tm-volume-options-button');
+        await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/quiet.wav'; await v.play(); });
+        await page.waitForFunction(preference => document.querySelector('video').volume > preference / 100 * 1.4, preferred);
+        const oldCapture = await page.evaluate(() => window.__normalizationCaptures);
+        await page.evaluate(() => window.dispatchEvent(new Event('yt-navigate-start')));
+        assert.equal(await page.evaluate(() => document.querySelector('video').volume), 0);
+        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 200)));
+        assert.equal(await page.evaluate(() => document.querySelector('video').volume), 0, 'outgoing audio cannot release the transition hold');
+        assert.equal(await page.evaluate(() => window.__normalizationCaptures), oldCapture, 'no outgoing recapture while navigation is pending');
+        await page.evaluate(() => {
+          history.replaceState(null, '', '/watch?v=reused');
+          window.dispatchEvent(new Event('yt-navigate-finish'));
+        });
+        await page.waitForFunction(count => window.__normalizationCaptures === count + 1 && document.querySelector('video').volume > 0, oldCapture);
+        assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+        // Real source loading may precede the SPA completion event. Silence
+        // must not release ordinary volume while waiting for its first sound.
+        await page.evaluate(async () => {
+          window.dispatchEvent(new Event('yt-navigate-start'));
+          window.__startupWrites = [];
+          const v = document.querySelector('video'); v.src = '/silent-start.wav'; await v.play();
+        });
+        await page.waitForFunction(() => document.querySelector('video').currentTime >= .4);
+        assert.equal(await page.evaluate(() => document.querySelector('video').volume), 0, 'healthy silent programme frames retain startup protection');
+        await page.waitForFunction(() => document.querySelector('video').currentTime >= 1.1);
+        const writes = await page.evaluate(() => window.__startupWrites);
+        assert.ok(writes.some(write => write.volume > 0), 'the new source opens when its own sound is measurable');
+        assert.ok(writes.every(write => write.volume <= preferred / 100 * .35), `the new loud source never receives ordinary output: ${JSON.stringify(writes)}`);
+        await page.evaluate(() => window.dispatchEvent(new Event('yt-navigate-finish')));
+        await page.locator('#tm-volume-options-button').click();
+        await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent === 'Active');
+        assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+        assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
+        assert.equal(await page.evaluate(() => window.__nativeFrames > 0), engine.startsWith('csp'));
+        await page.locator('#tm-volume-options-normalization').click();
+        await page.waitForFunction(() => window.__normalizationContexts.every(context => context.state === 'closed'));
+        assert.equal(await page.evaluate(() => document.querySelector('video').volume), preferred / 100);
+        assert.deepEqual(errors, []);
+        console.log(`${platform} (${engine}): reused-element navigation, silent decoder startup, first-sound correction, preference and cleanup passed`);
+        continue;
+      }
       if (startup) {
         const cdp = await context.newCDPSession(page);
         const read = async expression => {
@@ -425,7 +556,7 @@ try {
       // A loud return within the same source retains the preceding quiet boost.
       // Source replacement alone cannot reproduce that gain-transition bug.
       await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/burst.wav'; await v.play(); });
-      await page.waitForFunction(() => document.querySelector('video').currentTime >= 3.5);
+      await page.waitForFunction(onset => document.querySelector('video').currentTime >= onset - .5, burstOnset);
       assert.ok(Math.round(await page.evaluate(() => document.querySelector('video').volume) * 100) >= Math.round(preferred * 1.5), 'the quiet lead-in has at least 50% boost in native player steps');
       const burstTrace = await page.evaluate(() => new Promise(resolve => {
         const video = document.querySelector('video');
@@ -433,14 +564,14 @@ try {
         const timer = setInterval(() => rows.push({ time: video.currentTime, volume: video.volume }), 10);
         setTimeout(() => { clearInterval(timer); resolve(rows); }, 1300);
       }));
-      const afterAttack = burstTrace.filter(row => row.time >= 4.25 && row.time <= 4.7);
+      const afterAttack = burstTrace.filter(row => row.time >= burstOnset + .25 && row.time <= burstOnset + .7);
       assert.ok(afterAttack.length > 0, 'the captured trace includes the loud return');
       const worstBurstDb = Math.max(...afterAttack.map(row => 20 * Math.log10((0.7 / Math.sqrt(2) * row.volume) / (0.1 * preferred / 100))));
       assert.ok(worstBurstDb < 2, `loud return settles within 250 ms: ${worstBurstDb.toFixed(2)} dB above target`);
       const withinTarget = row => 20 * Math.log10((0.7 / Math.sqrt(2) * row.volume) / (0.1 * preferred / 100)) < 2;
-      const settledIndex = burstTrace.findIndex((row, index) => row.time >= 4 && withinTarget(row) && burstTrace.slice(index).filter(next => next.time <= 4.7).every(withinTarget));
+      const settledIndex = burstTrace.findIndex((row, index) => row.time >= burstOnset && withinTarget(row) && burstTrace.slice(index).filter(next => next.time <= burstOnset + .7).every(withinTarget));
       assert.ok(settledIndex >= 0, 'the loud return has a stable correction');
-      const reactionMs = (burstTrace[settledIndex].time - 4) * 1000;
+      const reactionMs = (burstTrace[settledIndex].time - burstOnset) * 1000;
       attackResults.push({ platform, preferred, engine, reactionMs, worstBurstDb, speechReturnExcessDb });
       assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
       assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
@@ -472,6 +603,20 @@ try {
       assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
       assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
       console.log(`${platform} (${engine}): repeated word onsets keep native volume within ${wordSwingDb.toFixed(2)} dB`);
+      await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/rounding.wav'; await v.play(); });
+      await page.waitForFunction(() => document.querySelector('video').currentTime >= 10);
+      const roundingVolumes = await page.evaluate(() => new Promise(resolve => {
+        const video = document.querySelector('video'), volumes = [];
+        const timer = setInterval(() => volumes.push(Math.round(video.volume * 100)), 20);
+        setTimeout(() => { clearInterval(timer); resolve(volumes); }, 10000);
+      }));
+      assert.ok(roundingVolumes.length >= 100, 'the trace covers a full cycle of the slow level variation');
+      assert.deepEqual([...new Set(roundingVolumes)], [preferred === 30 ? 5 : 7], 'tiny level variations cannot toggle neighboring native percentages');
+      await page.evaluate(() => { document.querySelector('video').volume = .5; });
+      await page.waitForFunction(expected => Math.round(document.querySelector('video').volume * 100) === expected, roundingVolumes[0]);
+      assert.equal(await page.locator('#tm-volume-slider-range').inputValue(), String(preferred));
+      assert.equal(await page.evaluate(key => localStorage.getItem(key), `tm-${prefix}-volume`), String(preferred));
+      console.log(`${platform} (${engine}): tiny level variations keep native output steady at ${roundingVolumes[0]}%`);
       // The old mono analyser reads this audible stereo source as silence.
       await page.evaluate(async () => { const v = document.querySelector('video'); v.src = '/stereo.wav'; await v.play(); });
       await page.waitForFunction(preference => document.querySelector('video').volume < preference / 100 * .25, preferred, { timeout: 3000 });

@@ -67,12 +67,14 @@ function render(channels, preferred) {
     meter.process(channels.map(channel => channel.subarray(offset, end)),
       frame => { gain = controller.update(frame, 100 / preferred); },
       attackPower => { gain = controller.update({ attackPower }, 100 / preferred); });
-    const next = Math.max(1, Math.round(Math.min(100, preferred * gain)));
+    const desired = preferred * gain;
+    const next = Math.max(1, Math.round(Math.min(100, desired)));
     // Match the native writer: increases use 50 ms ticks and coalesce small
-    // recovery steps for at most 150 ms. Every cut still bypasses the timer.
+    // recovery steps for at most 150 ms, with a small rounding margin to avoid
+    // repeated neighboring steps. Every cut still bypasses these guards.
     const outputTick = Math.floor(end / (rate * .05)) > Math.floor(offset / (rate * .05));
     const increaseReady = next / applied >= 10 ** (.5 / 20) || end - lastWrite >= rate * .15;
-    if (next < applied || (next > applied && outputTick && increaseReady)) {
+    if (next < applied || (next > applied && desired >= applied + .6 && outputTick && increaseReady)) {
       applied = next;
       lastWrite = end;
     }

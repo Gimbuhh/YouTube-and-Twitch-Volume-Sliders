@@ -43,6 +43,7 @@
   }
   function createVolumePersistence({ window: window2, storage, storageKey, debounceMs, getVolumeStep }) {
     let saveTimer = 0;
+    let scheduledVolume = 0;
     function getSavedVolume() {
       try {
         const saved = storage.getItem(storageKey);
@@ -71,12 +72,15 @@
     }
     function scheduleSaveVolume(value) {
       cancelScheduledSaveVolume();
-      saveTimer = window2.setTimeout(() => {
-        saveVolume(value);
-        saveTimer = 0;
-      }, debounceMs);
+      scheduledVolume = value;
+      saveTimer = window2.setTimeout(flushScheduledSaveVolume, debounceMs);
     }
-    return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
+    function flushScheduledSaveVolume() {
+      if (!saveTimer) return;
+      cancelScheduledSaveVolume();
+      saveVolume(scheduledVolume);
+    }
+    return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume, flushScheduledSaveVolume };
   }
 
   // src/shared/lufs-meter.js
@@ -251,7 +255,10 @@
           const current = Math.log(gain), target = Math.log(desired);
           const attenuation = Math.min(0, target) - Math.min(0, current);
           const boost = Math.max(0, target) - Math.max(0, current);
-          gain = Math.exp(current + attenuation * (1 - Math.exp(-dt / 0.25)) + boost * (1 - Math.exp(-dt / 0.9)));
+          gain = Math.exp(current + Math.min(
+            40 * Math.LN10 / 20 * dt,
+            attenuation * (1 - Math.exp(-dt / 0.2)) + boost * (1 - Math.exp(-dt / 0.9))
+          ));
         }
         return gain;
       }
@@ -410,6 +417,7 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
   function createVolumeNormalizer({ window: window2, getVolume, setVolume, isMuted, onStatusChanged = () => {
   } }) {
     let enabled = false;
+    let sourceChanging = false;
     let session = null;
     let status = "Off";
     let lastDetails = "";
@@ -439,13 +447,16 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     }
     function writeOutput(owned, value, gradual = false) {
       const next = outputPercent(value);
-      if (next === owned.applied && !owned.outputChanged) return;
+      const nativeChanged = owned.applied === 0 ? owned.video.volume !== 0 : Math.abs(owned.video.volume - owned.applied / 100) > 1e-6;
+      if (next === owned.applied && !owned.outputChanged && !nativeChanged) return;
+      if (gradual && !owned.outputChanged && !nativeChanged && next > owned.applied && value < owned.applied + 0.6) return;
       const now = window2.performance.now();
-      if (gradual && next > owned.applied && owned.applied > 0 && next / owned.applied < 10 ** (0.5 / 20) && now - owned.lastWriteAt < 150) return;
+      if (gradual && !owned.outputChanged && !nativeChanged && next > owned.applied && owned.applied > 0 && next / owned.applied < 10 ** (0.5 / 20) && now - owned.lastWriteAt < 150) return;
       const previous = owned.applied;
       owned.applied = next;
       owned.writing = true;
       try {
+        owned.video.volume = next / 100;
         setVolume(owned.video, next, { preserveMute: true });
         owned.lastWriteAt = now;
         owned.outputChanged = false;
@@ -461,6 +472,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       owned.gain = 1;
       owned.awaitingFrame = false;
       owned.startupPower = 0;
+      owned.hasProgrammeFrame = false;
       writeOutput(owned, preferred);
       owned.lufsTracker = null;
       owned.lastLufsFrame = null;
@@ -472,6 +484,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       owned.gain = 0;
       owned.awaitingFrame = true;
       owned.startupPower = 0;
+      owned.hasProgrammeFrame = false;
       writeOutput(owned, 0);
       owned.lufsTracker = null;
       owned.lastLufsFrame = null;
@@ -517,11 +530,16 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         context: owned.context,
         track,
         onFrame: (frame) => {
-          if (session !== owned || !owned.video.isConnected || owned.blocked) return;
+          if (session !== owned || !owned.video.isConnected || owned.blocked || sourceChanging) return;
           owned.lastLufsFrame = window2.performance.now();
           owned.catchUpAfter = 0;
           if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || owned.preferred === 0 || owned.lufs?.needsActivation) return;
           try {
+            if (frame.attackPower == null) {
+              if (!Number.isFinite(frame.power) || !Number.isFinite(frame.rawPower) || !Number.isFinite(frame.duration) || frame.duration <= 0) return;
+              owned.hasProgrammeFrame = true;
+              if (owned.awaitingFrame && (frame.rawPower <= 0 || frame.power <= 0)) return;
+            }
             if (owned.awaitingFrame && frame.attackPower != null) {
               if (!Number.isFinite(frame.attackPower) || frame.attackPower <= 0 || isMuted(owned.video)) return;
               owned.startupPower = Math.max(owned.startupPower, frame.attackPower);
@@ -543,7 +561,8 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
             );
             const output = owned.preferred * owned.gain;
             owned.awaitingFrame = false;
-            if (starting || outputPercent(output) < owned.applied) writeOutput(owned, output);
+            if (starting) writeOutput(owned, Math.min(output, owned.preferred * MIN_NORMALIZATION_GAIN));
+            else if (outputPercent(output) < owned.applied) writeOutput(owned, output);
           } catch {
             unavailable(owned);
           }
@@ -601,6 +620,17 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         return;
       }
       try {
+        if (sourceChanging) {
+          if (now - owned.analysisStarted > 3e3) {
+            sourceChanging = false;
+            unavailable(owned);
+          } else {
+            readPreferred(owned);
+            writeOutput(owned, 0);
+            report("Waiting for playback");
+          }
+          return;
+        }
         if (!owned.stream) {
           const capture = video.captureStream || video.mozCaptureStream;
           const AudioContext = window2.AudioContext || window2.webkitAudioContext;
@@ -653,15 +683,15 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           report("Waiting for audio");
           return;
         }
-        const starting = owned.awaitingFrame || owned.lastLufsFrame == null;
+        const starting = !owned.hasProgrammeFrame || owned.lastLufsFrame == null;
         if (now - (starting ? owned.analysisStarted : owned.lastLufsFrame) > (starting ? 3e3 : 500)) {
           if (delayed && !owned.catchUpAfter) owned.catchUpAfter = now + 100;
           if (now < (owned.catchUpAfter || 0)) return;
           unavailable(owned);
           return;
         }
-        if (starting) {
-          report("Starting audio analysis");
+        if (starting || owned.awaitingFrame) {
+          report(owned.hasProgrammeFrame && owned.awaitingFrame ? "Waiting for audio" : "Starting audio analysis");
           return;
         }
         writeOutput(owned, owned.preferred * owned.gain, true);
@@ -671,7 +701,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         unavailable(owned);
       }
     }
-    function bind(video) {
+    function bind(video, preferredVolume) {
       if (session?.video === video) return;
       if (session) {
         const owned2 = session;
@@ -692,7 +722,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         report(enabled ? "Waiting for playback" : "Off");
         return;
       }
-      const preferred = clampVolume(getVolume(video));
+      const preferred = clampVolume(preferredVolume ?? getVolume(video));
       const owned = session = {
         video,
         preferred,
@@ -703,7 +733,8 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         retryAt: 0,
         retryDelay: 1e3
       };
-      owned.reset = () => {
+      owned.reset = (event) => {
+        if (event) sourceChanging = false;
         try {
           resetAnalysis(owned);
         } catch {
@@ -725,12 +756,12 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         tick();
       };
       owned.holdOutput = () => {
-        if (!owned.awaitingFrame || owned.writing) return;
+        if (owned.blocked || owned.writing) return;
         window2.queueMicrotask(() => {
-          if (session !== owned || !owned.video.isConnected || !owned.awaitingFrame) return;
+          if (session !== owned || !owned.video.isConnected || owned.blocked) return;
           try {
             readPreferred(owned);
-            writeOutput(owned, owned.preferred * owned.gain);
+            writeOutput(owned, owned.applied);
           } catch {
             unavailable(owned);
           }
@@ -759,6 +790,14 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     }
     return {
       bind,
+      setSourceChanging(value) {
+        const next = !!value;
+        if (next === sourceChanging) return;
+        sourceChanging = next;
+        if (!session) return;
+        if (next) session.reset();
+        else tick();
+      },
       isBoundTo: (video) => session?.video === video,
       setEnabled(value) {
         enabled = !!value;
@@ -4891,6 +4930,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         syncVolumeControl({ slider, label, overlay, value, muted, updateSliderBar, updateVolumeIndicator });
       };
       const initVol = getSavedVolume();
+      if (readSavedMute() === null) saveMute(isMuted(video));
       if (initVol !== null) {
         syncInitialSliderState(initVol, isMuted(video));
       } else {
@@ -5022,12 +5062,12 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           if (isNativeVolumeReplacementEnabled() && now > userIntentUntil && savedValue !== null && Math.abs(playerVolume - savedValue) > 1) {
             cancelScheduledSaveVolume();
             setVolume(video, savedValue, { preserveMute: muted });
-            saveMute(muted);
+            if (!isNormalizationEnabled()) saveMute(muted);
             setSliderFromPlayer(slider, label, video);
             return;
           }
           setSliderFromPlayer(slider, label, video);
-          saveMute(muted);
+          if (!isNormalizationEnabled()) saveMute(muted);
           if (!muted) {
             scheduleSaveVolume(playerVolume);
           }
@@ -5035,6 +5075,24 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         }
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
+      const onSourceReset = () => {
+        if (!isNormalizationEnabled()) return;
+        const savedMute = readSavedMute();
+        if (savedMute === null) return;
+        startupLockUntil = Math.max(startupLockUntil, Date.now() + 2e3);
+        startupCorrectionApplied = false;
+      };
+      const onSourceReady = () => {
+        if (!isNormalizationEnabled()) return;
+        const savedMute = readSavedMute();
+        if (savedMute !== null) setMuted(video, savedMute);
+      };
+      for (const type of ["emptied", "loadstart"]) video.addEventListener(type, onSourceReset, true);
+      video.addEventListener("loadedmetadata", onSourceReady);
+      cleanupRegistry.add(() => {
+        for (const type of ["emptied", "loadstart"]) video.removeEventListener(type, onSourceReset, true);
+        video.removeEventListener("loadedmetadata", onSourceReady);
+      });
       cleanupRegistry.add(bindNativeVolumeInput({
         window,
         video,
@@ -5043,9 +5101,26 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         normalizer,
         onChange: () => {
           markUserVolumeIntent();
+          saveMute(isMuted(video));
           onVideoVolumeChange();
         }
       }));
+      const onNativeMuteInput = (event) => {
+        if (isOptionsPopupOpen() || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        const target = event.target;
+        if (!(target instanceof window.Element) || target.closest('input, textarea, select, [contenteditable="true"]')) return;
+        const activePlayer = getPlayerContainer(video) || player;
+        const muteButton = event.type === "click" && target.closest('[data-a-target="player-mute-unmute-button"]') && activePlayer.contains(target);
+        const muteKey = event.type === "keydown" && event.key.toLowerCase() === "m" && (playerWasLastPressed || activePlayer.contains(document.activeElement));
+        if (!muteButton && !muteKey) return;
+        window.queueMicrotask(() => {
+          if (overlayLifecycle.owns(overlay) && video.isConnected) saveMute(isMuted(video));
+        });
+      };
+      for (const type of ["click", "keydown"]) document.addEventListener(type, onNativeMuteInput, true);
+      cleanupRegistry.add(() => {
+        for (const type of ["click", "keydown"]) document.removeEventListener(type, onNativeMuteInput, true);
+      });
       const onLayoutChange = () => {
         if (!overlay.isConnected) return;
         const activePlayer = getPlayerContainer(video);

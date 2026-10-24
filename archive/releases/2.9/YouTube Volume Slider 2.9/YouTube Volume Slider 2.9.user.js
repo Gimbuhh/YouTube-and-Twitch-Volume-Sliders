@@ -42,6 +42,7 @@
   }
   function createVolumePersistence({ window: window2, storage, storageKey, debounceMs, getVolumeStep }) {
     let saveTimer = 0;
+    let scheduledVolume = 0;
     function getSavedVolume() {
       try {
         const saved = storage.getItem(storageKey);
@@ -70,12 +71,15 @@
     }
     function scheduleSaveVolume(value) {
       cancelScheduledSaveVolume();
-      saveTimer = window2.setTimeout(() => {
-        saveVolume(value);
-        saveTimer = 0;
-      }, debounceMs);
+      scheduledVolume = value;
+      saveTimer = window2.setTimeout(flushScheduledSaveVolume, debounceMs);
     }
-    return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
+    function flushScheduledSaveVolume() {
+      if (!saveTimer) return;
+      cancelScheduledSaveVolume();
+      saveVolume(scheduledVolume);
+    }
+    return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume, flushScheduledSaveVolume };
   }
 
   // src/shared/lufs-meter.js
@@ -250,7 +254,10 @@
           const current = Math.log(gain), target = Math.log(desired);
           const attenuation = Math.min(0, target) - Math.min(0, current);
           const boost = Math.max(0, target) - Math.max(0, current);
-          gain = Math.exp(current + attenuation * (1 - Math.exp(-dt / 0.25)) + boost * (1 - Math.exp(-dt / 0.9)));
+          gain = Math.exp(current + Math.min(
+            40 * Math.LN10 / 20 * dt,
+            attenuation * (1 - Math.exp(-dt / 0.2)) + boost * (1 - Math.exp(-dt / 0.9))
+          ));
         }
         return gain;
       }
@@ -409,6 +416,7 @@ registerProcessor('tm-lufs-analysis', class extends AudioWorkletProcessor {
   function createVolumeNormalizer({ window: window2, getVolume, setVolume, isMuted, onStatusChanged = () => {
   } }) {
     let enabled = false;
+    let sourceChanging = false;
     let session = null;
     let status = "Off";
     let lastDetails = "";
@@ -438,13 +446,16 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     }
     function writeOutput(owned, value, gradual = false) {
       const next = outputPercent(value);
-      if (next === owned.applied && !owned.outputChanged) return;
+      const nativeChanged = owned.applied === 0 ? owned.video.volume !== 0 : Math.abs(owned.video.volume - owned.applied / 100) > 1e-6;
+      if (next === owned.applied && !owned.outputChanged && !nativeChanged) return;
+      if (gradual && !owned.outputChanged && !nativeChanged && next > owned.applied && value < owned.applied + 0.6) return;
       const now = window2.performance.now();
-      if (gradual && next > owned.applied && owned.applied > 0 && next / owned.applied < 10 ** (0.5 / 20) && now - owned.lastWriteAt < 150) return;
+      if (gradual && !owned.outputChanged && !nativeChanged && next > owned.applied && owned.applied > 0 && next / owned.applied < 10 ** (0.5 / 20) && now - owned.lastWriteAt < 150) return;
       const previous = owned.applied;
       owned.applied = next;
       owned.writing = true;
       try {
+        owned.video.volume = next / 100;
         setVolume(owned.video, next, { preserveMute: true });
         owned.lastWriteAt = now;
         owned.outputChanged = false;
@@ -460,6 +471,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       owned.gain = 1;
       owned.awaitingFrame = false;
       owned.startupPower = 0;
+      owned.hasProgrammeFrame = false;
       writeOutput(owned, preferred);
       owned.lufsTracker = null;
       owned.lastLufsFrame = null;
@@ -471,6 +483,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
       owned.gain = 0;
       owned.awaitingFrame = true;
       owned.startupPower = 0;
+      owned.hasProgrammeFrame = false;
       writeOutput(owned, 0);
       owned.lufsTracker = null;
       owned.lastLufsFrame = null;
@@ -516,11 +529,16 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         context: owned.context,
         track,
         onFrame: (frame) => {
-          if (session !== owned || !owned.video.isConnected || owned.blocked) return;
+          if (session !== owned || !owned.video.isConnected || owned.blocked || sourceChanging) return;
           owned.lastLufsFrame = window2.performance.now();
           owned.catchUpAfter = 0;
           if (owned.video.paused || owned.video.ended || owned.video.readyState < 2 || owned.track?.muted || owned.track?.readyState !== "live" || owned.preferred === 0 || owned.lufs?.needsActivation) return;
           try {
+            if (frame.attackPower == null) {
+              if (!Number.isFinite(frame.power) || !Number.isFinite(frame.rawPower) || !Number.isFinite(frame.duration) || frame.duration <= 0) return;
+              owned.hasProgrammeFrame = true;
+              if (owned.awaitingFrame && (frame.rawPower <= 0 || frame.power <= 0)) return;
+            }
             if (owned.awaitingFrame && frame.attackPower != null) {
               if (!Number.isFinite(frame.attackPower) || frame.attackPower <= 0 || isMuted(owned.video)) return;
               owned.startupPower = Math.max(owned.startupPower, frame.attackPower);
@@ -542,7 +560,8 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
             );
             const output = owned.preferred * owned.gain;
             owned.awaitingFrame = false;
-            if (starting || outputPercent(output) < owned.applied) writeOutput(owned, output);
+            if (starting) writeOutput(owned, Math.min(output, owned.preferred * MIN_NORMALIZATION_GAIN));
+            else if (outputPercent(output) < owned.applied) writeOutput(owned, output);
           } catch {
             unavailable(owned);
           }
@@ -600,6 +619,17 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         return;
       }
       try {
+        if (sourceChanging) {
+          if (now - owned.analysisStarted > 3e3) {
+            sourceChanging = false;
+            unavailable(owned);
+          } else {
+            readPreferred(owned);
+            writeOutput(owned, 0);
+            report("Waiting for playback");
+          }
+          return;
+        }
         if (!owned.stream) {
           const capture = video.captureStream || video.mozCaptureStream;
           const AudioContext = window2.AudioContext || window2.webkitAudioContext;
@@ -652,15 +682,15 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
           report("Waiting for audio");
           return;
         }
-        const starting = owned.awaitingFrame || owned.lastLufsFrame == null;
+        const starting = !owned.hasProgrammeFrame || owned.lastLufsFrame == null;
         if (now - (starting ? owned.analysisStarted : owned.lastLufsFrame) > (starting ? 3e3 : 500)) {
           if (delayed && !owned.catchUpAfter) owned.catchUpAfter = now + 100;
           if (now < (owned.catchUpAfter || 0)) return;
           unavailable(owned);
           return;
         }
-        if (starting) {
-          report("Starting audio analysis");
+        if (starting || owned.awaitingFrame) {
+          report(owned.hasProgrammeFrame && owned.awaitingFrame ? "Waiting for audio" : "Starting audio analysis");
           return;
         }
         writeOutput(owned, owned.preferred * owned.gain, true);
@@ -670,7 +700,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         unavailable(owned);
       }
     }
-    function bind(video) {
+    function bind(video, preferredVolume) {
       if (session?.video === video) return;
       if (session) {
         const owned2 = session;
@@ -691,7 +721,7 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         report(enabled ? "Waiting for playback" : "Off");
         return;
       }
-      const preferred = clampVolume(getVolume(video));
+      const preferred = clampVolume(preferredVolume ?? getVolume(video));
       const owned = session = {
         video,
         preferred,
@@ -702,7 +732,8 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         retryAt: 0,
         retryDelay: 1e3
       };
-      owned.reset = () => {
+      owned.reset = (event) => {
+        if (event) sourceChanging = false;
         try {
           resetAnalysis(owned);
         } catch {
@@ -724,12 +755,12 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         tick();
       };
       owned.holdOutput = () => {
-        if (!owned.awaitingFrame || owned.writing) return;
+        if (owned.blocked || owned.writing) return;
         window2.queueMicrotask(() => {
-          if (session !== owned || !owned.video.isConnected || !owned.awaitingFrame) return;
+          if (session !== owned || !owned.video.isConnected || owned.blocked) return;
           try {
             readPreferred(owned);
-            writeOutput(owned, owned.preferred * owned.gain);
+            writeOutput(owned, owned.applied);
           } catch {
             unavailable(owned);
           }
@@ -758,6 +789,14 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
     }
     return {
       bind,
+      setSourceChanging(value) {
+        const next = !!value;
+        if (next === sourceChanging) return;
+        sourceChanging = next;
+        if (!session) return;
+        if (next) session.reset();
+        else tick();
+      },
       isBoundTo: (video) => session?.video === video,
       setEnabled(value) {
         enabled = !!value;
@@ -3831,17 +3870,17 @@ Output ${applied}% \xB7 Selected ${preferred}%`;
         syncNormalizationIcon();
       }
     });
-    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null, preferredVolume) {
       const enabled = isNormalizationEnabled() && isOverlayEnabled();
       normalizer.setEnabled(enabled);
-      normalizer.bind(video);
+      normalizer.bind(video, preferredVolume);
       refreshOptionsPopupState();
       syncNormalizationIcon();
     }
     function syncNormalizationIcon() {
       updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
     }
-    const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
+    const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume, flushScheduledSaveVolume } = createVolumePersistence({
       window,
       storage,
       storageKey: STORAGE_KEY,
@@ -4608,6 +4647,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     }
     function disposeActiveOverlay() {
       normalizer.bind(null);
+      flushScheduledSaveVolume();
       stopOptionsPreview();
       requestedVolumeIntent = null;
       overlayLifecycle.dispose();
@@ -4650,8 +4690,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         existingOverlay = null;
       }
       if (!existingOverlay && isNormalizationEnabled() && !normalizer.isBoundTo(video)) {
+        syncNormalization(video, getSavedVolume() ?? getRawVolume(video));
         restoreSavedVolume(video);
-        syncNormalization(video);
       }
       if (!controlsHost && !isSliderOnVideo()) {
         injectVolumeOptionsButton();
@@ -4691,7 +4731,17 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       if (!isYouTubeSupportedPage()) return;
       const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
       const hasRemovedNodes = mutations.some((m) => m.removedNodes && m.removedNodes.length > 0);
-      if (!hasAddedNodes && !hasRemovedNodes || attachQueued) return;
+      if (!hasAddedNodes && !hasRemovedNodes) return;
+      const videoAdded = isOverlayEnabled() && mutationAddsVideo(mutations);
+      if (videoAdded && isNormalizationEnabled()) {
+        resetVideoElement();
+        const video = getVideoElement();
+        if (video && !normalizer.isBoundTo(video) && attachSliderIfPossible()) {
+          lastAttach = Date.now();
+          return;
+        }
+      }
+      if (attachQueued) return;
       applyNativeVolumeVisibility();
       const overlay = document.getElementById(OVERLAY_ID);
       const button = document.getElementById(OPTIONS_BUTTON_ID);
@@ -4701,7 +4751,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       if (buttonMissing || buttonMisplaced) {
         injectVolumeOptionsButton();
       }
-      const videoMayHaveChanged = isOverlayEnabled() && !!overlay && mutationAddsVideo(mutations);
+      const videoMayHaveChanged = !!overlay && videoAdded;
       if (!overlayMissing && !videoMayHaveChanged) return;
       attachQueued = true;
       requestAnimationFrame(() => {
@@ -4770,6 +4820,16 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function setupYtNavigationHandler() {
       if (window.__tmYtVolumeNavBound) return;
       window.__tmYtVolumeNavBound = true;
+      const protectIncomingPlayback = (event) => {
+        const video = event.target;
+        if (!(video instanceof window.HTMLVideoElement) || !video.matches("#movie_player video.html5-main-video")) return;
+        if (!isYouTubeSupportedPage() || !isOverlayEnabled() || !isNormalizationEnabled() || normalizer.isBoundTo(video)) return;
+        resetVideoElement();
+        cachedYtPlayer = null;
+        attachSliderIfPossible();
+        if (normalizer.isBoundTo(video)) normalizer.setSourceChanging(false);
+      };
+      for (const type of ["loadstart", "play"]) window.addEventListener(type, protectIncomingPlayback, true);
       const cancelPendingReattach = () => {
         if (navDebounceTimer) {
           clearTimeout(navDebounceTimer);
@@ -4792,7 +4852,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
           navReattachTimer = 0;
           removeOverlay();
           removeVolumeOptionsButton();
-          attachSliderIfPossible();
+          if (attachSliderIfPossible()) normalizer.setSourceChanging(false);
         }, NAV_REATTACH_DELAY_MS);
       };
       const scheduleReattach = () => {
@@ -4803,6 +4863,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }, NAV_DEBOUNCE_MS);
       };
       const handleNavigationStart = () => {
+        normalizer.setSourceChanging(true);
         if (isOverlayEnabled() && isNativeVolumeReplacementEnabled()) {
           document.documentElement.classList.add("tm-yt-volume-native-replacement-active");
         }
@@ -4813,6 +4874,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         applyNativeVolumeVisibility();
         const attached = attachSliderIfPossible();
         if (attached || !isYouTubeSupportedPage()) {
+          normalizer.setSourceChanging(false);
           cancelPendingReattach();
           return;
         }

@@ -2,9 +2,9 @@
 
 - **Both:** **Auto-normalize volume** helps keep listening levels more consistent when switching YouTube videos or Twitch channels, with quick protection against loud spikes and gradual recovery afterward.
   - The feature starts off. Enable **Volume Slider Options → General → Audio → Auto-normalize volume** separately on each site; a status below the toggle shows whether it is active, waiting, or unavailable.
-  - Quiet audio receives limited boost, speech stays steadier between words, and the usual listening level is remembered through quiet passages and silent gaps. Brief loud sounds reduce volume without leaving it low afterward. Audio settings show the adjusted output percentage.
-  - Stream restarts preserve your selected level. Player volume arrows change it in five-point steps; native volume controls still work.
-  - Startup audio comes in softly under protection while normalization finds the right level, including after a source restart. Analysis starts before player controls load; native capture needs no extra activation click.
+  - Quiet audio receives limited boost, speech stays steadier between words, and the usual listening level is remembered through quiet passages and silent gaps. Volume returns smoothly after brief loud sounds, with fewer small fluctuations. Audio settings show the adjusted output percentage.
+  - Stream restarts preserve your selected level and mute choice, including after blocked Twitch ads. Player volume arrows change the selection in five-point steps; native volume controls still work.
+  - Audio starts softly under protection while normalization finds the right level, including when switching videos on the same page or restarting a source. Analysis starts before player controls load; native capture needs no extra activation click.
   - Temporary audio access failures recover automatically when capture becomes available.
   - A small waveform icon shows normalization is on. Pause and mute keep it visible; blocked or unavailable analysis hides it.
   - Turning normalization off or setting slider mode to Off restores your chosen volume while preserving mute. If the browser cannot analyze a stream, ordinary playback continues at your chosen level.

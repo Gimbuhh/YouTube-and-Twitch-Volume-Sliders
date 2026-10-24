@@ -8,9 +8,9 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 - **Both:** **Auto-normalize volume** keeps sources closer in loudness, limits boost during quiet audio to reduce sudden jumps, and preserves the chosen slider value and mute state.
   - The option starts disabled, saves separately for each site, and shows its current status under General → Audio in Volume Slider Options.
-  - Audio settings show adjusted output separately from the selected level. Stream restarts preserve the selection, and player volume arrows adjust it in five-point steps. Native volume controls still work.
-  - Normalization keeps speech steady between words, remembers the usual listening level through quiet passages and silent gaps, and recovers promptly after brief loud sounds.
-  - Audio starts softly under protection as soon as samples arrive. Analysis starts before player controls load; native capture needs no extra activation click.
+  - Audio settings show adjusted output separately from the selected level. Stream restarts preserve the selection and mute choice, including after blocked Twitch ads. Player volume arrows adjust the selection in five-point steps. Native volume controls still work.
+  - Normalization keeps speech steady between words, remembers the usual listening level through quiet passages and silent gaps, and recovers smoothly after brief loud sounds with fewer unnecessary volume changes.
+  - Audio starts softly under protection on page loads and video changes. Analysis starts before player controls load; native capture needs no extra activation click.
   - Temporary audio access failures retry automatically.
   - A waveform icon shows normalization is on, including during pause and mute, and hides if analysis is blocked or unavailable.
   - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.

@@ -114,7 +114,7 @@ The Twitch script also runs a small keyboard relay in Twitch's official extensio
 
 ## Loudness normalization (2.9)
 
-Open **Volume Slider Options → General → Audio → Auto-normalize volume** to enable it. It starts off and is saved separately for YouTube and Twitch. On later page loads, analysis can start from the playing video before the player controls finish loading. Startup audio comes in softly under protection as soon as samples arrive, then moves to the measured level; source restarts use the same protection. The slider continues to set your preferred listening level; automatic corrections do not move it or replace the saved percentage.
+Open **Volume Slider Options → General → Audio → Auto-normalize volume** to enable it. It starts off and is saved separately for YouTube and Twitch. On later page loads, analysis can start from the playing video before the player controls finish loading. Startup audio comes in softly under protection as soon as samples arrive, then moves to the measured level; source restarts and switching YouTube videos on the same page use the same protection. The slider continues to set your preferred listening level; automatic corrections do not move it or replace the saved percentage.
 
 Stream restarts keep that selected level. Player Up/Down keys change it in five-point steps, rather than stepping from the automatically adjusted output. Native volume controls can still change your listening level.
 

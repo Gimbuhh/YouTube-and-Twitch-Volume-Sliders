@@ -1220,6 +1220,7 @@ export function startTwitchVolumeSlider() {
 
         // Initialize from localStorage to avoid the 100% to actual jump on stream load
         const initVol = getSavedVolume();
+        if (readSavedMute() === null) saveMute(isMuted(video));
         if (initVol !== null) {
             syncInitialSliderState(initVol, isMuted(video));
         } else {
@@ -1360,20 +1361,58 @@ export function startTwitchVolumeSlider() {
                     savedValue !== null && Math.abs(playerVolume - savedValue) > 1) {
                     cancelScheduledSaveVolume();
                     setVolume(video, savedValue, { preserveMute: muted });
-                    saveMute(muted);
+                    if (!isNormalizationEnabled()) saveMute(muted);
                     setSliderFromPlayer(slider, label, video);
                     return;
                 }
                 setSliderFromPlayer(slider, label, video);
-                saveMute(muted);
+                if (!isNormalizationEnabled()) saveMute(muted);
                 if (!muted) {
                     scheduleSaveVolume(playerVolume);
                 }
             } catch (e) { /* prevent crash */ }
         };
         video.addEventListener('volumechange', onVideoVolumeChange);
+        const onSourceReset = () => {
+            if (!isNormalizationEnabled()) return;
+            const savedMute = readSavedMute();
+            if (savedMute === null) return;
+            // Hard player restarts can set initialization mute before emptied.
+            // Lock persistence before the normalizer's source-reset writes.
+            // Restore mute at metadata readiness, after analysis has held zero.
+            startupLockUntil = Math.max(startupLockUntil, Date.now() + 2000);
+            startupCorrectionApplied = false;
+        };
+        const onSourceReady = () => {
+            if (!isNormalizationEnabled()) return;
+            const savedMute = readSavedMute();
+            if (savedMute !== null) setMuted(video, savedMute);
+        };
+        for (const type of ['emptied', 'loadstart']) video.addEventListener(type, onSourceReset, true);
+        video.addEventListener('loadedmetadata', onSourceReady);
+        cleanupRegistry.add(() => {
+            for (const type of ['emptied', 'loadstart']) video.removeEventListener(type, onSourceReset, true);
+            video.removeEventListener('loadedmetadata', onSourceReady);
+        });
         cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: '[data-a-target="player-volume-slider"]', normalizer,
-            onChange: () => { markUserVolumeIntent(); onVideoVolumeChange(); } }));
+            onChange: () => { markUserVolumeIntent(); saveMute(isMuted(video)); onVideoVolumeChange(); } }));
+        const onNativeMuteInput = event => {
+            if (isOptionsPopupOpen() || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            const target = event.target;
+            if (!(target instanceof window.Element) || target.closest('input, textarea, select, [contenteditable="true"]')) return;
+            const activePlayer = getPlayerContainer(video) || player;
+            const muteButton = event.type === 'click' && target.closest('[data-a-target="player-mute-unmute-button"]') && activePlayer.contains(target);
+            const muteKey = event.type === 'keydown' && event.key.toLowerCase() === 'm' &&
+                (playerWasLastPressed || activePlayer.contains(document.activeElement));
+            if (!muteButton && !muteKey) return;
+            window.queueMicrotask(() => {
+                if (overlayLifecycle.owns(overlay) && video.isConnected) saveMute(isMuted(video));
+            });
+        };
+        for (const type of ['click', 'keydown']) document.addEventListener(type, onNativeMuteInput, true);
+        cleanupRegistry.add(() => {
+            for (const type of ['click', 'keydown']) document.removeEventListener(type, onNativeMuteInput, true);
+        });
 
         const onLayoutChange = () => {
             if (!overlay.isConnected) return;

@@ -349,6 +349,41 @@ test('brief peak recovery remains smooth around unity gain', () => {
   assert.ok(20 * Math.log10(Math.max(...recovered) / Math.min(...recovered)) < .3);
 });
 
+test('deep cuts recover at a bounded rate without slowing loud-sound protection', () => {
+  const target = 10 ** ((-18 + .691) / 10);
+  for (const duration of [.025, .05, .1, .25]) {
+    const controller = createLufsGainController();
+    const frame = { power: target, rawPower: .01, momentaryPower: target, duration };
+    for (let i = 0; i < 8 / duration; i++) controller.update(frame);
+    let previous = controller.update({ attackPower: target * 100 });
+    assert.equal(previous, .1, 'the large spike cuts immediately');
+    for (let i = 0; i < 1.5 / duration; i++) {
+      const gain = controller.update(frame);
+      assert.ok(20 * Math.log10(gain / previous) <= 40 * duration + 1e-9,
+        `${duration}s frame: recovery cannot jump faster than 40 dB/s`);
+      previous = gain;
+    }
+    assert.ok(previous > .95, 'the limit still allows prompt recovery after the cut');
+    assert.equal(controller.update({ attackPower: target * 100 }), .1, 'another cut remains immediate');
+  }
+});
+
+test('a brief event recovers promptly with a short captured programme history', () => {
+  const controller = createLufsGainController(), powers = [];
+  const normal = 10 ** ((-18 + .691) / 10) / 1.26 ** 2;
+  const update = power => {
+    powers.push(power); if (powers.length > 8) powers.shift();
+    return controller.update({ power, rawPower: power / 2, duration: .05,
+      momentaryPower: powers.reduce((sum, value) => sum + value, 0) / powers.length });
+  };
+  let before, recovered;
+  for (let i = 0; i < 53; i++) before = update(normal);
+  for (let i = 0; i < 7; i++) assert.ok(update(normal * 49) < before / 3, 'the loud event still cuts immediately');
+  for (let i = 0; i < 20; i++) recovered = update(normal);
+  assert.ok(Math.abs(20 * Math.log10(recovered / before)) < 1.5,
+    'one second of returning measurements recovers within 1.5 dB of the previous level');
+});
+
 test('silence does not erase speech reference before a quiet background starts', () => {
   const target = 10 ** ((-18 + .691) / 10), controller = createLufsGainController();
   const update = power => controller.update({ power, rawPower: power / 2, momentaryPower: power, duration: .05 }, 5);

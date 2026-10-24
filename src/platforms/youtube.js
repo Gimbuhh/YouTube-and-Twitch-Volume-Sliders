@@ -129,10 +129,10 @@ export function startYouTubeVolumeSlider() {
         onStatusChanged: () => { syncNormalizationStatus(getOptionsPopup()); syncNormalizationIcon(); }
     });
 
-    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null, preferredVolume) {
         const enabled = isNormalizationEnabled() && isOverlayEnabled();
         normalizer.setEnabled(enabled);
-        normalizer.bind(video);
+        normalizer.bind(video, preferredVolume);
         refreshOptionsPopupState();
         syncNormalizationIcon();
     }
@@ -141,7 +141,7 @@ export function startYouTubeVolumeSlider() {
         updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
     }
 
-    const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
+    const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume, flushScheduledSaveVolume } = createVolumePersistence({
         window, storage, storageKey: STORAGE_KEY, debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
         getVolumeStep
     });
@@ -1049,6 +1049,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
     function disposeActiveOverlay() {
         normalizer.bind(null);
+        flushScheduledSaveVolume();
         stopOptionsPreview();
         requestedVolumeIntent = null;
         overlayLifecycle.dispose();
@@ -1100,8 +1101,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         // A playing video can precede its controls. Restore intent once and
         // analyze immediately; mounting the slider retains this same session.
         if (!existingOverlay && isNormalizationEnabled() && !normalizer.isBoundTo(video)) {
+            syncNormalization(video, getSavedVolume() ?? getRawVolume(video));
             restoreSavedVolume(video);
-            syncNormalization(video);
         }
         if (!controlsHost && !isSliderOnVideo()) {
             injectVolumeOptionsButton();
@@ -1148,7 +1149,20 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!isYouTubeSupportedPage()) return;
         const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
         const hasRemovedNodes = mutations.some((m) => m.removedNodes && m.removedNodes.length > 0);
-        if ((!hasAddedNodes && !hasRemovedNodes) || attachQueued) return;
+        if (!hasAddedNodes && !hasRemovedNodes) return;
+
+        const videoAdded = isOverlayEnabled() && mutationAddsVideo(mutations);
+        if (videoAdded && isNormalizationEnabled()) {
+            resetVideoElement();
+            const video = getVideoElement();
+            // Audio protection cannot wait for the controls' layout cooldown.
+            // The attachment path disposes outgoing UI before binding analysis.
+            if (video && !normalizer.isBoundTo(video) && attachSliderIfPossible()) {
+                lastAttach = Date.now();
+                return;
+            }
+        }
+        if (attachQueued) return;
 
         applyNativeVolumeVisibility();
         const overlay = document.getElementById(OVERLAY_ID);
@@ -1159,7 +1173,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (buttonMissing || buttonMisplaced) {
             injectVolumeOptionsButton();
         }
-        const videoMayHaveChanged = isOverlayEnabled() && !!overlay && mutationAddsVideo(mutations);
+        const videoMayHaveChanged = !!overlay && videoAdded;
         if (!overlayMissing && !videoMayHaveChanged) return;
 
         attachQueued = true;
@@ -1238,6 +1252,19 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (window.__tmYtVolumeNavBound) return;
         window.__tmYtVolumeNavBound = true;
 
+        const protectIncomingPlayback = event => {
+            const video = event.target;
+            if (!(video instanceof window.HTMLVideoElement) || !video.matches('#movie_player video.html5-main-video')) return;
+            if (!isYouTubeSupportedPage() || !isOverlayEnabled() || !isNormalizationEnabled() || normalizer.isBoundTo(video)) return;
+            // A new player can start before navigation completion or controls
+            // layout. Bind from the media event before its first playback.
+            resetVideoElement();
+            cachedYtPlayer = null;
+            attachSliderIfPossible();
+            if (normalizer.isBoundTo(video)) normalizer.setSourceChanging(false);
+        };
+        for (const type of ['loadstart', 'play']) window.addEventListener(type, protectIncomingPlayback, true);
+
         const cancelPendingReattach = () => {
             if (navDebounceTimer) {
                 clearTimeout(navDebounceTimer);
@@ -1263,7 +1290,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
                 navReattachTimer = 0;
                 removeOverlay();
                 removeVolumeOptionsButton();
-                attachSliderIfPossible();
+                if (attachSliderIfPossible()) normalizer.setSourceChanging(false);
             }, NAV_REATTACH_DELAY_MS);
         };
 
@@ -1276,6 +1303,9 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         };
 
         const handleNavigationStart = () => {
+            // SPA navigation can reuse the element and its capture track. Do
+            // not let outgoing samples release protection for the next video.
+            normalizer.setSourceChanging(true);
             // Tampermonkey can isolate the userscript's History object from the one
             // YouTube calls. The navigation-start event crosses that boundary and
             // fires before the incoming player can expose its native volume area.
@@ -1294,6 +1324,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
             applyNativeVolumeVisibility();
             const attached = attachSliderIfPossible();
             if (attached || !isYouTubeSupportedPage()) {
+                normalizer.setSourceChanging(false);
                 cancelPendingReattach();
                 return;
             }
