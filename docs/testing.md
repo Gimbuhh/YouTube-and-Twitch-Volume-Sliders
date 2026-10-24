@@ -50,6 +50,8 @@ Speech-return regressions inspect the gain already in place before the next word
 
 ## Loudness comparison
 
+The [development audio-processing prototype](normalization-prototype.md) has separate deterministic checks under `tests/unit/normalization-prototype.test.js`. It is not part of either userscript bundle; its offline lookahead results do not validate live audio routing or synchronization.
+
 Install FFmpeg with the `ebur128` filter, then run:
 
 ```sh
