@@ -95,11 +95,10 @@ export function createNativeGainGraph(context, { selected = .3 } = {}) {
     setGain(value, at = context.currentTime) {
       if (value === targetGain) return;
       targetGain = value;
-      programme.gain.cancelAndHoldAtTime(at);
+      // Retarget the current exponential smoothly; neither gain queues future ramps.
       programme.gain.setTargetAtTime(value, at, .003);
     },
     setSelected(value, at = context.currentTime) {
-      level.gain.cancelAndHoldAtTime(at);
       level.gain.setTargetAtTime(value, at, .005);
     },
     readGain() {

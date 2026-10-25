@@ -1,6 +1,10 @@
 # Testing
 
-`npm run check` runs deterministic builds, parsed metadata validation, JavaScript syntax parsing, Node unit tests, isolated jsdom integration tests, and generated-artifact consistency checks.
+`npm run check` runs deterministic builds, metadata/syntax validation, Node unit and jsdom integration tests, generated-artifact checks, and the Chrome and Firefox browser suites. `npm test` also builds and runs Node plus both browser suites. Missing prerequisites fail these commands; browser checks never silently skip.
+
+Install Google Chrome and FFmpeg, run `npm ci`, then `npm run browsers:install` once to download the isolated Firefox test build. Linux may require `node node_modules/playwright-core/cli.js install --with-deps firefox`. Test runs themselves use local fixtures without downloading browsers or contacting YouTube/Twitch. CI installs Firefox and FFmpeg and uses the runner's installed Chrome before the same full check; release verification requires both browser suites too.
+
+For a quicker development pass, `npm run check:core` retains the browser-independent integrity/Node checks. `npm run test:node` runs Node tests alone. These are focused checks, not substitutes for full verification. `npm run test:browsers`, `npm run test:chrome`, and `npm run test:firefox` provide focused browser runs without repeating Node tests.
 
 Unit tests cover shared settings, storage failure and recovery, volume functions, custom adjustment steps, smooth wheel accumulation, zoom-gesture pass-through, and major-tick press behavior. Integration tests execute the generated `dist/*.user.js` files in explicit YouTube and Twitch fixtures. They verify standalone startup, mute-safe restoration, slider and wheel step selection, fixed keyboard steps, adaptive ticks, direct slider intent, accessible controls, options-dialog focus, tab keyboard navigation and preview cleanup on tab switches, options and resets with blocked storage, mode off, external detachment, and reattachment. This prevents source-only scaffolding from passing while production artifacts are broken.
 
@@ -12,15 +16,21 @@ Options lifecycle regressions verify that popup replacement does not accumulate 
 
 ## Real-browser smoke checks
 
-Run the opt-in Chrome smoke suite when changing input defaults, focus modality, rendered geometry, overflow, or Twitch controls-visibility timing:
+The default verification includes Chrome smoke coverage for input defaults, focus modality, rendered geometry, overflow and Twitch controls-visibility timing. To run only its UI suites:
 
 ```sh
 npm run test:browser
 ```
 
-The suite uses deterministic local YouTube and Twitch player contracts while routing pages onto their real origins. It checks adjustment-step layout, direct major-tick presses, keyboard ownership, options-label alignment on both tabs from 50% through 200% browser zoom, mouse and smooth wheel input, Ctrl+wheel pass-through, and platform-specific player behavior. Mode regressions verify a borderless control, visible keyboard focus through its background, and readable option text against a light native-menu backdrop. They open the native picker with mouse and keyboard, then verify that its arrow returns down after Escape, selection, or an outside click. It uses an installed Chrome or Edge executable without downloading a browser and prints a clear skip when neither is available. Set `VOLUME_SLIDER_CHROME` to choose a specific executable. Set `VOLUME_SLIDER_SMOKE_DIST` to exercise a preserved pair of `youtube-volume-slider.user.js` and `twitch-volume-slider.user.js` artifacts, including preserved known-bad regression artifacts.
+The suite uses deterministic local YouTube and Twitch player contracts while routing pages onto their real origins. It checks adjustment-step layout, direct major-tick presses, keyboard ownership, options-label alignment on both tabs from 50% through 200% browser zoom, mouse and smooth wheel input, Ctrl+wheel pass-through, and platform-specific player behavior. Mode regressions verify a borderless control, visible keyboard focus through its background, and readable option text against a light native-menu backdrop. They open the native picker with mouse and keyboard, then verify that its arrow returns down after Escape, selection, or an outside click. One shared launcher selects installed Google Chrome across platforms. Set `VOLUME_SLIDER_CHROME` (or the existing `CHROME_PATH` override) to choose a specific Chrome-compatible executable. Set `VOLUME_SLIDER_SMOKE_DIST` to exercise a preserved pair of `youtube-volume-slider.user.js` and `twitch-volume-slider.user.js` artifacts, including preserved known-bad regression artifacts.
 
-The regular `npm run check` remains browser-independent and deterministic.
+Browser launchers use isolated temporary profiles and never access the user's normal browser session. All suites share the prepared distribution files and run sequentially; the runner does not repeat builds for each browser.
+
+### Firefox compatibility
+
+Firefox compatibility runs by default; use `npm run test:firefox` to isolate it. `PLAYWRIGHT_BROWSERS_PATH` can select a task-local browser cache, and `VOLUME_SLIDER_FIREFOX_RESULTS` can select the screenshots/results directory.
+
+The Firefox suite requires continuous processed audio, peak protection, wheel/label/track synchronization, pause/mute recovery, source restarts and disable/re-enable on both sites. It also runs the 39 native gain graph cases at 44.1/48/96 kHz, including overlapping gain changes against a continuous exponential reference. Assertions use fresh buffer channel views because Firefox detaches earlier views when a source acquires its buffer. The broader UI/zoom and synthetic page-stall suites remain Chrome-specific.
 
 Options-button motion checks verify all three slider handles move with the menu state, return after Escape and outside dismissal, reverse during rapid toggles, preserve button geometry, and switch instantly under reduced motion on both sites.
 
@@ -36,7 +46,7 @@ The browser suite also checks the static normalization icon in both themes and i
 
 ## Audio normalization
 
-Run `npm run test:normalization-browser` after changing audio processing or lifecycle. It builds the standard userscripts, runs ten routed real-browser cases, records four synthetic startup/refresh cases with main-thread stalls, and runs 36 native gain-graph checks at 44.1/48/96 kHz. Chrome is required; set VOLUME_SLIDER_CHROME to select the executable. The startup waveform checks also require FFmpeg. Set VOLUME_SLIDER_NORMALIZATION_RESULTS to an output directory outside the repository; results otherwise use the OS temporary directory. No live browser audio is recorded.
+The default check includes the full normalization coverage. `npm run test:normalization-browser` isolates the Chrome audio suites: ten routed cases, four synthetic startup/refresh recordings with main-thread stalls, and 39 native gain-graph checks at 44.1/48/96 kHz. The startup waveform checks require FFmpeg on PATH or `VOLUME_SLIDER_FFMPEG` set to its executable. Set `VOLUME_SLIDER_NORMALIZATION_RESULTS` to an output directory outside the repository; results otherwise use the OS temporary directory. No live browser audio is recorded.
 
 The browser cases check native frames, worklet analysis, CSP-blocked worklets, unavailable input, blocked activation, stereo linking, mono input, sample ceilings, controls, selected-volume persistence, source restarts/replacement and enable/disable. A worklet message regression rejects startup-only notifications after meaningful programme measurement. The frozen packet-renderer waveform regression and earlier live results remain in the local analysis evidence, not in shipped code.
 

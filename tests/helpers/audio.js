@@ -20,7 +20,8 @@ export function mockAudioCapture(window, video) {
       this.audioWorklet = { addModule: async () => { if (state.loadError) throw new Error('Module blocked'); } };
     }
     parameter(value = 0) {
-      return { value, cancelAndHoldAtTime() {}, cancelScheduledValues() {},
+      // Keep the shared browser API subset; optional methods must not mask compatibility failures.
+      return { value, cancelScheduledValues() {},
         setValueAtTime(next) { this.value = next; }, setTargetAtTime(next) { this.value = next; }, linearRampToValueAtTime(next) { this.value = next; } };
     }
     node() {

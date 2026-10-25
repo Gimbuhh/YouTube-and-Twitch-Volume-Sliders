@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { chromium } from 'playwright-core';
+import { launchChrome } from '../helpers/browser.js';
 
 const directory = process.argv[2] || fileURLToPath(new URL('../../dist/', import.meta.url));
 const resultsDirectory = process.env.VOLUME_SLIDER_NORMALIZATION_RESULTS || join(tmpdir(), 'volume-slider-native-checks');
@@ -22,8 +22,7 @@ const monoWav = Buffer.alloc(44 + count * 2); wav.copy(monoWav, 0, 0, 44);
 monoWav.writeUInt32LE(monoWav.length - 8, 4); monoWav.writeUInt16LE(1, 22); monoWav.writeUInt32LE(rate * 2, 28);
 monoWav.writeUInt16LE(2, 32); monoWav.writeUInt32LE(count * 2, 40);
 for (let i = 0; i < count; i++) monoWav.writeInt16LE(wav.readInt16LE(44 + i * 4), 44 + i * 2);
-const browser = await chromium.launch({ headless: true, executablePath: process.env.VOLUME_SLIDER_CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--mute-audio'] });
+const browser = await launchChrome(['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--mute-audio']);
 const results = [];
 try {
   for (const platform of ['youtube', 'twitch']) for (const mode of ['worklet', 'native', 'csp', 'unavailable', 'activation']) {

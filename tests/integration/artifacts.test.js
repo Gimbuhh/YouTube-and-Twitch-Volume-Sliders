@@ -44,8 +44,9 @@ for (const platform of ['youtube','twitch']) test(`${platform} artifact metadata
   assert.ok(Buffer.byteLength(source) > (platform === 'youtube' ? 80000 : 95000), 'artifact retains full behavior');
 });
 
-test('twitch document-start bootstrap restores saved mute before controls mount', async () => {
+test('twitch document-start bootstrap restores saved mute before controls mount', async t => {
   const runtime=createRuntime('https://www.twitch.tv/test',{runScripts:'outside-only'});
+  t.after(()=>runtime.close());
   saveMutedTwitchState(runtime);
   const source=await readBuiltArtifact('twitch');
   runtime.window.eval(source);
@@ -62,11 +63,13 @@ test('twitch document-start bootstrap restores saved mute before controls mount'
   controls.innerHTML = twitchControlsHtml.replace(/^<div[^>]*>|<\/div>$/g,'');
   player.appendChild(controls);
 
-  await waitForTimers(runtime);
+  const deadline=performance.now()+2000;
+  while (!runtime.document.getElementById('tm-volume-slider-overlay') && performance.now()<deadline) {
+    await waitForTimers(runtime,20);
+  }
   assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
   assert.equal(state.muted,true);
   assert.equal(state.volume,.35);
-  runtime.close();
 });
 
 test('twitch saved mute also mutes the native video element immediately', async () => {

@@ -1,33 +1,11 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { launchChrome } from '../helpers/browser.js';
 
 const projectRoot=resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const artifactRoot=resolve(process.env.VOLUME_SLIDER_SMOKE_DIST || join(projectRoot,'dist'));
-
-async function firstExisting(paths){
-  for(const path of paths.filter(Boolean)){
-    try{await access(path);return path;}catch{/* keep looking */}
-  }
-  return null;
-}
-
-const executablePath=await firstExisting([
-  process.env.VOLUME_SLIDER_CHROME,
-  process.env.CHROME_PATH,
-  join(process.env.ProgramFiles || 'C:\\Program Files','Google','Chrome','Application','chrome.exe'),
-  join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)','Google','Chrome','Application','chrome.exe'),
-  process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA,'Google','Chrome','Application','chrome.exe'),
-  join(process.env.ProgramFiles || 'C:\\Program Files','Microsoft','Edge','Application','msedge.exe'),
-  join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)','Microsoft','Edge','Application','msedge.exe')
-]);
-
-if(!executablePath){
-  console.log('browser smoke skipped: set VOLUME_SLIDER_CHROME to a Chrome or Edge executable');
-  process.exit(0);
-}
 
 const youtubeHtml=`<!doctype html><html><head><style>
 html,body{margin:0;background:#111;color:#fff;font-family:Arial;height:100%}.spacer{height:1800px}
@@ -705,7 +683,7 @@ async function optionsScrollSmoke(browser, platform) {
   }
 }
 
-const browser=await chromium.launch({headless:true,executablePath,args:['--disable-background-networking','--disable-component-update','--no-first-run']});
+const browser=await launchChrome(['--disable-background-networking','--disable-component-update','--no-first-run']);
 try{
   await optionsButtonMotionSmoke(browser, 'youtube');
   await optionsButtonMotionSmoke(browser, 'twitch');
@@ -722,7 +700,7 @@ try{
   await twitchPreviewSmoke(browser);
   await wheelSmoke(browser, 'youtube');
   await wheelSmoke(browser, 'twitch');
-  console.log(`browser smoke passed with ${executablePath}`);
+  console.log(`browser smoke passed (${browser.version()})`);
 }finally{
   await browser.close();
 }

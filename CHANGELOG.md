@@ -22,6 +22,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Fixed
 
+- **Both:** Firefox normalization keeps playing reliably, and wheel changes keep the volume label and colored track in sync.
 - **Both:** Slider drags finish once, without reacting to unrelated page releases.
 - **Both:** Volume Slider Options keeps its normal height on scrolled pages and stays attached above the player controls.
 - **YouTube:** Volume and mute controls keep working when the player API is temporarily unavailable.

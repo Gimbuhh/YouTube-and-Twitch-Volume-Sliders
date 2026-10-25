@@ -1,27 +1,15 @@
 import assert from 'node:assert/strict';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { launchChrome } from '../helpers/browser.js';
 import { mockAudioCapture } from '../helpers/audio.js';
 
 const updateDocs = process.argv.includes('--update-docs');
 const screenshotDirectory = updateDocs ? fileURLToPath(new URL('../../docs/images/', import.meta.url)) : process.env.VOLUME_SLIDER_SCREENSHOTS;
 const docScreenshots = { expanded: 'volume-slider-expanded', classic: 'volume-slider-classic', settings: 'settings-menu', audio: 'normalization-settings', appearance: 'appearance-settings' };
 
-let executablePath;
-for (const candidate of [process.env.VOLUME_SLIDER_CHROME,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].filter(Boolean)) {
-  try { await access(candidate); executablePath = candidate; break; } catch { /* next browser */ }
-}
-if (!executablePath) {
-  if (updateDocs) throw new Error('Documentation screenshots require Chrome or Edge; set VOLUME_SLIDER_CHROME');
-  console.log('normalization icon checks skipped: set VOLUME_SLIDER_CHROME');
-  process.exit(0);
-}
-
-const browser = await chromium.launch({ headless: true, executablePath });
+const browser = await launchChrome();
 try {
   for (const platform of ['youtube', 'twitch']) {
     const youtube = platform === 'youtube', prefix = youtube ? 'yt' : 'twitch';

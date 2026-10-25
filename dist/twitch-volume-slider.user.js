@@ -384,11 +384,9 @@
       setGain(value, at = context.currentTime) {
         if (value === targetGain) return;
         targetGain = value;
-        programme.gain.cancelAndHoldAtTime(at);
         programme.gain.setTargetAtTime(value, at, 3e-3);
       },
       setSelected(value, at = context.currentTime) {
-        level.gain.cancelAndHoldAtTime(at);
         level.gain.setTargetAtTime(value, at, 5e-3);
       },
       readGain() {

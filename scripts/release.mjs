@@ -126,6 +126,7 @@ export async function runRelease(version){
     runNodeTests();
     runNode('scripts/verify-generated.mjs');
     runNode('scripts/security-scan.mjs');
+    runNode('scripts/browser-checks.mjs');
 
     const versions=[];
     for(const platform of platforms)versions.push(parseMetadata(await readFile(distPath(platform),'utf8')).fields.get('version')[0]);

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { chromium } from 'playwright-core';
+import { launchChrome } from '../helpers/browser.js';
 
 const directory = process.argv[2] || fileURLToPath(new URL('../../dist/', import.meta.url)), baseline = process.argv.includes('--baseline');
 const resultsDirectory = process.env.VOLUME_SLIDER_NORMALIZATION_RESULTS || join(tmpdir(), 'volume-slider-native-checks');
@@ -17,8 +17,7 @@ wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8
 wav.writeUInt16LE(1, 20); wav.writeUInt16LE(2, 22); wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 4, 28);
 wav.writeUInt16LE(4, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(count * 4, 40);
 for (let i = 0; i < count; i++) for (let c = 0; c < 2; c++) wav.writeInt16LE(Math.round(.08 * 32767 * Math.sin(2 * Math.PI * 997 * i / rate)), 44 + i * 4 + c * 2);
-const browser = await chromium.launch({ headless: true, executablePath: process.env.VOLUME_SLIDER_CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  args: ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--mute-audio'] });
+const browser = await launchChrome(['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--mute-audio']);
 const results = [];
 try {
   for (const load of (process.argv.includes('--quiet') ? [false] : [false, true])) {
@@ -68,7 +67,7 @@ try {
       const name = `startup-${load ? 'busy' : 'quiet'}-${phase}`;
       await writeFile(join(resultsDirectory, name + '.webm'), recording);
       // Select one channel; a generic stereo downmix can add gain or cancel PCM.
-      const decoded = spawnSync('ffmpeg', ['-v','error','-i','pipe:0','-af','pan=mono|c0=c0','-ar',String(rate),'-f','f32le','pipe:1'],
+      const decoded = spawnSync(process.env.VOLUME_SLIDER_FFMPEG || 'ffmpeg', ['-v','error','-i','pipe:0','-af','pan=mono|c0=c0','-ar',String(rate),'-f','f32le','pipe:1'],
         { input: recording, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
       if (decoded.status !== 0) throw Error(decoded.stderr.toString());
       const values = new Float32Array(decoded.stdout.buffer.slice(decoded.stdout.byteOffset, decoded.stdout.byteOffset + decoded.stdout.byteLength));

@@ -143,12 +143,14 @@ npm is the repository's only supported package manager.
 
 ```sh
 npm ci
-npm run build
+npm run browsers:install
 npm run check
 npm run release -- 2.5
 ```
 
 Edit canonical code under `src/`; never edit `dist/` or archives manually. `dist/` is generated, `archive/legacy/` preserves historical releases, and `archive/releases/` contains immutable packaged releases. See [architecture](docs/architecture.md), [testing](docs/testing.md), [releasing](docs/releasing.md), and [contributing](CONTRIBUTING.md).
+
+Full verification requires Google Chrome, the isolated Firefox test build, and FFmpeg. `npm test` and `npm run check` include both browsers by default; use `npm run check:core` for a quick browser-independent development check.
 
 The userscripts and this repository are made and maintained with Codex.
 
