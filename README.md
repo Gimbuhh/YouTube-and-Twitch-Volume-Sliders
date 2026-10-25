@@ -118,9 +118,9 @@ Open **Volume Slider Options → General → Audio → Auto-normalize volume** t
 
 Stream restarts keep that selected level. Player Up/Down keys change it in five-point steps, rather than stepping from the automatically adjusted output. Native volume controls can still change your listening level.
 
-The mode measures a local copy of the playing audio using LUFS-based loudness analysis and adjusts the native player volume. Frequency weighting better matches how people perceive loudness across speech, music, and effects. It reacts quickly to loud passages, raises quieter sources gradually, ignores silence and very low background levels, and relearns after a source change. Automatic boost stops at 6 dB to reduce sudden jumps, so especially quiet recordings may remain below target. The player's normal 100% maximum also applies. Channels are measured separately so stereo cancellation does not hide audible sound.
+The mode uses LUFS-based analysis to match listening levels and processes the player's audio directly to reduce loud spikes before playback. Quieter sources rise gradually, silence and very low background levels are ignored, and volume recovers smoothly after brief loud sounds. Automatic boost is limited, so especially quiet recordings may remain below target. Stereo channels stay linked without cancelling each other's measurements.
 
-The source reference is −18 LUFS before your selected volume: 30% gives a nominal steady target near −28.5 LUFS, and 40% near −26 LUFS. These are digital audio levels, not a fixed speaker loudness. Dynamic content, available volume headroom, and live adaptation affect the result. This is not a peak limiter or advance analysis of a whole recording; the first moments of a new source can still differ. LUFS is the only normalization method. If analysis cannot start or fails, playback continues at your selected volume and settings show normalization as unavailable. See [normalization](docs/normalization.md) for behavior and limitations, and [testing](docs/testing.md#loudness-comparison) to reproduce the comparison.
+Audio stays quiet until protection is ready on page loads and video changes. Normalization adds a small audio delay and cannot guarantee identical loudness for every recording. Browser activation and source restrictions still apply; if processing is unavailable, ordinary playback continues at your selected volume with a status warning. See [normalization](docs/normalization.md) for details and [testing](docs/testing.md#audio-normalization) for verification.
 
 The status below the toggle shows whether normalization is active, waiting, or unavailable. While active, it also shows whether audio is being raised or reduced. **Output** is the volume currently applied to the player; **Selected** is your chosen slider percentage. Browser audio capture support and stream restrictions vary. If capture fails or becomes inaccessible, ordinary playback continues at your chosen volume. You may need to click the player to activate analysis after a reload. Turning normalization off, or setting the slider mode to **Off**, releases analysis and restores your chosen volume while preserving mute. The opt-in remains saved when slider mode is Off.
 
@@ -133,7 +133,7 @@ A small, static waveform icon tucked into the volume ring's upper-right edge sho
   </tr>
 </table>
 
-**Active** means the audio capture is connected and being analyzed. Quiet passages and silence hold the current correction without making the status search for a source again.
+**Active** means normalization is processing the audio. Quiet passages and silence keep the source connected.
 
 Analysis stays on your device and uses only the playing media element. It does not request microphone access, record audio, send audio anywhere, or route a second copy to your speakers. For implementation and test details, see [normalization](docs/normalization.md).
 

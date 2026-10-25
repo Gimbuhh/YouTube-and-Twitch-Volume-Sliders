@@ -17,6 +17,22 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 height: 24px;
                 width: 24px;
             }
+            #{{optionsButtonId}} .tm-options-handle {
+                transform: translateX(0);
+                transition: transform 180ms cubic-bezier(0.2, 0, 0.2, 1);
+            }
+            #{{optionsButtonId}}[aria-expanded="true"] .tm-options-handle-top {
+                transform: translateX(-8px);
+            }
+            #{{optionsButtonId}}[aria-expanded="true"] .tm-options-handle-middle {
+                transform: translateX(8px);
+            }
+            #{{optionsButtonId}}[aria-expanded="true"] .tm-options-handle-bottom {
+                transform: translateX(-6px);
+            }
+            @media (prefers-reduced-motion: reduce) {
+                #{{optionsButtonId}} .tm-options-handle { transition: none; }
+            }
             #{{optionsPopupId}} {
                 background: rgba(18, 18, 18, 0.97);
                 border: 1px solid rgba(255, 255, 255, 0.12);

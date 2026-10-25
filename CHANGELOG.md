@@ -2,15 +2,15 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
-## 2.9 - 2026-10-21
+## 2.9 - 2026-10-25
 
 ### Added
 
-- **Both:** **Auto-normalize volume** keeps sources closer in loudness, limits boost during quiet audio to reduce sudden jumps, and preserves the chosen slider value and mute state.
+- **Both:** **Auto-normalize volume** keeps sources closer in loudness, protects against loud spikes before playback, and preserves the chosen slider value and mute state.
   - The option starts disabled, saves separately for each site, and shows its current status under General → Audio in Volume Slider Options.
   - Audio settings show adjusted output separately from the selected level. Stream restarts preserve the selection and mute choice, including after blocked Twitch ads. Player volume arrows adjust the selection in five-point steps. Native volume controls still work.
   - Normalization keeps speech steady between words, remembers the usual listening level through quiet passages and silent gaps, and recovers smoothly after brief loud sounds with fewer unnecessary volume changes.
-  - Audio starts softly under protection on page loads and video changes. Analysis starts before player controls load; native capture needs no extra activation click.
+  - Audio stays quiet until protection is ready on page loads, video changes, and stream restarts.
   - Temporary audio access failures retry automatically.
   - A waveform icon shows normalization is on, including during pause and mute, and hides if analysis is blocked or unavailable.
   - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.
@@ -18,7 +18,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 ### Changed
 
 - **Both:** Volume arrows show a compact on-video percentage and matching speaker icon with normalization on or off.
-- **Both:** Volume Slider Options groups listening and placement settings in **General**, with visual controls in **Appearance**, clearer toggles, and compact audio feedback. The borderless Mode dropdown stays above both tabs, keeps choices readable across browser themes, and points its arrow up while open and down when closed.
+- **Both:** Volume Slider Options groups listening and placement settings in **General**, with visual controls in **Appearance**, clearer toggles, and compact audio feedback. The options icon animates with the menu state. The borderless Mode dropdown stays above both tabs, keeps choices readable across browser themes, and points its arrow up while open and down when closed.
 
 ### Fixed
 

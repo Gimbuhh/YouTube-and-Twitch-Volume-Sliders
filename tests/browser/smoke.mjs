@@ -117,6 +117,44 @@ async function assertModeDropdown(page, platform) {
   }
 }
 
+async function optionsButtonMotionSmoke(browser, platform) {
+  const youtube = platform === 'youtube';
+  const { context, page, pageErrors } = await preparedPage(browser, {
+    platform, url: youtube ? 'https://www.youtube.com/watch?v=options-motion' : 'https://www.twitch.tv/options-motion',
+    html: youtube ? youtubeHtml : twitchHtml,
+    storage: { [`tm-${youtube ? 'yt' : 'twitch'}-volume-slider-mode`]: 'replace-native' }
+  });
+  try {
+    const button = page.locator('#tm-volume-options-button');
+    const handles = button.locator('.tm-options-handle');
+    const closed = await handles.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().x));
+    const bounds = await button.boundingBox();
+    const settle = target => page.waitForFunction(({ closed, target }) =>
+      [...document.querySelectorAll('#tm-volume-options-button .tm-options-handle')].every((node, i) =>
+        Math.abs(node.getBoundingClientRect().x - closed[i] - target[i]) < .05), { closed, target });
+    assert.equal(closed.length, 3);
+    assert.deepEqual(await handles.evaluateAll(nodes => nodes.map(node => getComputedStyle(node).transitionDuration)), ['0.18s', '0.18s', '0.18s']);
+    if (process.env.VOLUME_SLIDER_SCREENSHOTS) {
+      await mkdir(process.env.VOLUME_SLIDER_SCREENSHOTS, { recursive: true });
+      await button.screenshot({ path: join(process.env.VOLUME_SLIDER_SCREENSHOTS, `${platform}-options-closed.png`) });
+    }
+    await button.click(); await settle([-8, 8, -6]);
+    assert.equal(await button.getAttribute('aria-expanded'), 'true');
+    assert.deepEqual(await button.boundingBox(), bounds, 'handle movement cannot shift the button');
+    if (process.env.VOLUME_SLIDER_SCREENSHOTS) await button.screenshot({ path: join(process.env.VOLUME_SLIDER_SCREENSHOTS, `${platform}-options-open.png`) });
+    await page.keyboard.press('Escape'); await settle([0, 0, 0]);
+    await button.click(); await page.waitForTimeout(35); await button.click(); await settle([0, 0, 0]);
+    assert.equal(await button.getAttribute('aria-expanded'), 'false', 'rapid toggles reverse the same transition');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await button.press('Space'); await settle([-8, 8, -6]);
+    assert.deepEqual(await handles.evaluateAll(nodes => nodes.map(node => getComputedStyle(node).transitionDuration)), ['0s', '0s', '0s']);
+    await page.mouse.click(1100, 600); await settle([0, 0, 0]);
+    assert.equal(await button.getAttribute('aria-expanded'), 'false', 'outside dismissal restores the handles');
+    assert.deepEqual(pageErrors, []);
+    console.log(`browser smoke: ${platform} Options handles animate, reverse on close/rapid toggles and respect reduced motion`);
+  } finally { await context.close(); }
+}
+
 async function modeDropdownSmoke(browser, platform) {
   const youtube = platform === 'youtube';
   const { context, page, pageErrors } = await preparedPage(browser, {
@@ -669,6 +707,8 @@ async function optionsScrollSmoke(browser, platform) {
 
 const browser=await chromium.launch({headless:true,executablePath,args:['--disable-background-networking','--disable-component-update','--no-first-run']});
 try{
+  await optionsButtonMotionSmoke(browser, 'youtube');
+  await optionsButtonMotionSmoke(browser, 'twitch');
   await optionsScrollSmoke(browser, 'youtube');
   await optionsScrollSmoke(browser, 'twitch');
   await youtubeOptionsPositionSmoke(browser);

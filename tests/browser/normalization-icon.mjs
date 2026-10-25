@@ -65,7 +65,7 @@ try {
       const mute = page.locator('.tm-volume-icon-cell');
       const slider = page.locator('#tm-volume-slider-range');
       await indicator.waitFor({ state: 'visible' });
-      await page.waitForFunction(() => document.querySelector('video').volume < 0.2);
+      await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').output < 20);
       {
         const player = page.locator('#movie_player, .video-player');
         const native = youtube ? await page.locator('[data-layer="4"]').evaluate(element => element.outerHTML) : null;
@@ -74,7 +74,7 @@ try {
           assert.equal(await slider.inputValue(), value);
           assert.equal(await overlay.evaluate(element => element.classList.contains('tm-expanded')), false, 'player arrows keep the pill collapsed');
           assert.equal(await page.locator('[data-tm-volume-feedback]').textContent(), `${value}%`);
-          assert.equal(await page.locator('video').evaluate(video => video.volume < .25), true, 'feedback never applies unnormalized volume');
+          assert.equal(await page.locator('video').evaluate(video => video.volume), 1, 'feedback keeps audio routed through the normalized graph');
           if (youtube) assert.equal(await page.locator('[data-layer="4"]').evaluate(element => element.outerHTML), native);
         }
         const repeatedKeysStarted = Date.now();

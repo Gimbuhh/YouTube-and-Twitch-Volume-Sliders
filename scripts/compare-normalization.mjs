@@ -4,9 +4,10 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createLufsMeter, createLufsGainController } from '../src/shared/lufs-meter.js';
+import { createLufsMeter } from '../src/shared/lufs-meter.js';
+import { createLufsGainController } from './lib/legacy-normalization.mjs';
 
-// Optional developer comparison: FFmpeg is the independent meter, never a
+// Historical reactive-controller comparison, not production playback: FFmpeg is the independent meter, never a
 // runtime dependency. Downloaded audio and rendered results stay outside Git.
 const directory = process.env.VOLUME_SLIDER_COMPARISON || join(tmpdir(), 'volume-slider-lufs-comparison');
 const corpus = process.env.VOLUME_SLIDER_AUDIO_CORPUS;
@@ -151,6 +152,7 @@ for (let index = 0; index < soakRate * soakSeconds / 128; index++) soakMeter.pro
   attackPower => { soakGain = soakController.update({ attackPower }, 100 / 30); assert.ok(Number.isFinite(soakGain)); });
 const soak = { sampleRate: soakRate, audioSeconds: soakSeconds, frames: soakFrames, processingMs: performance.now() - soakStart, finalGain: soakGain };
 assert.equal(soakFrames, soakSeconds * 20);
-const report = { reference: 'FFmpeg ebur128, output after the first five seconds; 1% native-volume quantization; headroom-limited cases excluded from summaries', corpus: corpus ? 'six attributed speech/music recordings, a speech/music/effects mix, and three tones' : 'three synthetic tones only', assets, validation, summaries, soak, rows };
+const implementation = 'historical reactive controller; not the production native graph';
+const report = { implementation, reference: 'FFmpeg ebur128, output after the first five seconds; 1% native-volume quantization; headroom-limited cases excluded from summaries', corpus: corpus ? 'six attributed speech/music recordings, a speech/music/effects mix, and three tones' : 'three synthetic tones only', assets, validation, summaries, soak, rows };
 await writeFile(join(directory, 'comparison.json'), JSON.stringify(report, null, 2));
-console.log(JSON.stringify({ validation, summaries, soak, rows: rows.length, report: join(directory, 'comparison.json') }, null, 2));
+console.log(JSON.stringify({ implementation, validation, summaries, soak, rows: rows.length, report: join(directory, 'comparison.json') }, null, 2));

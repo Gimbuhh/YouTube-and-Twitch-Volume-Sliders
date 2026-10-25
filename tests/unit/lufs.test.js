@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLufsMeter, createLufsGainController } from '../../src/shared/lufs-meter.js';
+import { createLufsMeter } from '../../src/shared/lufs-meter.js';
+import { createLufsGainController } from '../../scripts/lib/legacy-normalization.mjs';
 
 function tone(rate, seconds, amplitude, frequency = 1000) {
   return Float32Array.from({ length: Math.round(rate * seconds) }, (_, i) => amplitude * Math.sin(2 * Math.PI * frequency * i / rate));

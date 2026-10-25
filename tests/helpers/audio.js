@@ -1,10 +1,10 @@
-// A controllable analysis-only capture contract. Real Web Audio coverage lives
-// in tests/browser/normalization.mjs; this fixture never claims browser support.
+// Controllable routing and analysis contracts. Native DSP behavior is verified
+// with real Web Audio in the browser suites, never inferred from these stubs.
 export function mockAudioCapture(window, video) {
   const state = { amplitude: 0.5, paused: false, readyState: 4, captures: 0, contexts: [], streams: [], nodes: [],
     captureError: null, loadError: false, processorError: false, stalled: false };
   class Track extends window.EventTarget {
-    constructor(kind) { super(); this.kind = kind; this.readyState = 'live'; this.muted = false; }
+    constructor(kind) { super(); this.kind = kind; this.readyState = 'live'; this.muted = kind === 'audio' && !!state.captureMuted; }
     stop() { this.readyState = 'ended'; }
   }
   class Stream extends window.EventTarget {
@@ -15,18 +15,35 @@ export function mockAudioCapture(window, video) {
   }
   class AudioContext {
     constructor() {
-      this.state = 'running'; this.closed = false; state.contexts.push(this);
+      this.state = 'running'; this.closed = false; this.sampleRate = 48000; this.currentTime = 0;
+      this.destination = this.node(); this.sources = new Map(); state.contexts.push(this);
       this.audioWorklet = { addModule: async () => { if (state.loadError) throw new Error('Module blocked'); } };
     }
-    createMediaStreamSource(stream) {
+    parameter(value = 0) {
+      return { value, cancelAndHoldAtTime() {}, cancelScheduledValues() {},
+        setValueAtTime(next) { this.value = next; }, setTargetAtTime(next) { this.value = next; }, linearRampToValueAtTime(next) { this.value = next; } };
+    }
+    node() {
       const connected = new Set();
-      return { stream, connect(node) { connected.add(node); node.connected = true; },
+      return { connections: connected, connect(node) { connected.add(node); node.connected = true; return node; },
         disconnect(node) {
           for (const item of connected) if (!node || node === item) { item.connected = false; connected.delete(item); }
         } };
     }
-    createAnalyser() { throw new Error('RMS analyser must not be allocated'); }
-    createChannelSplitter() { throw new Error('RMS splitter must not be allocated'); }
+    createMediaStreamSource(stream) { return Object.assign(this.node(), { stream }); }
+    createMediaElementSource(element) {
+      if (this.sources.has(element)) throw new Error('Media element attached twice');
+      const source = this.node(); this.sources.set(element, source); return source;
+    }
+    createGain() { return Object.assign(this.node(), { gain: this.parameter(1) }); }
+    createDelay() { return Object.assign(this.node(), { delayTime: this.parameter() }); }
+    createIIRFilter() { return this.node(); }
+    createWaveShaper() { return this.node(); }
+    createConvolver() { return this.node(); }
+    createConstantSource() { return Object.assign(this.node(), { offset: this.parameter(), start() {}, stop() {} }); }
+    createBuffer(channels, count) { const planes = Array.from({ length: channels }, () => new Float32Array(count)); return { getChannelData: index => planes[index] }; }
+    createAnalyser() { return Object.assign(this.node(), { getFloatTimeDomainData: array => array.fill(1) }); }
+    createChannelSplitter() { return this.node(); }
     resume() { this.state = 'running'; return Promise.resolve(); }
     close() { this.closed = true; this.state = 'closed'; return Promise.resolve(); }
   }
@@ -61,6 +78,7 @@ export function mockAudioCapture(window, video) {
     return stream;
   };
   Object.defineProperties(video, {
+    currentSrc: { configurable: true, get: () => window.location.origin + '/mock-audio' },
     paused: { configurable: true, get: () => state.paused },
     readyState: { configurable: true, get: () => state.readyState }
   });
