@@ -595,8 +595,8 @@
       if (!context.audioWorklet || !window2.AudioWorkletNode) throw new Error("No supported audio analysis input");
       const code = `const createLufsMeter=${createLufsMeter.toString()};
 registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
- constructor(){super();this.meter=createLufsMeter(sampleRate);this.send=frame=>{this.port.postMessage(frame);if(frame.rawPower>=1e-9&&frame.power>=1e-9)this.short=undefined};this.short=power=>this.port.postMessage({attackPower:power});this.port.onmessage=()=>{this.stopped=true}}
- process(inputs){if(this.stopped)return false;try{this.meter.process(inputs[0]||[],this.send,this.short);return true}catch(error){this.port.postMessage({failed:true,message:error.message});return false}}
+ constructor(){super();this.meter=createLufsMeter(sampleRate);this.send=frame=>{this.port.postMessage(frame);if(frame.rawPower>=1e-9&&frame.power>=1e-9)this.measured=true};this.short=power=>{if(!this.measured)this.port.postMessage({attackPower:power})};this.port.onmessage=()=>{this.stopped=true}}
+ process(inputs){if(this.stopped)return false;try{this.meter.process(inputs[0]||[],this.send,this.measured?undefined:this.short);return true}catch(error){this.port.postMessage({failed:true,message:error.message});return false}}
 });`;
       const url = window2.URL.createObjectURL(new window2.Blob([code], { type: "application/javascript" }));
       try {
