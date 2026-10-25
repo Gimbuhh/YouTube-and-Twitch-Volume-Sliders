@@ -14,7 +14,11 @@ export function acquireMediaOutput(window, video) {
     const context = new Context({ latencyHint: 'interactive' });
     document = { context, sources: new WeakMap() };
     documents.set(window, document);
-    const resume = () => { if (context.state === 'suspended') context.resume().catch(() => {}); };
+    const resume = () => {
+      if (context.state === 'suspended') {
+        context.resume().catch(() => {});
+      }
+    };
     window.document.addEventListener('pointerdown', resume, true);
     window.document.addEventListener('keydown', resume, true);
     document.resume = resume;

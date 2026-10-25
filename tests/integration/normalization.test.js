@@ -152,6 +152,9 @@ for (const config of platforms) {
       f.video.dispatchEvent(new f.window.Event('loadedmetadata'));
       assert.equal(f.state.muted, muted, 'restore the saved choice, not Twitch initialization mute');
       assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), String(muted));
+      f.api.setMuted(!muted);
+      f.video.dispatchEvent(new f.window.Event('playing'));
+      assert.equal(f.state.muted, muted, 'late initialization mute cannot outlive the source restart');
       await f.advance(.2);
       assert.equal(f.state.muted, muted);
       if (!muted) {
@@ -161,6 +164,113 @@ for (const config of platforms) {
       assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
       assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
     }
+  });
+
+  if (config.file === 'twitch') test('twitch: restart mute restoration works without metadata and respects a new user choice', async t => {
+    const f = await prepare(config, t, { saved: true, controlledTime: true });
+    await f.advance(7);
+    f.window.localStorage.setItem('tm-twitch-muted', 'false');
+    // Controls can attach after loadstart but before metadata is available.
+    f.video.dispatchEvent(new f.window.Event('loadedmetadata'));
+    f.api.setMuted(true);
+    f.video.dispatchEvent(new f.window.Event('playing'));
+    assert.equal(f.state.muted, false, 'metadata also arms restoration when the reset event preceded attachment');
+    f.video.dispatchEvent(new f.window.Event('emptied'));
+    f.api.setMuted(true);
+    f.video.dispatchEvent(new f.window.Event('playing'));
+    await f.advance(.2);
+    assert.equal(f.state.muted, false, 'playing completes a restart even without new metadata');
+    assert.equal(f.video.muted, false);
+
+    // An ordinary pause/resume must not restore an old startup preference.
+    f.api.setMuted(true);
+    f.video.dispatchEvent(new f.window.Event('playing'));
+    assert.equal(f.state.muted, true);
+
+    f.video.dispatchEvent(new f.window.Event('loadstart'));
+    f.window.localStorage.setItem('tm-twitch-muted', 'true');
+    f.api.setMuted(false);
+    f.video.dispatchEvent(new f.window.Event('playing'));
+    assert.equal(f.state.muted, true, 'use the latest user choice, not a restart-time snapshot');
+    assert.equal(f.video.muted, true);
+    assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
+  });
+
+  if (config.file === 'twitch') test('twitch: restart locks protect saved settings without freezing the mute indicator', async t => {
+    const f = await prepare(config, t, { saved: true, controlledTime: true });
+    await f.advance(7);
+    const label = f.document.getElementById('tm-volume-slider-value');
+    const indicator = f.document.querySelector('.tm-volume-icon-cell');
+    f.window.localStorage.setItem('tm-twitch-muted', 'true');
+    f.api.setMuted(true);
+    f.video.muted = true;
+    assert.equal(label.textContent, 'Muted');
+    const mutedArtwork = indicator.innerHTML;
+
+    // The player restarts muted, then restores the saved unmuted choice while
+    // persistence is still locked. Native output stays at 100% for the graph.
+    f.window.localStorage.setItem('tm-twitch-muted', 'false');
+    f.video.dispatchEvent(new f.window.Event('emptied'));
+    f.video.dispatchEvent(new f.window.Event('loadedmetadata'));
+    f.video.dispatchEvent(new f.window.Event('playing'));
+    await f.advance(.2);
+    assert.equal(f.state.muted, false);
+    assert.equal(f.video.muted, false);
+    assert.equal(label.textContent, '50%', 'the restored mute state must reach the display during the startup lock');
+    assert.notEqual(indicator.innerHTML, mutedArtwork);
+    assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
+    assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), 'false');
+    assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
+
+    // No native-volume change is guaranteed once playback stabilizes.
+    await f.advance(3);
+    assert.equal(label.textContent, '50%');
+  });
+
+  if (config.file === 'twitch') test('twitch: temporary startup mute does not flash or replace the selected volume', async t => {
+    for (const muted of [false, true]) {
+      const f = await prepare(config, t, { saved: true, controlledTime: true });
+      await f.advance(7);
+      f.window.localStorage.setItem('tm-twitch-muted', String(muted));
+      f.api.setMuted(muted);
+      const label = f.document.getElementById('tm-volume-slider-value');
+      const expected = muted ? 'Muted' : '50%';
+      assert.equal(label.textContent, expected);
+      f.video.dispatchEvent(new f.window.Event('emptied'));
+      f.api.setMuted(!muted);
+      assert.equal(label.textContent, expected, 'initialization mute must not flash in the control');
+      assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
+      assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), String(muted));
+      f.video.dispatchEvent(new f.window.Event('loadedmetadata'));
+      f.video.dispatchEvent(new f.window.Event('playing'));
+      await f.advance(.2);
+      assert.equal(label.textContent, expected);
+    }
+  });
+
+  if (config.file === 'twitch') test('twitch: explicit mute input updates the display during startup', async t => {
+    const f = await prepare(config, t, { saved: true, controlledTime: true });
+    await f.advance(7);
+    f.window.localStorage.setItem('tm-twitch-muted', 'false');
+    f.video.dispatchEvent(new f.window.Event('emptied'));
+    f.api.setMuted(true); // Passive initialization mute.
+    // Close the settings menu before interacting with playback controls.
+    f.document.getElementById('tm-volume-options-button').click();
+    const slider = f.document.getElementById('tm-volume-slider-range');
+    slider.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), 'false', 'a volume step cannot adopt initialization mute');
+    assert.equal(f.document.getElementById('tm-volume-slider-value').textContent, '55%');
+    f.document.querySelector('.tm-volume-icon-cell').click();
+    assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), 'true', 'clicking the unmuted control requests mute');
+    const label = f.document.getElementById('tm-volume-slider-value');
+    assert.equal(label.textContent, 'Muted');
+    const button = f.document.createElement('button');
+    button.dataset.aTarget = 'player-mute-unmute-button';
+    button.addEventListener('click', () => f.api.setMuted(false));
+    f.player.append(button);
+    button.click(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), 'false');
+    assert.equal(label.textContent, '55%', 'native unmute refreshes after the saved choice changes');
   });
 
   if (config.file === 'twitch') test('twitch: native mute button and M key still save explicit mute choices', async t => {

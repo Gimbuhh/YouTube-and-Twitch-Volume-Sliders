@@ -7,9 +7,11 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
   const now = () => window.performance.now();
   function report(next) {
     const changed = status !== next; status = next;
-    if (session) window.document.documentElement.dataset.tmAudioNormalization = JSON.stringify({ status, selected: session.preferred,
-      output: session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)), backend: session.playback?.backend || 'starting',
-      context: session.playback?.context.state, metrics: session.metrics || null, error: session.error || null });
+    if (session) {
+      window.document.documentElement.dataset.tmAudioNormalization = JSON.stringify({ status, selected: session.preferred,
+        output: session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)), backend: session.playback?.backend || 'starting',
+        context: session.playback?.context.state, metrics: session.metrics || null, error: session.error || null });
+    }
     if (changed || now() - lastUiAt >= 500) { lastUiAt = now(); onStatusChanged(); }
   }
   function nativeWrite(owned, value, options = { preserveMute: true }) {

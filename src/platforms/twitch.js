@@ -604,6 +604,12 @@ export function startTwitchVolumeSlider() {
         return !!video.muted;
     }
 
+    function isMutedForDisplay(video) {
+        // Twitch's initialization mute is temporary, not a listening preference.
+        const savedMute = Date.now() <= startupLockUntil ? readSavedMute() : null;
+        return savedMute ?? isMuted(video);
+    }
+
     /**
      * Set mute state via Twitch API or video element.
      */
@@ -624,7 +630,7 @@ export function startTwitchVolumeSlider() {
     }
 
     function toggleMute(video) {
-        setMuted(video, !isMuted(video));
+        setMuted(video, !isMutedForDisplay(video));
     }
 
     /**
@@ -721,8 +727,8 @@ export function startTwitchVolumeSlider() {
 
     function setSliderFromPlayer(slider, label, video) {
         try {
-            const muted = isMuted(video);
-            const displayValue = muted ? getUnderlyingVolume(video) : getVolume(video);
+            const muted = isMutedForDisplay(video);
+            const displayValue = getUnderlyingVolume(video);
             slider.value = String(displayValue);
             if (label) {
                 label.textContent = muted ? 'Muted' : `${displayValue}%`;
@@ -1222,14 +1228,14 @@ export function startTwitchVolumeSlider() {
         const initVol = getSavedVolume();
         if (readSavedMute() === null) saveMute(isMuted(video));
         if (initVol !== null) {
-            syncInitialSliderState(initVol, isMuted(video));
+            syncInitialSliderState(initVol, isMutedForDisplay(video));
         } else {
-            syncInitialSliderState(getVolume(video), isMuted(video));
+            syncInitialSliderState(getUnderlyingVolume(video), isMutedForDisplay(video));
         }
 
         const applySliderValue = (value, { preserveMute = false, markInteraction = true } = {}) => {
             setVolume(video, value, { preserveMute });
-            const muted = isMuted(video);
+            const muted = preserveMute ? isMutedForDisplay(video) : isMuted(video);
             saveMute(muted);
             label.textContent = muted ? 'Muted' : `${value}%`;
             updateSliderBar(slider);
@@ -1256,7 +1262,7 @@ export function startTwitchVolumeSlider() {
                 applySliderValue(nextValue, { preserveMute: true, markInteraction: false });
                 startKeyboardControlsHold();
             }
-            keyboardFeedback.show(nextValue, isMuted(video));
+            keyboardFeedback.show(nextValue, isMutedForDisplay(video));
         };
         slider.addEventListener('keydown', applyKeyboardVolumeStep);
 
@@ -1341,16 +1347,17 @@ export function startTwitchVolumeSlider() {
         const onVideoVolumeChange = () => {
             const now = Date.now();
             if (now <= startupLockUntil) {
-                if (now <= userIntentUntil || startupCorrectionApplied) {
-                    return;
+                if (now > userIntentUntil && !startupCorrectionApplied) {
+                    // Re-apply the saved level before displaying the corrected state.
+                    const savedValue = getSavedVolume();
+                    const muted = isMuted(video);
+                    if (savedValue !== null && Math.abs(getUnderlyingVolume(video) - savedValue) > 1) {
+                        setVolume(video, savedValue, { preserveMute: muted });
+                    }
+                    startupCorrectionApplied = true;
                 }
-                // Actively re-apply saved volume when Twitch overrides it during player initialization
-                const savedValue = getSavedVolume();
-                const muted = isMuted(video);
-                if (savedValue !== null && Math.abs(getUnderlyingVolume(video) - savedValue) > 1) {
-                    setVolume(video, savedValue, { preserveMute: muted });
-                }
-                startupCorrectionApplied = true;
+                // Startup locks protect persistence, not the current mute/volume display.
+                setSliderFromPlayer(slider, label, video);
                 return;
             }
             try {
@@ -1373,26 +1380,30 @@ export function startTwitchVolumeSlider() {
             } catch (e) { /* prevent crash */ }
         };
         video.addEventListener('volumechange', onVideoVolumeChange);
+        let sourceMutePending = false;
         const onSourceReset = () => {
             if (!isNormalizationEnabled()) return;
             const savedMute = readSavedMute();
             if (savedMute === null) return;
             // Hard player restarts can set initialization mute before emptied.
             // Lock persistence before the normalizer's source-reset writes.
-            // Restore mute at metadata readiness, after analysis has held zero.
+            // Keep the saved choice through metadata and the final playing event:
+            // Twitch can apply initialization mute between those events.
+            sourceMutePending = true;
             startupLockUntil = Math.max(startupLockUntil, Date.now() + 2000);
             startupCorrectionApplied = false;
         };
-        const onSourceReady = () => {
-            if (!isNormalizationEnabled()) return;
+        const onSourceReady = event => {
+            if (!isNormalizationEnabled() || (event.type === 'playing' && !sourceMutePending)) return;
             const savedMute = readSavedMute();
             if (savedMute !== null) setMuted(video, savedMute);
+            sourceMutePending = event.type !== 'playing';
         };
         for (const type of ['emptied', 'loadstart']) video.addEventListener(type, onSourceReset, true);
-        video.addEventListener('loadedmetadata', onSourceReady);
+        for (const type of ['loadedmetadata', 'playing']) video.addEventListener(type, onSourceReady);
         cleanupRegistry.add(() => {
             for (const type of ['emptied', 'loadstart']) video.removeEventListener(type, onSourceReset, true);
-            video.removeEventListener('loadedmetadata', onSourceReady);
+            for (const type of ['loadedmetadata', 'playing']) video.removeEventListener(type, onSourceReady);
         });
         cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: '[data-a-target="player-volume-slider"]', normalizer,
             onChange: () => { markUserVolumeIntent(); saveMute(isMuted(video)); onVideoVolumeChange(); } }));
@@ -1406,7 +1417,9 @@ export function startTwitchVolumeSlider() {
                 (playerWasLastPressed || activePlayer.contains(document.activeElement));
             if (!muteButton && !muteKey) return;
             window.queueMicrotask(() => {
-                if (overlayLifecycle.owns(overlay) && video.isConnected) saveMute(isMuted(video));
+                if (!overlayLifecycle.owns(overlay) || !video.isConnected) return;
+                saveMute(isMuted(video));
+                setSliderFromPlayer(slider, label, video);
             });
         };
         for (const type of ['click', 'keydown']) document.addEventListener(type, onNativeMuteInput, true);

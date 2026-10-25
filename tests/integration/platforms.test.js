@@ -364,6 +364,22 @@ test('Twitch: arrow keys use fixed five-percent steps while preserving mute and 
   runtime.close();
 });
 
+test('Twitch: startup correction displays the restored volume immediately',async t=>{
+  const source=await readFile(new URL('../../dist/twitch-volume-slider.user.js',import.meta.url),'utf8');
+  const runtime=createRuntime(platforms[1].url,{runScripts:'outside-only'});
+  t.after(()=>runtime.close());
+  const fixture=twitchFixture(runtime.document);
+  runtime.window.localStorage.setItem(platforms[1].volumeKey,'40');
+  runtime.window.eval(source);
+
+  fixture.player._tmPlayerApi.setVolume(.15);
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+
+  assert.equal(fixture.state.volume,.4);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-range').value,'40');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'40%');
+});
+
 test('Twitch: replace-native mode restores unmarked player volume resets',async()=>{
   const config=platforms[1];
   let now=10_000;

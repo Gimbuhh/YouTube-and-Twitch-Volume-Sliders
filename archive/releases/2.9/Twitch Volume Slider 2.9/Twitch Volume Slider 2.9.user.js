@@ -419,8 +419,10 @@
       document2 = { context, sources: /* @__PURE__ */ new WeakMap() };
       documents.set(window2, document2);
       const resume = () => {
-        if (context.state === "suspended") context.resume().catch(() => {
-        });
+        if (context.state === "suspended") {
+          context.resume().catch(() => {
+          });
+        }
       };
       window2.document.addEventListener("pointerdown", resume, true);
       window2.document.addEventListener("keydown", resume, true);
@@ -653,15 +655,17 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
     function report(next) {
       const changed = status !== next;
       status = next;
-      if (session) window2.document.documentElement.dataset.tmAudioNormalization = JSON.stringify({
-        status,
-        selected: session.preferred,
-        output: session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)),
-        backend: session.playback?.backend || "starting",
-        context: session.playback?.context.state,
-        metrics: session.metrics || null,
-        error: session.error || null
-      });
+      if (session) {
+        window2.document.documentElement.dataset.tmAudioNormalization = JSON.stringify({
+          status,
+          selected: session.preferred,
+          output: session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)),
+          backend: session.playback?.backend || "starting",
+          context: session.playback?.context.state,
+          metrics: session.metrics || null,
+          error: session.error || null
+        });
+      }
       if (changed || now() - lastUiAt >= 500) {
         lastUiAt = now();
         onStatusChanged();
@@ -4492,6 +4496,10 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       }
       return !!video.muted;
     }
+    function isMutedForDisplay(video) {
+      const savedMute = Date.now() <= startupLockUntil ? readSavedMute() : null;
+      return savedMute ?? isMuted(video);
+    }
     function setMuted(video, muted) {
       const nextMuted = !!muted;
       if (!nextMuted) {
@@ -4509,7 +4517,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       setNativeVideoMuted(video, nextMuted);
     }
     function toggleMute(video) {
-      setMuted(video, !isMuted(video));
+      setMuted(video, !isMutedForDisplay(video));
     }
     function restoreSavedVolume(video) {
       const savedMute = readSavedMute();
@@ -4587,8 +4595,8 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     }
     function setSliderFromPlayer(slider, label, video) {
       try {
-        const muted = isMuted(video);
-        const displayValue = muted ? getUnderlyingVolume(video) : getVolume(video);
+        const muted = isMutedForDisplay(video);
+        const displayValue = getUnderlyingVolume(video);
         slider.value = String(displayValue);
         if (label) {
           label.textContent = muted ? "Muted" : `${displayValue}%`;
@@ -5042,13 +5050,13 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       const initVol = getSavedVolume();
       if (readSavedMute() === null) saveMute(isMuted(video));
       if (initVol !== null) {
-        syncInitialSliderState(initVol, isMuted(video));
+        syncInitialSliderState(initVol, isMutedForDisplay(video));
       } else {
-        syncInitialSliderState(getVolume(video), isMuted(video));
+        syncInitialSliderState(getUnderlyingVolume(video), isMutedForDisplay(video));
       }
       const applySliderValue = (value, { preserveMute = false, markInteraction = true } = {}) => {
         setVolume(video, value, { preserveMute });
-        const muted = isMuted(video);
+        const muted = preserveMute ? isMutedForDisplay(video) : isMuted(video);
         saveMute(muted);
         label.textContent = muted ? "Muted" : `${value}%`;
         updateSliderBar(slider);
@@ -5074,7 +5082,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
           applySliderValue(nextValue, { preserveMute: true, markInteraction: false });
           startKeyboardControlsHold();
         }
-        keyboardFeedback.show(nextValue, isMuted(video));
+        keyboardFeedback.show(nextValue, isMutedForDisplay(video));
       };
       slider.addEventListener("keydown", applyKeyboardVolumeStep);
       let playerWasLastPressed = false;
@@ -5154,15 +5162,15 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       const onVideoVolumeChange = () => {
         const now = Date.now();
         if (now <= startupLockUntil) {
-          if (now <= userIntentUntil || startupCorrectionApplied) {
-            return;
+          if (now > userIntentUntil && !startupCorrectionApplied) {
+            const savedValue = getSavedVolume();
+            const muted = isMuted(video);
+            if (savedValue !== null && Math.abs(getUnderlyingVolume(video) - savedValue) > 1) {
+              setVolume(video, savedValue, { preserveMute: muted });
+            }
+            startupCorrectionApplied = true;
           }
-          const savedValue = getSavedVolume();
-          const muted = isMuted(video);
-          if (savedValue !== null && Math.abs(getUnderlyingVolume(video) - savedValue) > 1) {
-            setVolume(video, savedValue, { preserveMute: muted });
-          }
-          startupCorrectionApplied = true;
+          setSliderFromPlayer(slider, label, video);
           return;
         }
         try {
@@ -5185,23 +5193,26 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         }
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
+      let sourceMutePending = false;
       const onSourceReset = () => {
         if (!isNormalizationEnabled()) return;
         const savedMute = readSavedMute();
         if (savedMute === null) return;
+        sourceMutePending = true;
         startupLockUntil = Math.max(startupLockUntil, Date.now() + 2e3);
         startupCorrectionApplied = false;
       };
-      const onSourceReady = () => {
-        if (!isNormalizationEnabled()) return;
+      const onSourceReady = (event) => {
+        if (!isNormalizationEnabled() || event.type === "playing" && !sourceMutePending) return;
         const savedMute = readSavedMute();
         if (savedMute !== null) setMuted(video, savedMute);
+        sourceMutePending = event.type !== "playing";
       };
       for (const type of ["emptied", "loadstart"]) video.addEventListener(type, onSourceReset, true);
-      video.addEventListener("loadedmetadata", onSourceReady);
+      for (const type of ["loadedmetadata", "playing"]) video.addEventListener(type, onSourceReady);
       cleanupRegistry.add(() => {
         for (const type of ["emptied", "loadstart"]) video.removeEventListener(type, onSourceReset, true);
-        video.removeEventListener("loadedmetadata", onSourceReady);
+        for (const type of ["loadedmetadata", "playing"]) video.removeEventListener(type, onSourceReady);
       });
       cleanupRegistry.add(bindNativeVolumeInput({
         window,
@@ -5224,7 +5235,9 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         const muteKey = event.type === "keydown" && event.key.toLowerCase() === "m" && (playerWasLastPressed || activePlayer.contains(document.activeElement));
         if (!muteButton && !muteKey) return;
         window.queueMicrotask(() => {
-          if (overlayLifecycle.owns(overlay) && video.isConnected) saveMute(isMuted(video));
+          if (!overlayLifecycle.owns(overlay) || !video.isConnected) return;
+          saveMute(isMuted(video));
+          setSliderFromPlayer(slider, label, video);
         });
       };
       for (const type of ["click", "keydown"]) document.addEventListener(type, onNativeMuteInput, true);

@@ -418,8 +418,10 @@
       document2 = { context, sources: /* @__PURE__ */ new WeakMap() };
       documents.set(window2, document2);
       const resume = () => {
-        if (context.state === "suspended") context.resume().catch(() => {
-        });
+        if (context.state === "suspended") {
+          context.resume().catch(() => {
+          });
+        }
       };
       window2.document.addEventListener("pointerdown", resume, true);
       window2.document.addEventListener("keydown", resume, true);
@@ -652,15 +654,17 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
     function report(next) {
       const changed = status !== next;
       status = next;
-      if (session) window2.document.documentElement.dataset.tmAudioNormalization = JSON.stringify({
-        status,
-        selected: session.preferred,
-        output: session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)),
-        backend: session.playback?.backend || "starting",
-        context: session.playback?.context.state,
-        metrics: session.metrics || null,
-        error: session.error || null
-      });
+      if (session) {
+        window2.document.documentElement.dataset.tmAudioNormalization = JSON.stringify({
+          status,
+          selected: session.preferred,
+          output: session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)),
+          backend: session.playback?.backend || "starting",
+          context: session.playback?.context.state,
+          metrics: session.metrics || null,
+          error: session.error || null
+        });
+      }
       if (changed || now() - lastUiAt >= 500) {
         lastUiAt = now();
         onStatusChanged();

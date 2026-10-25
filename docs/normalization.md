@@ -35,6 +35,8 @@ A new element is attached only after context activation and only for an accessib
 
 Source loads and YouTube navigation hold audio quiet until a fresh measurement permits protected output. Outgoing callbacks cannot release the incoming hold. Selected volume and mute intent are preserved independently of native initialization writes. Pause, mute and zero volume retain the programme reference; silence does not cause source-search loops.
 
+Twitch restores the saved mute choice at metadata readiness and when restarted playback begins. During startup, the control displays that choice instead of Twitch's temporary initialization mute; explicit mute and unmute actions update it immediately. Persistence locks still allow the indicators to refresh after volume corrections without overwriting saved settings.
+
 One 50 ms lifecycle timer owns source checks and bounded recovery. Initial activation/source transitions are bounded at three seconds; missing established measurements time out after 1.5 seconds. Inaccessible tracks have a 1.5-second grace, and a retry never attaches a track already known to be inaccessible. Failures retry after 1, 2, 4, 8, 16, then at most 30 seconds while playback is ready; three healthy seconds reset the backoff. User gestures can retry immediately. Ordinary playback remains available on failure, with the user's mute choice preserved.
 
 ## Verification

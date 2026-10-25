@@ -97,11 +97,52 @@ try {
     await page.waitForFunction(() => window.__peak() > .001);
     await page.evaluate(() => { const slider=document.querySelector('#tm-volume-slider-range');slider.value='40';slider.dispatchEvent(new Event('input',{bubbles:true}));slider.dispatchEvent(new Event('change',{bubbles:true})); });
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').selected === 40);
-    await page.evaluate(() => { const video=document.querySelector('video');video.src='/replacement.wav';video.load();video.play(); });
+    await page.evaluate(twitch => {
+      const video = document.querySelector('video');
+      if (twitch) {
+        localStorage.setItem('tm-twitch-muted', 'false');
+        const label = document.querySelector('#tm-volume-slider-value');
+        window.__restartLabels = [label.textContent];
+        window.__restartLabelObserver = new MutationObserver(() => window.__restartLabels.push(label.textContent));
+        window.__restartLabelObserver.observe(label, { childList: true, characterData: true, subtree: true });
+        // Worker/player initialization can mute after metadata restoration.
+        video.addEventListener('loadedmetadata', () => { video.muted = true; }, { once: true });
+      }
+      video.src = '/replacement.wav'; video.load(); video.play();
+    }, !youtube);
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status?.startsWith('Active'));
     await page.waitForFunction(() => window.__peak() > .001);
     assert.equal(await page.evaluate(() => document.querySelector('video').volume), 1);
+    assert.equal(await page.evaluate(() => document.querySelector('video').muted), false, 'source restart remained muted');
+    assert.equal(await page.locator('#tm-volume-slider-value').textContent(), '40%', 'source restart left a stale mute indicator');
     assert.equal(await page.evaluate(key => localStorage.getItem(key), 'tm-' + prefix + '-volume'), '40');
+    if (!youtube) {
+      const labels = await page.evaluate(() => {
+        window.__restartLabelObserver.disconnect();
+        return [...new Set(window.__restartLabels)];
+      });
+      assert.deepEqual(labels, ['40%'], 'an initialization mute flashed in the volume indicator');
+      await page.evaluate(() => {
+        const video = document.querySelector('video');
+        localStorage.setItem('tm-twitch-muted', 'true'); video.muted = true;
+        video.addEventListener('loadedmetadata', () => { video.muted = false; }, { once: true });
+        video.src = '/muted-replacement.wav'; video.load(); video.play();
+      });
+      await page.waitForFunction(() => document.querySelector('video').readyState >= 2 && !document.querySelector('video').paused &&
+        JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status === 'Waiting for audio');
+      await page.waitForFunction(() => window.__peak() < 1e-7);
+      assert.equal(await page.evaluate(() => document.querySelector('video').muted), true, 'source restart lost a deliberate mute');
+      assert.equal(await page.locator('#tm-volume-slider-value').textContent(), 'Muted');
+      // Resume with an explicit mute-button action and verify its saved choice.
+      await page.evaluate(() => {
+        const button = document.createElement('button'); button.dataset.aTarget = 'player-mute-unmute-button';
+        button.onclick = () => { document.querySelector('video').muted = false; };
+        document.querySelector('.video-player').append(button); button.click(); button.remove();
+      });
+      await page.waitForFunction(() => window.__peak() > .001);
+      assert.equal(await page.evaluate(() => localStorage.getItem('tm-twitch-muted')), 'false');
+      assert.equal(await page.locator('#tm-volume-slider-value').textContent(), '40%');
+    }
     if (mode === 'worklet') {
       await page.evaluate(() => Object.defineProperty(window.__captures.at(-1).getAudioTracks()[0], 'muted', { configurable:true, value:true }));
       await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status?.startsWith('Audio unavailable'));
