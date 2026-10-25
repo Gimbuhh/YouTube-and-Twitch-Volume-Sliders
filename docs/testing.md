@@ -2,7 +2,7 @@
 
 `npm run check` runs deterministic builds, metadata/syntax validation, Node unit and jsdom integration tests, generated-artifact checks, and the Chrome and Firefox browser suites. `npm test` also builds and runs Node plus both browser suites. Missing prerequisites fail these commands; browser checks never silently skip.
 
-Install Google Chrome and FFmpeg, run `npm ci`, then `npm run browsers:install` once to download the isolated Firefox test build. Linux may require `node node_modules/playwright-core/cli.js install --with-deps firefox`. Test runs themselves use local fixtures without downloading browsers or contacting YouTube/Twitch. CI installs Firefox and FFmpeg and uses the runner's installed Chrome before the same full check; release verification requires both browser suites too.
+Install Google Chrome and FFmpeg, run `npm ci`, then `npm run browsers:install` once to download the isolated Firefox test build. Linux may require `node node_modules/playwright-core/cli.js install --with-deps firefox`. Test runs themselves use local fixtures without downloading browsers or contacting YouTube/Twitch. CI runs the core checks and Chrome suites on Windows, plus Firefox on Linux with a PulseAudio null sink so real audio processing needs no physical output device. Both jobs are required for complete verification; release verification also runs both browser suites with a virtual audio output.
 
 For a quicker development pass, `npm run check:core` retains the browser-independent integrity/Node checks. `npm run test:node` runs Node tests alone. These are focused checks, not substitutes for full verification. `npm run test:browsers`, `npm run test:chrome`, and `npm run test:firefox` provide focused browser runs without repeating Node tests.
 

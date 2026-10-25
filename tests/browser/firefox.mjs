@@ -41,7 +41,15 @@ try {
     await page.goto(youtube ? 'https://www.youtube.com/watch?v=firefox-fixture' : 'https://www.twitch.tv/firefox-fixture');
     await page.addScriptTag({ content: await readFile(new URL(`../../dist/${platform}-volume-slider.user.js`, import.meta.url), 'utf8') });
     await page.evaluate(() => document.querySelector('video').play());
-    await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status === 'Active' && window.__peak() > .001);
+    await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status === 'Active' && window.__peak() > .001).catch(async error => {
+      console.error(JSON.stringify({ platform, errors, ...await page.evaluate(() => {
+        const video = document.querySelector('video');
+        return { status: document.documentElement.dataset.tmAudioNormalization, peak: window.__peak(),
+          media: { time: video.currentTime, paused: video.paused, muted: video.muted, volume: video.volume, ready: video.readyState, error: video.error?.message },
+          contexts: window.__contexts.map(context => ({ state: context.state, time: context.currentTime, rate: context.sampleRate })) };
+      }) }));
+      throw error;
+    });
     const levels = [], playbackDeadline = Date.now() + 10000;
     while (await page.evaluate(() => document.querySelector('video').currentTime < 3.5)) {
       assert.ok(Date.now() < playbackDeadline, `${platform}: playback stopped advancing`);
