@@ -1438,6 +1438,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
   var VOLUME_NUMBER_FONT_SIZE = 16;
   var VOLUME_NUMBER_COMPACT_SIZE = 15;
   var VOLUME_NUMBER_COMPACT_SPACING = -0.25;
+  var COMPACT_MAX_WIDTH = 22.5;
   function createVolumeNumberRenderer(document2, center) {
     let context;
     let pixelRatio;
@@ -1463,7 +1464,15 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       let position = positions.get(text);
       if (!position) {
         context.font = `${VOLUME_NUMBER_FONT_WEIGHT} ${size}px ${VOLUME_NUMBER_FONT_FAMILY}`;
-        const metrics = context.measureText(text);
+        let metrics = context.measureText(text);
+        const spacing = compact ? VOLUME_NUMBER_COMPACT_SPACING * (text.length - 1) : 0;
+        const width = metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight + spacing;
+        let fittedSize = size;
+        if (compact && width > COMPACT_MAX_WIDTH) {
+          fittedSize = Number((size * COMPACT_MAX_WIDTH / width).toFixed(3));
+          context.font = `${VOLUME_NUMBER_FONT_WEIGHT} ${fittedSize}px ${VOLUME_NUMBER_FONT_FAMILY}`;
+          metrics = context.measureText(text);
+        }
         const {
           actualBoundingBoxLeft: left,
           actualBoundingBoxRight: right,
@@ -1473,16 +1482,17 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         if (![left, right, ascent, descent].every(Number.isFinite) || left + right <= 0 || ascent + descent <= 0) {
           return;
         }
-        const spacing = compact ? VOLUME_NUMBER_COMPACT_SPACING * (text.length - 1) : 0;
         position = {
           x: center + (left - right - spacing) / 2,
-          y: center + (ascent - descent) / 2
+          y: center + (ascent - descent) / 2,
+          fontSize: fittedSize
         };
         positions.set(text, position);
       }
       element.setAttribute("text-anchor", "start");
       element.setAttribute("dominant-baseline", "alphabetic");
       element.setAttribute("alignment-baseline", "alphabetic");
+      element.style.fontSize = position.fontSize < size ? `${position.fontSize}px` : "";
       element.setAttribute("x", String(Number(position.x.toFixed(3))));
       element.setAttribute("y", String(Number(position.y.toFixed(3))));
     };

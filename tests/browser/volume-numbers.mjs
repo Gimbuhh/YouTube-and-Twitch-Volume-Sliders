@@ -60,7 +60,7 @@ try {
           const glyph = text.cloneNode(true);
           // Keep samples in the page's font context. An SVG loaded as a separate
           // image can resolve system-ui differently from the actual player on Linux.
-          for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontStretch', 'fontKerning', 'fontVariantNumeric', 'fontFeatureSettings']) {
+          for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontStretch', 'fontKerning', 'fontVariantNumeric', 'fontFeatureSettings', 'textRendering']) {
             glyph.style[property] = style[property];
           }
           glyph.style.letterSpacing = style.letterSpacing;
@@ -122,7 +122,11 @@ try {
         assert.ok(result.radius < 13, `${platform} at ${zoom}: numeral clears the arc: ${JSON.stringify(result)}`);
         assert.ok(result.badgeClearance > 0, `${platform} at ${zoom}: badge leaves numeral unobscured: ${JSON.stringify(result)}`);
         assert.equal(result.stretched, false, 'numerals retain natural proportions');
-        assert.equal(result.size, result.value === 100 ? '15px' : '16px');
+        if (result.value === 100) {
+          assert.ok(parseFloat(result.size) > 0 && parseFloat(result.size) <= 15, '100 fits the resolved local font');
+        } else {
+          assert.equal(result.size, '16px');
+        }
       }
     }
     await page.evaluate(() => { document.body.style.zoom = 1; });
