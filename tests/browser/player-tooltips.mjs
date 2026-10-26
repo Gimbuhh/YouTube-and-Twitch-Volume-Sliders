@@ -10,6 +10,18 @@ try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 700 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    await page.addInitScript(() => {
+      window.__tooltipTrace = [];
+      for (const type of ['focusin', 'focusout', 'pointerover', 'pointerout', 'scroll', 'keydown']) {
+        document.addEventListener(type, event => {
+          const element = event.target;
+          window.__tooltipTrace.push({ type, key: event.key, target: element.id || element.tagName,
+            active: document.activeElement?.id || document.activeElement?.tagName,
+            focusVisible: element.matches?.(':focus-visible'), tooltip: !!document.getElementById('tm-volume-player-tooltip') });
+          window.__tooltipTrace = window.__tooltipTrace.slice(-40);
+        }, true);
+      }
+    });
     const host = youtube
       ? '<div id="movie_player"><video></video><div class="ytp-popup ytp-settings-menu" hidden>Quality</div><div class="ytp-chrome-bottom"><div class="ytp-left-controls"><div class="ytp-volume-area"></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">Settings</button></div></div></div>'
       : '<div class="player-stack"><div class="video-player" data-a-target="player-overlay-click-handler"><video></video><div class="controls-fade"><div data-a-target="player-controls" data-a-visible="true"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button">Settings</button></div></div></div></div></div>';
@@ -178,7 +190,14 @@ try {
       // Focus the real control using keyboard navigation, regardless of platform tab order.
       for (let attempt = 0; attempt < 10 && !await button.evaluate(element => element === document.activeElement); attempt++) await page.keyboard.press('Tab');
       assert.equal(await button.evaluate(element => element === document.activeElement), true);
-      await tooltip.waitFor();
+      try { await tooltip.waitFor({ timeout: 5000 }); }
+      catch (error) {
+        console.log('Tooltip keyboard failure', platform, await page.evaluate(() => ({ trace: window.__tooltipTrace,
+          focused: document.activeElement?.outerHTML, focusVisible: document.activeElement?.matches(':focus-visible'), hasFocus: document.hasFocus(),
+          tooltip: document.getElementById('tm-volume-player-tooltip')?.outerHTML,
+          popup: document.getElementById('tm-volume-options-popup')?.hidden })));
+        throw error;
+      }
       if (youtube) {
         await page.locator('.ytp-settings-button').hover();
         assert.equal(await tooltip.count(), 0, 'a native hover dismisses keyboard-opened custom feedback');
