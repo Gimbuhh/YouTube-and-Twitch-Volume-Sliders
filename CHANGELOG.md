@@ -2,7 +2,7 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
-## 2.9 - 2026-10-25
+## 3.0 - 2026-10-25
 
 ### Added
 
@@ -18,6 +18,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Changed
 
+- **Both:** Control tooltips match the site's styling and behavior, and the Options button is labeled **Volume Slider Options**.
 - **Both:** Volume arrows show a compact on-video percentage and matching speaker icon with normalization on or off.
 - **Both:** Volume Slider Options groups listening and behavior settings in **General**, with visual controls in **Appearance**, clearer toggles, and compact audio feedback. The options icon animates with the menu state. The borderless Mode dropdown stays above both tabs, keeps choices readable across browser themes, and points its arrow up while open and down when closed.
 - **Both:** Replace native always uses the original volume position; the redundant Placement choices are removed.

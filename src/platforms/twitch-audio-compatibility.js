@@ -24,18 +24,20 @@ export function syncTwitchAudioCompatibility(window, video, mutations) {
     if (owned) {
       if (!saved) {
         // 7TV's custom tooltip uses its private requested state, which can be
-        // wrong after source creation fails. Use the native explanation instead.
+        // wrong after source creation fails. Show our platform-styled explanation.
         saved = { disabled: button.disabled, label: button.getAttribute('aria-label'), title: button.getAttribute('title'),
+          tooltip: button.getAttribute('data-tm-tooltip'),
           hover: event => event.stopImmediatePropagation() };
         buttons.set(button, saved);
         button.addEventListener('mouseenter', saved.hover, true);
       }
       if (!button.disabled) { button.disabled = true; }
       if (button.getAttribute('aria-label') !== explanation) { button.setAttribute('aria-label', explanation); }
-      if (button.title !== explanation) { button.title = explanation; }
+      if (button.dataset.tmTooltip !== explanation) { button.dataset.tmTooltip = explanation; }
+      if (button.hasAttribute('title')) { button.removeAttribute('title'); }
     } else if (saved) {
       button.disabled = saved.disabled;
-      for (const [attribute, value] of [['aria-label', saved.label], ['title', saved.title]]) {
+      for (const [attribute, value] of [['aria-label', saved.label], ['title', saved.title], ['data-tm-tooltip', saved.tooltip]]) {
         if (value === null) { button.removeAttribute(attribute); }
         else { button.setAttribute(attribute, value); }
       }

@@ -46,6 +46,12 @@ Volume-intent regressions simulate passive player writes and source reloads with
 
 The browser suite also checks the static normalization icon in both themes and icon styles, at enlarged on-video sizes, and through output changes, pause, mute, unavailable capture, and disabled states. It verifies the original circular layout, inset upper-right placement with overlap limited to the outer ring, unclipped center and perimeter at ten zoom levels from 50% through 200%, unobscured selected values through 100%, and thumb clearance at zero volume. It preserves the slider's preferred volume, accessible descriptions, and existing mute interaction. Normal pause, mute, and zero volume keep the waveform visible; blocked/unavailable analysis and Off hide it. Its artwork stays unchanged through hiding and recovery. Audio feedback checks verify two separate detail lines, containment inside the status card, and no text overlap at six zoom levels from 50% through 200%. These UI checks use a controlled capture fixture; the separate normalization suite below covers real audio capture.
 
+## Tooltips
+
+Chrome and Firefox checks cover the Options label, site styling, keyboard and pointer access, scaling, dismissal, and removal with the control. YouTube cases verify the controls-bar baseline, menu suppression, and immediate handoffs between native and custom labels, including fading native tooltips and keyboard focus.
+
+Twitch cases verify hover timing, pop-in motion, reduced motion, controls hiding and reappearing, fullscreen placement, and cleanup after player removal. Hit-testing checks that the tooltip is painted above a native menu in a separate body layer. Audio-ownership checks also exercise the explanation on the disabled 7TV compressor.
+
 ## Audio normalization
 
 The default check includes the full normalization coverage. `npm run test:normalization-browser` isolates the Chrome audio suites: ten routed cases, four synthetic startup/refresh recordings with main-thread stalls, and 39 native gain-graph checks at 44.1/48/96 kHz. The startup waveform checks require FFmpeg on PATH or `VOLUME_SLIDER_FFMPEG` set to its executable. Set `VOLUME_SLIDER_NORMALIZATION_RESULTS` to an output directory outside the repository; results otherwise use the OS temporary directory. No live browser audio is recorded.

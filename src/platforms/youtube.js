@@ -1,3 +1,4 @@
+import { installPlayerTooltips } from '../shared/player-tooltips.js';
 import { createVolumeNormalizer } from '../shared/normalization.js';
 import { bindNativeVolumeInput } from '../shared/native-volume-input.js';
 import { createVolumeFeedback } from '../shared/volume-feedback.js';
@@ -15,6 +16,8 @@ import { bindRangePointerInteraction, bindWheelVolumeStep, createVolumeControlEl
 
 export function startYouTubeVolumeSlider() {
     'use strict';
+
+    installPlayerTooltips(window, 'youtube');
 
     let storage = null;
     try {
@@ -506,18 +509,14 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         }
     }
 
-    function getVolumeModeLabel(mode = getVolumeSliderMode()) {
-        if (mode === 'off') return 'Off';
-        return mode === 'replace-native' ? 'Replace native' : 'On';
-    }
-
     function updateOptionsButtonState(btn = document.getElementById(OPTIONS_BUTTON_ID)) {
         if (!btn) return;
         const mode = getVolumeSliderMode();
-        const label = `Volume Slider Options (${getVolumeModeLabel(mode)})`;
-        btn.dataset.tmVolumeMode = mode;
-        btn.setAttribute('aria-label', label);
-        btn.setAttribute('title', label);
+        const label = 'Volume Slider Options';
+        if (btn.dataset.tmVolumeMode !== mode) { btn.dataset.tmVolumeMode = mode; }
+        if (btn.getAttribute('aria-label') !== label) { btn.setAttribute('aria-label', label); }
+        if (btn.dataset.tmTooltip !== label) { btn.dataset.tmTooltip = label; }
+        if (btn.hasAttribute('title')) { btn.removeAttribute('title'); }
     }
 
     // -------------------------------------

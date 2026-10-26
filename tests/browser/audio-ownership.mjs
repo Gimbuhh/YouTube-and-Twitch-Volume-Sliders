@@ -59,7 +59,12 @@ try {
       assert.equal(await page.evaluate(() => window.__sevenError), 'InvalidStateError');
       await page.waitForFunction(() => document.querySelector('[data-a-target="seventv-player-audio-compressor-button"]').disabled);
       assert.match(await compressor.getAttribute('aria-label'), /Reload with Auto-normalize volume off/);
-      assert.equal(await compressor.getAttribute('title'), await compressor.getAttribute('aria-label'));
+      assert.equal(await compressor.getAttribute('title'), null);
+      assert.equal(await compressor.getAttribute('data-tm-tooltip'), await compressor.getAttribute('aria-label'));
+      await compressor.hover();
+      await page.locator('#tm-volume-player-tooltip').waitFor();
+      assert.equal(await page.locator('#tm-volume-player-tooltip').textContent(), await compressor.getAttribute('aria-label'));
+      await page.mouse.move(0, 0);
       await compressor.dispatchEvent('mouseenter');
       assert.equal(await page.evaluate(() => window.__sevenTooltipCount), 0, '7TV cannot show its stale requested-state tooltip');
       // 7TV can rewrite its button after a failed auto-enable attempt.

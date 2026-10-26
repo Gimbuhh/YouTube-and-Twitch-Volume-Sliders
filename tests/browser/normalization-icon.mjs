@@ -113,7 +113,8 @@ try {
       }
       const artwork = await indicator.innerHTML();
       assert.equal(await indicator.textContent(), '');
-      assert.equal(await indicator.getAttribute('title'), 'Auto-normalize volume is on');
+      assert.equal(await indicator.getAttribute('title'), null);
+      assert.equal(await indicator.getAttribute('data-tm-tooltip'), 'Auto-normalize volume is on');
       assert.equal(await indicator.locator('text, animate, animateTransform').count(), 0);
       assert.match(await mute.getAttribute('aria-describedby'), /normalization-description/);
 

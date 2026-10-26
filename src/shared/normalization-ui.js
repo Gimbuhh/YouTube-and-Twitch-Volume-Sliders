@@ -2,7 +2,7 @@ export function createNormalizationIcon(document) {
   const icon = document.createElement('span');
   icon.className = 'tm-normalization-icon';
   icon.hidden = true;
-  icon.title = 'Auto-normalize volume is on';
+  icon.dataset.tmTooltip = 'Auto-normalize volume is on';
   icon.setAttribute('aria-hidden', 'true');
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');

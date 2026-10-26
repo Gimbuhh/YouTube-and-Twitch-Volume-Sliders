@@ -1,20 +1,242 @@
 // ==UserScript==
-// @name         Twitch Volume Slider
+// @name         YouTube Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.9
-// @description  Compact Twitch volume controls with optional automatic volume normalization.
+// @version      3.0
+// @description  Compact YouTube volume controls with optional automatic volume normalization.
 // @author       Gimbuhh (Made using AI)
-// @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
-// @match        https://www.twitch.tv/*
-// @match        https://*.ext-twitch.tv/*
-// @updateURL    https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
-// @downloadURL  https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
+// @icon         https://www.youtube.com/favicon.ico
+// @match        https://www.youtube.com/*
+// @updateURL    https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/youtube-volume-slider.user.js
+// @downloadURL  https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/youtube-volume-slider.user.js
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
 "use strict";
 
 (() => {
+  // src/shared/styles.js
+  function createStyleElement(document2, id) {
+    if (document2.getElementById(id)) return null;
+    const parent = document2.head || document2.documentElement;
+    if (!parent) return null;
+    const style = document2.createElement("style");
+    style.id = id;
+    parent.appendChild(style);
+    return style;
+  }
+  var fillStyleTemplate = (template, values) => template.replace(/\{\{([A-Za-z0-9]+)\}\}/g, (_, key) => {
+    if (!(key in values)) throw new Error(`Missing style token ${key}`);
+    return values[key];
+  });
+
+  // src/shared/player-tooltips.js
+  var selector = "[data-tm-tooltip]";
+  var tooltipId = "tm-volume-player-tooltip";
+  var css = `
+.tm-player-tooltip {
+  box-sizing:border-box; position:absolute; z-index:10002; width:max-content;
+  max-width:320px; padding:5px 9px; border:0; border-radius:8px;
+  background:rgba(0,0,0,.3); color:#eee; backdrop-filter:blur(12px);
+  font:500 13px/15px "YouTube Noto",Roboto,Arial,Helvetica,sans-serif;
+  letter-spacing:normal; text-align:left; text-shadow:none; text-transform:none;
+  white-space:normal; overflow-wrap:anywhere; pointer-events:none;
+  animation:none; transition:none;
+}
+.tm-player-tooltip[data-platform="twitch"] {
+  position:fixed;
+  padding:4px 8px; border-radius:4px; backdrop-filter:none;
+  background:var(--color-background-tooltip,#fff); color:var(--color-text-tooltip,#0e0e10);
+  font:600 14px/1.4 var(--font-base,Inter,Roobert,"Helvetica Neue",Helvetica,Arial,sans-serif);
+  animation:tm-tooltip-pop-in 100ms ease backwards;
+  transform-origin:center;
+}
+@keyframes tm-tooltip-pop-in {
+  from { opacity:0; transform:scale(.9); }
+  to { opacity:1; transform:scale(1); }
+}
+@media (prefers-reduced-motion:reduce) {
+  .tm-player-tooltip[data-platform="twitch"] { animation:none; }
+}
+.tm-player-tooltip[data-platform="twitch"]::after {
+  content:""; position:absolute; top:100%; left:var(--tm-tooltip-arrow-x,50%);
+  transform:translateX(-50%); border:5px solid transparent; border-bottom:0;
+  border-top-color:var(--color-background-tooltip,#fff);
+}
+.tm-player-tooltip[data-platform="twitch"][data-placement="bottom"]::after {
+  top:auto; bottom:100%; border-top:0; border-bottom:5px solid var(--color-background-tooltip,#fff);
+}
+/* YouTube keeps its previous tooltip fading after entering a custom control.
+   Keep one label visible and make control-button handoffs immediate. Seek
+   previews retain their own transitions. Display remains owned by YouTube. */
+#movie_player:has(.tm-player-tooltip[data-platform="youtube"]) .ytp-tooltip {
+  visibility:hidden !important;
+}
+#movie_player:has(.ytp-chrome-bottom button:hover:not([data-tm-tooltip])) .ytp-tooltip.ytp-bottom:not(.ytp-preview):not(.ytp-tooltip-progress-bar-style) {
+  opacity:1 !important; transition:none !important;
+}`;
+  function installPlayerTooltips(window2, platform) {
+    const { document: document2 } = window2;
+    let target = null, tooltip = null, observer = null, showTimer = null;
+    const rootSelector = platform === "youtube" ? "#movie_player" : '.video-player,[data-a-target="player-overlay-click-handler"]';
+    function getVisiblePlayer(element) {
+      if (!element?.isConnected || element.hidden || !element.dataset.tmTooltip) {
+        return null;
+      }
+      const root = element.closest(rootSelector);
+      if (!root) {
+        return null;
+      }
+      if (platform === "youtube") {
+        if (element.getAttribute("aria-expanded") === "true" || document2.getElementById("tm-volume-options-popup")?.hasAttribute("hidden") === false) {
+          return null;
+        }
+        if (root.classList.contains("ytp-settings-shown")) {
+          return null;
+        }
+        for (const menu of root.querySelectorAll(".ytp-popup:not(button)")) {
+          if (menu.getClientRects().length && window2.getComputedStyle(menu).visibility !== "hidden") {
+            return null;
+          }
+        }
+      } else if (element.closest('[data-a-target="player-controls"]')?.getAttribute("data-a-visible") === "false") {
+        return null;
+      }
+      for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+        const style = window2.getComputedStyle(ancestor);
+        if (ancestor.hidden || style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+          return null;
+        }
+        if (ancestor === root && platform === "youtube") {
+          break;
+        }
+      }
+      return root;
+    }
+    function hide() {
+      window2.clearTimeout(showTimer);
+      observer?.disconnect();
+      observer = null;
+      tooltip?.remove();
+      tooltip = null;
+      target = null;
+    }
+    function show() {
+      const root = getVisiblePlayer(target);
+      if (!root) {
+        hide();
+        return;
+      }
+      const style = createStyleElement(document2, "tm-volume-player-tooltip-style");
+      if (style) {
+        style.textContent = css;
+      }
+      tooltip = document2.createElement("div");
+      tooltip.id = tooltipId;
+      tooltip.className = "tm-player-tooltip";
+      tooltip.dataset.platform = platform;
+      tooltip.setAttribute("role", "tooltip");
+      tooltip.textContent = target.dataset.tmTooltip;
+      const nativeText = platform === "youtube" && root.querySelector(".ytp-tooltip .ytp-tooltip-bottom-text");
+      if (nativeText) {
+        const native = window2.getComputedStyle(nativeText);
+        for (const property of ["font", "color", "backgroundColor", "borderRadius", "padding", "backdropFilter", "boxShadow"]) {
+          tooltip.style[property] = native[property];
+        }
+      }
+      const fixed = platform === "twitch";
+      const host = fixed ? document2.fullscreenElement || document2.body : root;
+      host.appendChild(tooltip);
+      const box = root.getBoundingClientRect(), anchor = target.getBoundingClientRect();
+      const sx = fixed ? 1 : box.width / root.offsetWidth || 1, sy = fixed ? 1 : box.height / root.offsetHeight || 1;
+      const originX = fixed ? 0 : box.left + root.clientLeft * sx, originY = fixed ? 0 : box.top + root.clientTop * sy;
+      const leftEdge = Math.max(fixed ? box.left + 8 : 8, (8 - originX) / sx);
+      const rightEdge = Math.min(fixed ? box.right - 8 : root.clientWidth - 8, (window2.innerWidth - 8 - originX) / sx);
+      tooltip.style.maxWidth = `${Math.max(0, Math.min(320, rightEdge - leftEdge))}px`;
+      const width = tooltip.offsetWidth, height = tooltip.offsetHeight;
+      const center = ((anchor.left + anchor.right) / 2 - originX) / sx;
+      const desiredLeft = platform === "twitch" ? (anchor.right - originX) / sx - width : center - width / 2;
+      const left = Math.max(leftEdge, Math.min(desiredLeft, rightEdge - width));
+      const controls = platform === "youtube" && target.closest(".ytp-chrome-bottom");
+      const anchorTop = controls ? controls.getBoundingClientRect().top : anchor.top;
+      const above = Math.floor((anchorTop - originY) / sy - height - 10);
+      const below = above < (fixed ? Math.max(0, box.top) : Math.max(0, -originY / sy));
+      tooltip.dataset.placement = below ? "bottom" : "top";
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${below ? (anchor.bottom - originY) / sy + 10 : above}px`;
+      tooltip.style.setProperty("--tm-tooltip-arrow-x", `${Math.max(8, Math.min(width - 8, center - left))}px`);
+      observer = new window2.MutationObserver(() => {
+        if (!getVisiblePlayer(target) || tooltip.textContent !== target.dataset.tmTooltip) {
+          hide();
+        }
+      });
+      observer.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["hidden", "aria-expanded", "data-tm-tooltip", "data-a-visible", "class", "style"]
+      });
+      if (fixed) {
+        for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          observer.observe(ancestor, { childList: true, attributes: true, attributeFilter: ["hidden", "class", "style"] });
+        }
+      }
+    }
+    function enter(element, delay) {
+      if (element === target) {
+        return;
+      }
+      hide();
+      if (!getVisiblePlayer(element)) {
+        return;
+      }
+      target = element;
+      if (delay) {
+        showTimer = window2.setTimeout(show, delay);
+      } else {
+        show();
+      }
+    }
+    document2.addEventListener("pointerover", (event) => {
+      if (event.pointerType === "touch") {
+        return;
+      }
+      const element = event.target.closest?.(selector);
+      if (element) {
+        enter(element, platform === "youtube" ? 0 : 200);
+      } else if (target && !target.contains(event.target)) {
+        hide();
+      }
+    }, true);
+    document2.addEventListener("pointerout", (event) => {
+      if (!target?.contains(event.target) || target.contains(event.relatedTarget)) {
+        return;
+      }
+      hide();
+    }, true);
+    document2.addEventListener("focusin", (event) => {
+      const element = event.target.closest?.(selector);
+      if (element?.matches(":focus-visible")) {
+        enter(element, 0);
+      }
+    }, true);
+    document2.addEventListener("focusout", (event) => {
+      if (target?.contains(event.target)) {
+        hide();
+      }
+    }, true);
+    for (const type of ["pointerdown", "click"]) {
+      document2.addEventListener(type, hide, true);
+    }
+    document2.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        hide();
+      }
+    }, true);
+    window2.addEventListener("scroll", hide, true);
+    window2.addEventListener("resize", hide);
+    document2.addEventListener("fullscreenchange", hide);
+  }
+
   // src/shared/volume.js
   var clampVolume = (value) => Math.min(100, Math.max(0, Number(value) || 0));
   var VOLUME_STEPS = [1, 2, 5, 10];
@@ -206,7 +428,7 @@
   // src/shared/normalization-gain.js
   var NORMALIZATION_PROFILE = Object.freeze({ targetLufs: -18, energyHeadroomLu: 3, lookaheadMs: 20, attackMs: 1, releaseMs: 180, holdMs: 20, riseDbPerSecond: 24, peakDb: -10 });
   function createProgrammeState(selected = 0.3, energyHeadroomLu = NORMALIZATION_PROFILE.energyHeadroomLu) {
-    const history2 = [];
+    const history = [];
     const targetPower = 10 ** ((NORMALIZATION_PROFILE.targetLufs + 0.691) / 10), energyCeiling = targetPower * 10 ** (energyHeadroomLu / 10);
     let gain = 0, waiting = true, programmeGain = 1, shortCap = Infinity, time = 0, referenceHold = 0;
     return {
@@ -223,10 +445,10 @@
         if (waiting && (frame.rawPower < 1e-9 || frame.power < 1e-9)) return;
         waiting = false;
         time += frame.duration;
-        while (history2.length && history2[0].time <= time - 3) history2.shift();
+        while (history.length && history[0].time <= time - 3) history.shift();
         if (frame.rawPower < 1e-4 || frame.power <= 0) return;
-        history2.push({ time, power: frame.power, duration: frame.duration });
-        const ordered = history2.slice().sort((a, b) => a.power - b.power), duration = history2.reduce((sum, item) => sum + item.duration, 0);
+        history.push({ time, power: frame.power, duration: frame.duration });
+        const ordered = history.slice().sort((a, b) => a.power - b.power), duration = history.reduce((sum, item) => sum + item.duration, 0);
         let cumulative = 0, reference = 0;
         for (const item of ordered) {
           cumulative += item.duration;
@@ -448,19 +670,10 @@
     assertMediaOutputAvailable(window2, video);
     registry(window2).reserved.add(video);
   }
-  function registerExternalMediaOutput(window2, video) {
-    if (video && !ownsMediaOutput(window2, video)) {
-      registry(window2).external.add(video);
-    }
-  }
   function mediaOutputConflict() {
     const error = new Error("Another audio processor already owns this player");
     error.name = "AudioSourceConflict";
     return error;
-  }
-  function ownsMediaOutput(window2, video) {
-    const state = documents.get(window2);
-    return !!video && !!state && (state.reserved.has(video) || state.sources.has(video));
   }
   function acquireMediaOutput(window2, video) {
     installMediaOutputGuard(window2);
@@ -1125,55 +1338,12 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     };
   }
 
-  // src/platforms/twitch-extension-keys.js
-  var messageType = "tm-volume-player-key-v1";
-  var playerKeys = /* @__PURE__ */ new Set(["ArrowUp", "ArrowDown", " "]);
-  var recentCommands = /* @__PURE__ */ new WeakMap();
-  var extensionOrigin = (origin) => /^https:\/\/[a-z0-9-]+\.ext-twitch\.tv$/i.test(origin);
-  var interactive = 'input, textarea, select, button, a[href], [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="button"], [role="slider"], [role="combobox"]';
-  function validMessage(event) {
-    return extensionOrigin(event.origin) && event.data?.type === messageType && typeof event.data.id === "string" && event.data.id.length > 0 && event.data.id.length <= 64 && playerKeys.has(event.data.key) && !(event.data.key === " " && event.data.repeat);
-  }
-  function startTwitchExtensionKeys(window2) {
-    if (window2.parent === window2 || !extensionOrigin(window2.location.origin)) return;
-    window2.addEventListener("keydown", (event) => {
-      if (!playerKeys.has(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      if (event.key === " " && event.repeat) return;
-      if (event.target?.closest?.(interactive)) return;
-      window2.queueMicrotask(() => {
-        if (event.defaultPrevented) return;
-        event.preventDefault();
-        event.stopPropagation();
-        window2.parent.postMessage({ type: messageType, id: window2.crypto.randomUUID(), key: event.key, repeat: event.repeat }, "*");
-      });
-    });
-    window2.addEventListener("message", (event) => {
-      const frame = window2.document.activeElement;
-      if (validMessage(event) && frame?.tagName === "IFRAME" && frame.contentWindow === event.source) {
-        window2.parent.postMessage({ type: messageType, id: event.data.id, key: event.data.key, repeat: event.data.repeat === true }, "*");
-      }
-    });
-  }
-  function focusedTwitchExtensionKey(event, player) {
-    const frame = player?.ownerDocument.activeElement;
-    if (!validMessage(event) || !frame?.matches?.("iframe.extension-view__iframe") || !player.contains(frame) || frame.contentWindow !== event.source) return null;
-    let seen = recentCommands.get(frame);
-    if (!seen) {
-      seen = /* @__PURE__ */ new Set();
-      recentCommands.set(frame, seen);
-    }
-    if (seen.has(event.data.id)) return null;
-    seen.add(event.data.id);
-    if (seen.size > 64) seen.delete(seen.values().next().value);
-    return event.data.key;
-  }
-
   // src/shared/normalization-ui.js
   function createNormalizationIcon(document2) {
     const icon = document2.createElement("span");
     icon.className = "tm-normalization-icon";
     icon.hidden = true;
-    icon.title = "Auto-normalize volume is on";
+    icon.dataset.tmTooltip = "Auto-normalize volume is on";
     icon.setAttribute("aria-hidden", "true");
     const ns = "http://www.w3.org/2000/svg";
     const svg = document2.createElementNS(ns, "svg");
@@ -2175,8 +2345,8 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
   function normalizeVolumeSliderMode(mode) {
     return normalizeChoice(mode, MODES);
   }
-  function normalizeSliderLocation(location2) {
-    return normalizeChoice(location2, LOCATIONS);
+  function normalizeSliderLocation(location) {
+    return normalizeChoice(location, LOCATIONS);
   }
   function normalizeVolumeAppearance(appearance) {
     return normalizeChoice(appearance, APPEARANCES);
@@ -2309,8 +2479,8 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       write(keys.appearance, normalizeVolumeAppearance(appearance) || "new");
       updateOverlayAppearance(getOverlay());
     }
-    function setSliderLocation(location2) {
-      write(keys.location, normalizeSliderLocation(location2) || "controls");
+    function setSliderLocation(location) {
+      write(keys.location, normalizeSliderLocation(location) || "controls");
       onPlacementChanged();
     }
     function getSavedVolumeStep() {
@@ -2660,21 +2830,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     }
     return { getVideoElement, resetVideoElement, ensurePlayerPositioning };
   }
-
-  // src/shared/styles.js
-  function createStyleElement(document2, id) {
-    if (document2.getElementById(id)) return null;
-    const parent = document2.head || document2.documentElement;
-    if (!parent) return null;
-    const style = document2.createElement("style");
-    style.id = id;
-    parent.appendChild(style);
-    return style;
-  }
-  var fillStyleTemplate = (template, values) => template.replace(/\{\{([A-Za-z0-9]+)\}\}/g, (_, key) => {
-    if (!(key in values)) throw new Error(`Missing style token ${key}`);
-    return values[key];
-  });
 
   // src/shared/options-styles.js
   var OPTIONS_STYLE_TEMPLATE = String.raw`
@@ -3915,173 +4070,10 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     };
   }
 
-  // src/platforms/twitch-controls-visibility.js
-  function createTwitchControlsVisibilityManager({
-    window: window2,
-    MutationObserver: MutationObserver2,
-    getTargets,
-    areControlsHidden
-  }) {
-    const owners = /* @__PURE__ */ new Map();
-    let observer = null;
-    let observedTargets = [];
-    let disposed = false;
-    const touchedElements = /* @__PURE__ */ new Set();
-    function reveal() {
-      if (disposed || owners.size === 0) return;
-      const { root, shell, controls } = getTargets();
-      [root, shell, controls].filter(Boolean).forEach((element) => touchedElements.add(element));
-      if (shell) {
-        shell.classList.add("tm-volume-options-controls-shell-hold");
-        shell.setAttribute("aria-hidden", "false");
-        shell.style.opacity = "1";
-        shell.style.visibility = "visible";
-      }
-      if (root) {
-        root.classList.add("tm-volume-options-controls-hold");
-        root.setAttribute("data-a-visible", "true");
-        root.setAttribute("aria-hidden", "false");
-        root.style.opacity = "1";
-        root.style.visibility = "visible";
-      }
-      if (controls) {
-        controls.setAttribute("aria-hidden", "false");
-        controls.style.opacity = "1";
-        controls.style.visibility = "visible";
-      }
-      observeTargets();
-    }
-    function releaseStyles() {
-      const { root, shell, controls } = getTargets();
-      [root, shell, controls].filter(Boolean).forEach((element) => touchedElements.add(element));
-      for (const element of touchedElements) {
-        element?.classList?.remove("tm-volume-options-controls-shell-hold");
-        element?.classList?.remove("tm-volume-options-controls-hold");
-        element?.style?.removeProperty("opacity");
-        element?.style?.removeProperty("visibility");
-        element?.style?.removeProperty("pointer-events");
-      }
-      touchedElements.clear();
-    }
-    function disconnectObserver() {
-      observer?.disconnect();
-      observer = null;
-      observedTargets = [];
-    }
-    function observeTargets() {
-      if (disposed || owners.size === 0 || !MutationObserver2) return;
-      const { root, shell, controls } = getTargets();
-      const nextTargets = [shell, root, controls].filter(Boolean);
-      if (nextTargets.length === observedTargets.length && nextTargets.every((target, index) => target === observedTargets[index])) return;
-      disconnectObserver();
-      if (!nextTargets.length) return;
-      observedTargets = nextTargets;
-      observer = new MutationObserver2(() => {
-        if (owners.size && areControlsHidden()) reveal();
-      });
-      if (shell) observer.observe(shell, { attributes: true, attributeFilter: ["aria-hidden", "style", "class"] });
-      if (root) observer.observe(root, { attributes: true, attributeFilter: ["data-a-visible", "aria-hidden", "style", "class"] });
-      if (controls) observer.observe(controls, { attributes: true, attributeFilter: ["aria-hidden", "style", "class"] });
-    }
-    function clearOwnerTimer(owner) {
-      const entry = owners.get(owner);
-      if (entry?.timer) window2.clearTimeout(entry.timer);
-    }
-    function hold(owner, duration = 0, onExpire) {
-      if (disposed || !owner) return;
-      clearOwnerTimer(owner);
-      const entry = { timer: 0 };
-      owners.set(owner, entry);
-      reveal();
-      if (duration > 0) {
-        entry.timer = window2.setTimeout(() => {
-          entry.timer = 0;
-          release(owner);
-          onExpire?.();
-        }, duration);
-      }
-    }
-    function release(owner) {
-      if (!owners.has(owner)) return;
-      clearOwnerTimer(owner);
-      owners.delete(owner);
-      if (owners.size) {
-        reveal();
-        return;
-      }
-      disconnectObserver();
-      releaseStyles();
-    }
-    function has(owner) {
-      return owners.has(owner);
-    }
-    function dispose() {
-      if (disposed) return;
-      for (const owner of owners.keys()) clearOwnerTimer(owner);
-      owners.clear();
-      disconnectObserver();
-      releaseStyles();
-      disposed = true;
-    }
-    return { hold, release, has, reveal, dispose, get size() {
-      return owners.size;
-    } };
-  }
-
-  // src/platforms/twitch-audio-compatibility.js
-  var buttons = /* @__PURE__ */ new WeakMap();
-  var selector = '[data-a-target="seventv-player-audio-compressor-button"]';
-  var explanation = "7TV compressor unavailable while Volume Slider controls audio. Reload with Auto-normalize volume off to use it.";
-  function registerExistingTwitchAudio(window2, video) {
-    if (window2.document.querySelector('[data-a-target="seventv-player-audio-compressor-button"].is-active:not(.is-unavailable)')) {
-      registerExternalMediaOutput(window2, video);
-    }
-  }
-  function syncTwitchAudioCompatibility(window2, video, mutations) {
-    if (mutations && !mutations.some(({ target, addedNodes }) => target.nodeType === 1 && target.closest(selector) || [...addedNodes].some((node) => node.nodeType === 1 && (node.matches(selector) || node.querySelector(selector))))) {
-      return;
-    }
-    const owned = ownsMediaOutput(window2, video);
-    for (const button of window2.document.querySelectorAll(selector)) {
-      let saved = buttons.get(button);
-      if (owned) {
-        if (!saved) {
-          saved = {
-            disabled: button.disabled,
-            label: button.getAttribute("aria-label"),
-            title: button.getAttribute("title"),
-            hover: (event) => event.stopImmediatePropagation()
-          };
-          buttons.set(button, saved);
-          button.addEventListener("mouseenter", saved.hover, true);
-        }
-        if (!button.disabled) {
-          button.disabled = true;
-        }
-        if (button.getAttribute("aria-label") !== explanation) {
-          button.setAttribute("aria-label", explanation);
-        }
-        if (button.title !== explanation) {
-          button.title = explanation;
-        }
-      } else if (saved) {
-        button.disabled = saved.disabled;
-        for (const [attribute, value] of [["aria-label", saved.label], ["title", saved.title]]) {
-          if (value === null) {
-            button.removeAttribute(attribute);
-          } else {
-            button.setAttribute(attribute, value);
-          }
-        }
-        button.removeEventListener("mouseenter", saved.hover, true);
-        buttons.delete(button);
-      }
-    }
-  }
-
-  // src/platforms/twitch.js
-  function startTwitchVolumeSlider() {
+  // src/platforms/youtube.js
+  function startYouTubeVolumeSlider() {
     "use strict";
+    installPlayerTooltips(window, "youtube");
     let storage = null;
     try {
       storage = localStorage;
@@ -4093,18 +4085,19 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     const OPTIONS_STYLE_ID = "tm-volume-options-style";
     const OPTIONS_BUTTON_ID = "tm-volume-options-button";
     const OPTIONS_POPUP_ID = "tm-volume-options-popup";
-    const STORAGE_KEY = "tm-twitch-volume";
-    const MUTE_STORAGE_KEY = "tm-twitch-muted";
-    const VOLUME_MODE_KEY = "tm-twitch-volume-slider-mode";
-    const SLIDER_LOCATION_KEY = "tm-twitch-volume-slider-location";
-    const VOLUME_STEP_KEY = "tm-twitch-volume-slider-step";
-    const LEGACY_SNAP_TO_5_KEY = "tm-twitch-volume-slider-snap-to-5";
-    const ALWAYS_EXPANDED_KEY = "tm-twitch-volume-slider-always-expanded";
-    const OVERLAY_OPACITY_IDLE_KEY = "tm-twitch-volume-slider-opacity-idle";
-    const OVERLAY_OPACITY_ACTIVE_KEY = "tm-twitch-volume-slider-opacity-active";
-    const OVERLAY_SIZE_KEY = "tm-twitch-volume-slider-size";
-    const SLIDER_THICKNESS_KEY = "tm-twitch-volume-slider-thickness";
-    const VOLUME_APPEARANCE_KEY = "tm-twitch-volume-slider-appearance";
+    const OPTIONS_CLOSE_HIDE_CONTROLS_CLASS = "tm-volume-options-close-hide-controls";
+    const STORAGE_KEY = "tm-yt-volume";
+    const MUTE_STORAGE_KEY = "tm-yt-muted";
+    const VOLUME_MODE_KEY = "tm-yt-volume-slider-mode";
+    const SLIDER_LOCATION_KEY = "tm-yt-volume-slider-location";
+    const VOLUME_STEP_KEY = "tm-yt-volume-slider-step";
+    const LEGACY_SNAP_TO_5_KEY = "tm-yt-volume-slider-snap-to-5";
+    const ALWAYS_EXPANDED_KEY = "tm-yt-volume-slider-always-expanded";
+    const OVERLAY_OPACITY_IDLE_KEY = "tm-yt-volume-slider-opacity-idle";
+    const OVERLAY_OPACITY_ACTIVE_KEY = "tm-yt-volume-slider-opacity-active";
+    const OVERLAY_SIZE_KEY = "tm-yt-volume-slider-size";
+    const SLIDER_THICKNESS_KEY = "tm-yt-volume-slider-thickness";
+    const VOLUME_APPEARANCE_KEY = "tm-yt-volume-slider-appearance";
     const DEFAULT_OVERLAY_OPACITY_IDLE = 45;
     const DEFAULT_OVERLAY_OPACITY_ACTIVE = 95;
     const DEFAULT_OVERLAY_SIZE = 100;
@@ -4112,22 +4105,19 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     const STORAGE_WRITE_DEBOUNCE_MS = 150;
     const VOLUME_CHANGE_EXPANDED_HOLD_MS = 1200;
     const KEYBOARD_VOLUME_STEP = 5;
-    const VOLUME_LABEL_ROW_WIDTH_PX = 50;
-    const TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS = 5e3;
-    const KEYBOARD_CONTROLS_HOLD_MS = 3e3;
-    const TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR = '[data-a-target="player-settings-button"], button[aria-label="Settings"]';
-    const TWITCH_NATIVE_SETTINGS_UI_SELECTOR = `${TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR}, [data-a-target="player-settings-menu"], [data-a-target="player-settings-submenu"], [data-a-target="player-settings-submenu-back-button"]`;
-    const TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX = 720;
+    const NAV_REATTACH_DELAY_MS = 700;
+    const NAV_DEBOUNCE_MS = 180;
+    const INITIAL_ATTACH_RETRY_MS = 50;
+    const INITIAL_ATTACH_MAX_ATTEMPTS = 80;
+    const USER_VOLUME_INTENT_GRACE_MS = 5e3;
+    const USER_VOLUME_TOLERANCE = 1;
     const ON_VIDEO_IDLE_BOTTOM_PX = 12;
     const ON_VIDEO_MAX_CONTROLS_OFFSET_PX = 140;
-    const COMPACT_CONTROLS_MAX_WIDTH_PX = 640;
-    const VOLUME_ACCENT_LIGHT = "#a970ff";
-    const VOLUME_ACCENT_DARK = "#9146ff";
-    const VOLUME_ACCENT_MID = "#b38cff";
+    const VOLUME_ACCENT_LIGHT = "#cc4444";
+    const VOLUME_ACCENT_DARK = "#bb3333";
+    const VOLUME_ACCENT_MID = "#cc5555";
     const VOLUME_ARC_TRACK = "rgba(255, 255, 255, 0.38)";
     const VOLUME_PANEL_DROP_SHADOW = "drop-shadow(0 2px 5px rgba(0, 0, 0, 0.06))";
-    const STARTUP_MUTE_GUARD_MS = 4e3;
-    const STARTUP_MUTE_GUARD_INTERVAL_MS = 50;
     const USER_SETTINGS = {
       // Volume slider mode: 'saved', 'off', 'on', or 'replace-native'. Default: 'saved'
       volumeSliderMode: "saved",
@@ -4137,8 +4127,9 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       volumeStep: "saved",
       // Keep the volume pill expanded: 'saved', true, or false. Default: 'saved'
       alwaysExpanded: "saved",
-      // Opacity for the on-video slider when idle/focused: 'saved' or 0-100. Default: 'saved'
+      // On-video slider opacity when unfocused: 'saved' or 0-100 as a percentage. Default: 45
       overlayOpacityUnfocused: "saved",
+      // On-video slider opacity when focused/hovered: 'saved' or 0-100 as a percentage. Default: 95
       overlayOpacityFocused: "saved",
       // On-video slider size: 'saved' or 100-200 as a percentage. Default: 100
       overlaySize: "saved",
@@ -4149,35 +4140,25 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       // Loudness normalization: 'saved', true, or false. Default: off
       normalizeVolume: "saved"
     };
-    let cachedApi = null;
-    let cachedApiFromElement = null;
-    let startupLockUntil = 0;
-    let startupCorrectionApplied = false;
-    let stopActiveStartupMuteGuard = null;
-    let userIntentUntil = 0;
+    let cachedYtPlayer = null;
+    const nativeVolumeOwners = /* @__PURE__ */ new WeakSet();
+    const nativeMuteOwners = /* @__PURE__ */ new WeakSet();
     let navReattachTimer = 0;
-    let navLateRestoreTimer = 0;
     let navDebounceTimer = 0;
-    let lastKnownPath = window.location.pathname;
     let attachObserver = null;
     let attachObserverTarget = null;
     let attachBootstrapObserver = null;
-    let nativeSettingsObserver = null;
-    let nativeSettingsObserverTarget = null;
-    let delayedFirstAttachRestoreTimer = 0;
-    let playerBoundaryResizeFrame = 0;
+    let playerControlsObserver = null;
+    let playerControlsObserverTarget = null;
+    let requestedVolumeIntent = null;
     const overlayLifecycle = createOverlayLifecycle();
     const { getVideoElement, resetVideoElement, ensurePlayerPositioning } = createVideoLocator(document, window);
-    const USER_INTENT_GRACE_MS = 5e3;
-    const NAV_REATTACH_DELAY_MS = 700;
-    const NAV_LATE_RESTORE_DELAY_MS = 4200;
-    const NAV_DEBOUNCE_MS = 180;
     const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, isSliderOnVideo, setSliderLocation, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled } = createVolumeSettings({
       document,
       storage,
       userSettings: USER_SETTINGS,
       overlayId: OVERLAY_ID,
-      keys: { normalization: "tm-twitch-volume-slider-normalization", mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+      keys: { normalization: "tm-yt-volume-slider-normalization", mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
       defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
       onPlacementChanged: () => {
         attachSliderIfPossible();
@@ -4201,7 +4182,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         return document.getElementById(OVERLAY_ID);
       }
     });
-    registerExistingTwitchAudio(window, getVideoElement());
     const normalizer = createVolumeNormalizer({
       window,
       getVolume: getRawVolume,
@@ -4210,189 +4190,126 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       onStatusChanged: () => {
         syncNormalizationStatus(getOptionsPopup());
         syncNormalizationIcon();
-        syncTwitchAudioCompatibility(window, getVideoElement());
       }
     });
-    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null, preferredVolume) {
       const enabled = isNormalizationEnabled() && isOverlayEnabled();
       normalizer.setEnabled(enabled);
-      normalizer.bind(video);
+      normalizer.bind(video, preferredVolume);
       refreshOptionsPopupState();
       syncNormalizationIcon();
     }
     function syncNormalizationIcon() {
       updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
     }
-    const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
+    const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume, flushScheduledSaveVolume } = createVolumePersistence({
       window,
       storage,
       storageKey: STORAGE_KEY,
       debounceMs: STORAGE_WRITE_DEBOUNCE_MS,
       getVolumeStep
     });
-    const makeControlsVisibilityManager = () => createTwitchControlsVisibilityManager({
-      window,
-      MutationObserver: window.MutationObserver,
-      getTargets: () => ({
-        root: getTwitchPlayerControlsRoot(),
-        shell: getTwitchPlayerControlsShell(),
-        controls: getTwitchPlayerControlsSection()
-      }),
-      areControlsHidden: () => areTwitchControlsHidden()
-    });
-    let controlsVisibility = makeControlsVisibilityManager();
-    function getPlayerContainer(video = getVideoElement()) {
-      if (!video) {
-        return null;
+    function shouldHideNativeVolume() {
+      return isYouTubeSupportedPage() && isOverlayEnabled() && isNativeVolumeReplacementEnabled();
+    }
+    function ensureNativeVolumeVisibilityGuard() {
+      const style = createStyleElement(document, "tm-volume-native-visibility-style");
+      if (style) {
+        style.textContent = `
+html.tm-yt-volume-native-replacement-active .ytp-volume-area {
+  display: none !important;
+}
+            `;
       }
-      return video.closest('[data-a-target="video-player"], .video-player') || video.closest(".video-player__container") || video.parentElement;
-    }
-    function getVideoOverlayContainer(video = getVideoElement(), player = getPlayerContainer(video)) {
-      return video?.closest?.(".video-player__container") || player;
-    }
-    function isTwitchPreviewPlayer(player = getPlayerContainer()) {
-      const isBrowsePage = /^\/(?:$|(?:directory|following|search)(?:\/|$))/.test(window.location.pathname);
-      const rect = player?.getBoundingClientRect?.();
-      const width = Number(rect?.width);
-      return isBrowsePage && Number.isFinite(width) && width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
-    }
-    function getTwitchControlsHost(player = getPlayerContainer()) {
-      return player?.querySelector?.(".player-controls__left-control-group") || document.querySelector("#channel-player .player-controls__left-control-group") || document.querySelector('[aria-label="Player Controls"] .player-controls__left-control-group') || document.querySelector(".player-controls__left-control-group");
-    }
-    function getTwitchPlayerControlsRoot(player = getPlayerContainer()) {
-      return player?.querySelector?.('[data-a-target="player-controls"].player-controls') || player?.querySelector?.('[data-a-target="player-controls"]') || document.querySelector('[data-a-target="player-controls"].player-controls') || document.querySelector('[data-a-target="player-controls"]');
-    }
-    function getTwitchPlayerControlsShell(player = getPlayerContainer()) {
-      return getTwitchPlayerControlsRoot(player)?.closest?.(".tw-transition") || null;
-    }
-    function getTwitchPlayerControlsSection(player = getPlayerContainer()) {
-      return player?.querySelector?.('#channel-player, [aria-label="Player Controls"]') || document.querySelector('#channel-player, [aria-label="Player Controls"]');
-    }
-    function getTwitchRightControlsHost(player = getPlayerContainer()) {
-      return player?.querySelector?.(".player-controls__right-control-group") || document.querySelector("#channel-player .player-controls__right-control-group") || document.querySelector('[aria-label="Player Controls"] .player-controls__right-control-group') || document.querySelector(".player-controls__right-control-group");
-    }
-    function getTwitchSettingsButton(host = getTwitchRightControlsHost()) {
-      return host?.querySelector?.('[data-a-target="player-settings-button"]') || host?.querySelector?.('button[aria-label="Settings"]') || null;
-    }
-    function getLayoutWidth(element) {
-      const rectWidth = element?.getBoundingClientRect?.().width || 0;
-      return rectWidth > 0 ? rectWidth : element?.clientWidth || 0;
-    }
-    function updateControlsCompactLayout(overlay, controlsHost) {
-      if (!overlay) return;
-      const controlsWidth = getLayoutWidth(getTwitchPlayerControlsRoot()) || getLayoutWidth(getTwitchPlayerControlsSection()) || getLayoutWidth(controlsHost);
-      overlay.classList.toggle(
-        "tm-volume-compact-layout",
-        !isSliderOnVideo() && controlsWidth > 0 && controlsWidth <= COMPACT_CONTROLS_MAX_WIDTH_PX
+      document.documentElement.classList.toggle(
+        "tm-yt-volume-native-replacement-active",
+        shouldHideNativeVolume()
       );
     }
-    function isNativeSettingsMenuOpen() {
-      return getTwitchSettingsButton()?.getAttribute("aria-expanded") === "true";
-    }
-    function isClickOnNativeSettingsUi(event) {
-      return !!event.target?.closest?.(TWITCH_NATIVE_SETTINGS_UI_SELECTOR);
-    }
-    function getDirectChildOf(parent, child) {
-      let node = child;
-      while (node && node.parentElement && node.parentElement !== parent) {
-        node = node.parentElement;
+    function applyNativeVolumeVisibility() {
+      ensureNativeVolumeVisibilityGuard();
+      const shouldHideNative = shouldHideNativeVolume();
+      if (shouldHideNative) {
+        const overlay = document.getElementById(OVERLAY_ID);
+        const player = getPlayerContainer();
+        const controlsHost = getYouTubeControlsHost(player);
+        if (overlay && player) {
+          placeOverlay(overlay, player, controlsHost);
+        }
       }
-      return node && node.parentElement === parent ? node : null;
     }
-    function getNativeVolumeGroup(controlsHost = getTwitchControlsHost()) {
-      if (!controlsHost) return null;
-      const muteButton = controlsHost.querySelector('[data-a-target="player-mute-unmute-button"]');
-      return muteButton ? getDirectChildOf(controlsHost, muteButton) : null;
+    function getPlayerContainer(video = getVideoElement()) {
+      const moviePlayer = document.getElementById("movie_player");
+      if (moviePlayer) {
+        return moviePlayer;
+      }
+      return video ? video.parentElement : null;
     }
-    function getTwitchSettingsWrapper(host = getTwitchRightControlsHost()) {
-      const settingsBtn = getTwitchSettingsButton(host);
-      return host && settingsBtn ? getDirectChildOf(host, settingsBtn) : null;
+    function getYouTubeControlsHost(player) {
+      if (!player) return null;
+      return player.querySelector(".ytp-left-controls") || document.querySelector(".ytp-left-controls");
     }
-    function positionOverlayAboveControls(overlay, overlayHost, player = getPlayerContainer()) {
-      const controls = getTwitchPlayerControlsSection(player);
-      if (!overlay || !overlayHost || !controls) {
+    function getNativeVolumeArea(controlsHost) {
+      return controlsHost?.querySelector?.(".ytp-volume-area") || document.querySelector(".ytp-volume-area");
+    }
+    function positionOverlayAboveScrubber(overlay, player) {
+      const progressBar = document.querySelector(".ytp-progress-bar-padding");
+      const barEl = progressBar ? progressBar.closest(".ytp-progress-bar") || progressBar.parentElement : null;
+      const ref = barEl || progressBar;
+      if (!overlay || !player || !ref) {
         if (overlay) overlay.style.bottom = `${ON_VIDEO_IDLE_BOTTOM_PX}px`;
         return;
       }
-      const playerRect = overlayHost.getBoundingClientRect();
-      const controlsRect = controls.getBoundingClientRect();
-      const hasUsableControlsRect = controlsRect.width > 0 && controlsRect.height > 0 && controlsRect.top >= playerRect.top && controlsRect.top < playerRect.bottom;
-      if (!hasUsableControlsRect) {
+      const playerRect = player.getBoundingClientRect();
+      const barRect = ref.getBoundingClientRect();
+      const hasUsableBarRect = barRect.width > 0 && barRect.height > 0 && barRect.top >= playerRect.top && barRect.top < playerRect.bottom;
+      if (!hasUsableBarRect) {
         overlay.style.bottom = `${ON_VIDEO_IDLE_BOTTOM_PX}px`;
         return;
       }
-      const bottomPx = playerRect.bottom - controlsRect.top + 8;
+      const bottomPx = playerRect.bottom - barRect.top + 8;
       const safeBottomPx = Math.min(Math.max(20, bottomPx), ON_VIDEO_MAX_CONTROLS_OFFSET_PX);
       overlay.style.bottom = `${safeBottomPx}px`;
     }
-    function updateVideoOverlayPosition(overlay, overlayHost, player = getPlayerContainer()) {
-      if (!overlay || !overlayHost || !isSliderOnVideo()) return;
-      if (areTwitchControlsHidden(player)) {
+    function updateVideoOverlayPosition(overlay, player) {
+      if (!overlay || !player || !isSliderOnVideo()) return;
+      if (player.classList.contains("ytp-autohide")) {
         overlay.style.bottom = `${ON_VIDEO_IDLE_BOTTOM_PX}px`;
         return;
       }
-      positionOverlayAboveControls(overlay, overlayHost, player);
+      positionOverlayAboveScrubber(overlay, player);
     }
     function placeOverlayInControls(overlay, controlsHost) {
       if (!overlay || !controlsHost) return;
-      const nativeVolumeGroup = getNativeVolumeGroup(controlsHost);
-      if (isNativeVolumeReplacementEnabled() && nativeVolumeGroup && nativeVolumeGroup.parentElement === controlsHost) {
-        if (overlay.parentElement !== controlsHost || overlay.nextElementSibling !== nativeVolumeGroup) {
-          controlsHost.insertBefore(overlay, nativeVolumeGroup);
+      const nativeVolumeArea = getNativeVolumeArea(controlsHost);
+      if (isNativeVolumeReplacementEnabled() && nativeVolumeArea && nativeVolumeArea.parentElement === controlsHost) {
+        if (overlay.parentElement !== controlsHost || overlay.nextElementSibling !== nativeVolumeArea) {
+          controlsHost.insertBefore(overlay, nativeVolumeArea);
         }
-        return;
-      }
-      if (nativeVolumeGroup && nativeVolumeGroup.parentElement === controlsHost) {
-        if (overlay.parentElement === controlsHost && overlay.previousElementSibling === nativeVolumeGroup) {
-          return;
-        }
-        nativeVolumeGroup.insertAdjacentElement("afterend", overlay);
-        return;
-      }
-      if (overlay.parentElement !== controlsHost || overlay.nextElementSibling) {
+      } else if (overlay.parentElement !== controlsHost || overlay.nextElementSibling) {
         controlsHost.appendChild(overlay);
       }
     }
     function placeOverlay(overlay, player, controlsHost) {
       if (!overlay || !player) return;
       if (isSliderOnVideo()) {
-        const overlayHost = getVideoOverlayContainer(void 0, player);
-        ensurePlayerPositioning(overlayHost);
-        if (overlay.parentElement !== overlayHost) {
-          overlayHost.appendChild(overlay);
+        ensurePlayerPositioning(player);
+        if (overlay.parentElement !== player) {
+          player.appendChild(overlay);
         }
-        updateVideoOverlayPosition(overlay, overlayHost, player);
+        updateVideoOverlayPosition(overlay, player);
       } else if (controlsHost) {
         placeOverlayInControls(overlay, controlsHost);
         overlay.style.bottom = "";
       }
-      updateControlsCompactLayout(overlay, controlsHost);
       const expanded = overlay.classList.contains("tm-expanded") || isAlwaysExpandedEnabled();
       setOverlayExpanded(overlay, expanded, true);
       updateOverlayOpacity(overlay);
     }
-    function applyNativeVolumeVisibility() {
-      const video = getVideoElement();
-      const player = getPlayerContainer(video);
-      const controlsHost = getTwitchControlsHost(player);
-      const nativeVolumeGroup = getNativeVolumeGroup(controlsHost);
-      const isPreviewPlayer = isTwitchPreviewPlayer(player);
-      if (nativeVolumeGroup) {
-        const shouldHideNative = !isPreviewPlayer && isOverlayEnabled() && isNativeVolumeReplacementEnabled();
-        const nextDisplay = shouldHideNative ? "none" : "";
-        if (nativeVolumeGroup.style.display !== nextDisplay) {
-          nativeVolumeGroup.style.display = nextDisplay;
-        }
-      }
-      const overlay = document.getElementById(OVERLAY_ID);
-      if (overlay && player && !isPreviewPlayer && !isOverlayInteractionFocused(overlay)) {
-        placeOverlay(overlay, player, controlsHost);
-      }
-    }
     function createStylesIfNeeded() {
       installVolumeSliderStyles({
         document,
-        platform: "twitch",
+        platform: "youtube",
         overlayId: OVERLAY_ID,
         valueLabelId: VALUE_LABEL_ID,
         panelDropShadow: VOLUME_PANEL_DROP_SHADOW
@@ -4412,19 +4329,9 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       arcTrack: VOLUME_ARC_TRACK,
       expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
     });
-    function areTwitchControlsHidden(player = getPlayerContainer()) {
-      const controlsRoot = getTwitchPlayerControlsRoot(player);
-      const controlsShell = getTwitchPlayerControlsShell(player);
-      const controls = getTwitchPlayerControlsSection(player);
-      if (controlsShell?.getAttribute("aria-hidden") === "true") return true;
-      if (controlsRoot?.getAttribute("data-a-visible") === "false") return true;
-      if (controlsRoot?.getAttribute("aria-hidden") === "true") return true;
-      if (!controls) return false;
-      if (controls.getAttribute("aria-hidden") === "true") return true;
-      const shellStyle = controlsShell ? window.getComputedStyle(controlsShell) : null;
-      const rootStyle = controlsRoot ? window.getComputedStyle(controlsRoot) : null;
-      const controlsStyle = window.getComputedStyle(controls);
-      return shellStyle?.display === "none" || shellStyle?.visibility === "hidden" || Number(shellStyle?.opacity) === 0 || rootStyle?.display === "none" || rootStyle?.visibility === "hidden" || Number(rootStyle?.opacity) === 0 || controlsStyle.display === "none" || controlsStyle.visibility === "hidden" || Number(controlsStyle.opacity) === 0;
+    function areYouTubeControlsHidden() {
+      const player = getPlayerContainer();
+      return !!player?.classList?.contains("ytp-autohide") || !!player?.classList?.contains("ytp-hide-controls");
     }
     function finishExpandedHoldIfDue(overlay) {
       if (!overlay?.isConnected) {
@@ -4439,6 +4346,10 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         return;
       }
       clearExpandedHold(overlay);
+      if (areYouTubeControlsHidden()) {
+        setOverlayExpanded(overlay, false);
+        return;
+      }
       collapseOverlayIfIdle(overlay, true);
     }
     function collapseOverlayIfIdle(overlay, force = false) {
@@ -4447,57 +4358,27 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
           setOverlayExpanded(overlay, true);
           return;
         }
-        if (overlay.dataset.tmKeepExpanded === "true") {
+        if (overlay.dataset.tmKeepExpanded === "true" && !areYouTubeControlsHidden()) {
           return;
+        }
+        if (overlay.dataset.tmKeepExpanded === "true") {
+          clearExpandedHold(overlay);
         }
         if (force || !shouldKeepOverlayExpanded(overlay)) {
           setOverlayExpanded(overlay, false);
         }
       }, 0);
     }
-    function getTwitchPlayerApi(video) {
-      try {
-        const playerSel = 'div[data-a-target="player-overlay-click-handler"], [data-a-target="video-player"], .video-player';
-        const player = getPlayerContainer(video);
-        const candidates = [
-          video?.closest?.(playerSel),
-          player,
-          player?.closest?.(playerSel),
-          player?.querySelector?.(playerSel),
-          document.querySelector(playerSel)
-        ].filter(Boolean);
-        const uniqueCandidates = candidates.filter((candidate, index) => candidates.indexOf(candidate) === index);
-        if (cachedApi && uniqueCandidates.includes(cachedApiFromElement)) {
-          return cachedApi;
-        }
-        for (const el of uniqueCandidates) {
-          let instance;
-          for (const key in el) {
-            if (key.startsWith("__reactInternalInstance$") || key.startsWith("__reactFiber$")) {
-              instance = el[key];
-              break;
-            }
-          }
-          if (!instance) continue;
-          let parent = instance.return;
-          for (let i = 0; i < 50; i++) {
-            if (!parent || !parent.memoizedProps) break;
-            const player2 = parent.memoizedProps.mediaPlayerInstance;
-            if (player2) {
-              const api = player2.core ?? player2.playerInstance?.core ?? player2;
-              if (typeof api?.getVolume === "function" && typeof api?.setVolume === "function") {
-                cachedApi = api;
-                cachedApiFromElement = el;
-                return api;
-              }
-            }
-            parent = parent.return;
-          }
-        }
-      } catch (e) {
+    function getYouTubePlayer() {
+      if (cachedYtPlayer && cachedYtPlayer.isConnected && typeof cachedYtPlayer.getVolume === "function" && typeof cachedYtPlayer.setVolume === "function") {
+        return cachedYtPlayer;
       }
-      cachedApi = null;
-      cachedApiFromElement = null;
+      const player = document.getElementById("movie_player");
+      if (player && typeof player.getVolume === "function" && typeof player.setVolume === "function") {
+        cachedYtPlayer = player;
+        return player;
+      }
+      cachedYtPlayer = null;
       return null;
     }
     function getVolume(video) {
@@ -4507,141 +4388,77 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       return normalizer.getPreferredVolume(video, getRawVolume(video));
     }
     function getRawVolume(video) {
-      try {
-        const api = getTwitchPlayerApi(video);
-        if (api) {
-          const vol = api.getVolume();
-          return Math.round((typeof vol === "number" ? vol : 0) * 100);
+      if (!nativeVolumeOwners.has(video)) {
+        try {
+          const ytPlayer = getYouTubePlayer();
+          if (ytPlayer) return Math.round(ytPlayer.getVolume());
+        } catch {
         }
-      } catch (e) {
       }
       return Math.round((Number(video?.volume) || 0) * 100);
     }
-    function setNativeVideoMuted(video, muted) {
-      if (!video) return;
-      video.muted = video.defaultMuted = !!muted;
+    function isMuted(video) {
+      if (!nativeMuteOwners.has(video)) {
+        try {
+          const ytPlayer = getYouTubePlayer();
+          if (ytPlayer && typeof ytPlayer.isMuted === "function") return ytPlayer.isMuted();
+        } catch {
+        }
+      }
+      return !!video.muted;
+    }
+    function toggleMute(video) {
+      setMuted(video, !isMuted(video));
+    }
+    function setMuted(video, muted) {
+      try {
+        const ytPlayer = getYouTubePlayer();
+        const method = muted ? "mute" : "unMute";
+        if (typeof ytPlayer?.[method] === "function") {
+          ytPlayer[method]();
+          nativeMuteOwners.delete(video);
+          return;
+        }
+      } catch {
+      }
+      nativeMuteOwners.add(video);
+      video.muted = !!muted;
     }
     function setVolume(video, value, options = {}) {
       normalizer.setPreferredVolume(video, value, options);
     }
     function setRawVolume(video, value, options = {}) {
-      const preserveMute = options.preserveMute === true;
-      const api = getTwitchPlayerApi(video);
-      if (api) {
-        if (!preserveMute) {
-          try {
-            if (api.isMuted?.()) {
-              if (typeof api.setMuted === "function") api.setMuted(false);
-              else setNativeVideoMuted(video, false);
-            }
-          } catch (e) {
-            setNativeVideoMuted(video, false);
-          }
-        }
-        try {
-          api.setVolume(Math.min(1, Math.max(0, value / 100)));
+      if (!options.preserveMute && isMuted(video)) setMuted(video, false);
+      const ytPlayer = getYouTubePlayer();
+      try {
+        if (ytPlayer) {
+          ytPlayer.setVolume(value);
+          nativeVolumeOwners.delete(video);
           return;
-        } catch (e) {
         }
+      } catch {
       }
+      nativeVolumeOwners.add(video);
       video.volume = value / 100;
-      if (!preserveMute) {
-        setNativeVideoMuted(video, false);
-      }
-    }
-    function isMuted(video) {
-      try {
-        const api = getTwitchPlayerApi(video);
-        if (api && api.isMuted) return api.isMuted();
-      } catch (e) {
-      }
-      return !!video.muted;
-    }
-    function isMutedForDisplay(video) {
-      const savedMute = Date.now() <= startupLockUntil ? readSavedMute() : null;
-      return savedMute ?? isMuted(video);
-    }
-    function setMuted(video, muted) {
-      const nextMuted = !!muted;
-      if (!nextMuted) {
-        stopStartupMuteGuard();
-      }
-      try {
-        const api = getTwitchPlayerApi(video);
-        if (api && api.setMuted) {
-          api.setMuted(nextMuted);
-          setNativeVideoMuted(video, nextMuted);
-          return;
-        }
-      } catch (e) {
-      }
-      setNativeVideoMuted(video, nextMuted);
-    }
-    function toggleMute(video) {
-      setMuted(video, !isMutedForDisplay(video));
+      if (!options.preserveMute) video.muted = false;
     }
     function restoreSavedVolume(video) {
-      const savedMute = readSavedMute();
-      const wasMuted = savedMute === null ? isMuted(video) : savedMute;
-      if (savedMute === true) {
-        setMuted(video, true);
-      }
+      const wasMuted = isMuted(video);
       const value = getSavedVolume();
       if (value !== null) {
-        setVolume(video, value, { preserveMute: wasMuted });
+        setVolume(video, value);
       }
-      setMuted(video, wasMuted);
-      if (wasMuted) {
-        startStartupMuteGuard(video);
-      }
-    }
-    function readSavedMute() {
       try {
         const savedMute = localStorage.getItem(MUTE_STORAGE_KEY);
-        if (savedMute === "true") return true;
-        if (savedMute === "false") return false;
+        if (savedMute === "true") {
+          setMuted(video, true);
+        } else if (savedMute === "false") {
+          setMuted(video, false);
+        } else if (wasMuted && !isMuted(video)) {
+          setMuted(video, true);
+        }
       } catch (e) {
       }
-      return null;
-    }
-    function restoreSavedVolumeBeforeControls(video = getVideoElement()) {
-      if (!video) return false;
-      startupLockUntil = Math.max(startupLockUntil, Date.now() + 2e3);
-      restoreSavedVolume(video);
-      return true;
-    }
-    function stopStartupMuteGuard() {
-      stopActiveStartupMuteGuard?.();
-      stopActiveStartupMuteGuard = null;
-    }
-    function startStartupMuteGuard(video) {
-      if (!shouldHoldSavedMute(video)) return;
-      stopStartupMuteGuard();
-      const guardUntil = Math.max(startupLockUntil, Date.now() + STARTUP_MUTE_GUARD_MS);
-      const enforceSavedMute = () => {
-        if (Date.now() > guardUntil || !shouldHoldSavedMute(video)) {
-          stopStartupMuteGuard();
-          return;
-        }
-        try {
-          const api = getTwitchPlayerApi(video);
-          if (api?.setMuted && (!api.isMuted || !api.isMuted())) {
-            api.setMuted(true);
-          }
-        } catch (e) {
-        }
-        if (!video.muted || !video.defaultMuted) {
-          setNativeVideoMuted(video, true);
-        }
-      };
-      const timer = window.setInterval(enforceSavedMute, STARTUP_MUTE_GUARD_INTERVAL_MS);
-      stopActiveStartupMuteGuard = () => {
-        window.clearInterval(timer);
-      };
-      enforceSavedMute();
-    }
-    function shouldHoldSavedMute(video) {
-      return !!video?.isConnected && readSavedMute() === true && Date.now() > userIntentUntil;
     }
     function saveMute(muted) {
       try {
@@ -4649,112 +4466,99 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       } catch (e) {
       }
     }
-    function markUserVolumeIntent() {
-      cancelDelayedFirstAttachRestore();
-      stopStartupMuteGuard();
-      userIntentUntil = Date.now() + USER_INTENT_GRACE_MS;
-    }
     function setSliderFromPlayer(slider, label, video) {
-      try {
-        const muted = isMutedForDisplay(video);
-        const displayValue = getUnderlyingVolume(video);
-        slider.value = String(displayValue);
-        if (label) {
-          label.textContent = muted ? "Muted" : `${displayValue}%`;
-        }
-        updateSliderBar(slider);
-        updateVolumeIndicator(document.getElementById(OVERLAY_ID), displayValue, muted);
-      } catch (e) {
+      const muted = isMuted(video);
+      const displayValue = muted ? getUnderlyingVolume(video) : getVolume(video);
+      slider.value = String(displayValue);
+      if (label) {
+        label.textContent = muted ? "Muted" : `${displayValue}%`;
       }
+      updateSliderBar(slider);
+      updateVolumeIndicator(document.getElementById(OVERLAY_ID), displayValue, muted);
     }
     function ensureOptionsStyles() {
       installOptionsStyles({
         document,
-        platform: "twitch",
+        platform: "youtube",
         styleId: OPTIONS_STYLE_ID,
         optionsButtonId: OPTIONS_BUTTON_ID,
         optionsPopupId: OPTIONS_POPUP_ID,
-        accentDark: VOLUME_ACCENT_DARK
+        accentDark: VOLUME_ACCENT_DARK,
+        closeHideControlsClass: OPTIONS_CLOSE_HIDE_CONTROLS_CLASS
       });
     }
-    function getVolumeModeLabel(mode = getVolumeSliderMode()) {
-      if (mode === "off") return "Off";
-      return mode === "replace-native" ? "Replace native" : "On";
+    function closeYouTubeSettingsPopupIfOpen() {
+      const isOpen = Array.from(document.querySelectorAll(".ytp-settings-menu")).some((popup) => popup.style.display !== "none" && popup.offsetParent !== null);
+      if (isOpen) {
+        document.querySelector(".ytp-settings-button")?.click();
+      }
     }
     function updateOptionsButtonState(btn = document.getElementById(OPTIONS_BUTTON_ID)) {
       if (!btn) return;
       const mode = getVolumeSliderMode();
-      const label = `Volume Slider Options (${getVolumeModeLabel(mode)})`;
-      btn.dataset.tmVolumeMode = mode;
-      btn.setAttribute("aria-label", label);
-      btn.setAttribute("title", label);
+      const label = "Volume Slider Options";
+      if (btn.dataset.tmVolumeMode !== mode) {
+        btn.dataset.tmVolumeMode = mode;
+      }
+      if (btn.getAttribute("aria-label") !== label) {
+        btn.setAttribute("aria-label", label);
+      }
+      if (btn.dataset.tmTooltip !== label) {
+        btn.dataset.tmTooltip = label;
+      }
+      if (btn.hasAttribute("title")) {
+        btn.removeAttribute("title");
+      }
+    }
+    function getRightControlsHost(player) {
+      if (!player) return null;
+      return player.querySelector(".ytp-right-controls-left") || player.querySelector(".ytp-right-controls");
+    }
+    function isOptionsButtonInPreferredSlot() {
+      const player = getPlayerContainer();
+      const host = getRightControlsHost(player);
+      const settingsBtn = host?.querySelector?.(".ytp-settings-button");
+      const btn = document.getElementById(OPTIONS_BUTTON_ID);
+      return !!(host && settingsBtn && btn && btn.parentElement === host && btn.nextElementSibling === settingsBtn);
     }
     function injectVolumeOptionsButton() {
       ensureOptionsStyles();
       const player = getPlayerContainer();
-      if (isTwitchPreviewPlayer(player)) {
-        removeVolumeOptionsButton();
-        return;
-      }
-      const host = getTwitchRightControlsHost(player || void 0);
-      const settingsWrapper = getTwitchSettingsWrapper(host);
-      const settingsBtn = getTwitchSettingsButton(host);
-      if (!host || !settingsWrapper || !settingsBtn) return;
-      ensureNativeSettingsHoldIsolation();
-      let wrapper = document.getElementById(`${OPTIONS_BUTTON_ID}-wrapper`);
-      if (wrapper && wrapper.parentElement === host && wrapper.nextElementSibling === settingsWrapper) {
+      const host = getRightControlsHost(player);
+      const settingsBtn = host?.querySelector?.(".ytp-settings-button");
+      if (!host || !settingsBtn) return;
+      let btn = document.getElementById(OPTIONS_BUTTON_ID);
+      if (btn && btn.parentElement === host && btn.nextElementSibling === settingsBtn) {
         updateOptionsButtonState();
         return;
       }
-      if (wrapper && wrapper.querySelector(`#${OPTIONS_BUTTON_ID}`)) {
-        host.insertBefore(wrapper, settingsWrapper);
-        updateOptionsButtonState();
-        return;
-      }
-      wrapper?.remove();
-      wrapper = document.createElement("div");
-      wrapper.id = `${OPTIONS_BUTTON_ID}-wrapper`;
-      wrapper.className = "InjectLayout-sc-1i43xsx-0 iDMNUO";
-      const inner = document.createElement("div");
-      inner.className = "Layout-sc-1xcs6mc-0 ScLayoutCssVars-sc-1pn65j5-0 jfyitl kDsKkP";
-      const btn = document.createElement("button");
+      btn?.remove();
+      btn = document.createElement("button");
       btn.id = OPTIONS_BUTTON_ID;
       btn.type = "button";
-      btn.className = settingsBtn.className || "ScCoreButton-sc-ocjdkq-0 ScButtonIcon-sc-9yap0r-0";
+      btn.className = "ytp-button";
+      btn.dataset.priority = "6";
       btn.setAttribute("aria-haspopup", "true");
       btn.setAttribute("aria-expanded", "false");
-      const figure = document.createElement("div");
-      figure.className = "ButtonIconFigure-sc-1emm8lf-0 lnTwMD";
-      const svgWrap = document.createElement("div");
-      svgWrap.className = "ScSvgWrapper-sc-wkgzod-0 kccyMt tw-svg";
-      svgWrap.appendChild(createOptionsButtonIconSvg(document));
-      figure.appendChild(svgWrap);
-      btn.appendChild(figure);
+      btn.appendChild(createOptionsButtonIconSvg(document));
       updateOptionsButtonState(btn);
       btn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         toggleVolumeOptionsPopup();
       });
-      inner.appendChild(btn);
-      wrapper.appendChild(inner);
-      host.insertBefore(wrapper, settingsWrapper);
-    }
-    function isOptionsButtonInPreferredSlot() {
-      const host = getTwitchRightControlsHost();
-      const settingsWrapper = getTwitchSettingsWrapper(host);
-      const wrapper = document.getElementById(`${OPTIONS_BUTTON_ID}-wrapper`);
-      return !!(host && settingsWrapper && wrapper && wrapper.parentElement === host && wrapper.nextElementSibling === settingsWrapper);
+      host.insertBefore(btn, settingsBtn);
+      ensurePlayerControlsObserver();
     }
     function removeVolumeOptionsButton() {
-      document.getElementById(`${OPTIONS_BUTTON_ID}-wrapper`)?.remove();
+      document.getElementById(OPTIONS_BUTTON_ID)?.remove();
       closeVolumeOptionsPopup();
     }
     let optionsPopupOutsideHandler = null;
     let optionsPopupKeyboardCleanup = null;
     let optionsPopupRepositionHandler = null;
+    let optionsCloseHideControlsHandler = null;
     let optionsPopupOpener = null;
-    let optionsPostCloseOutsideHandler = null;
     function getOptionsPopup() {
       return document.getElementById(OPTIONS_POPUP_ID);
     }
@@ -4799,26 +4603,25 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     }
     function ensureOptionsPopup() {
       const player = getPlayerContainer();
-      const overlayHost = getVideoOverlayContainer(void 0, player);
-      if (!overlayHost) return null;
+      if (!player) return null;
       let popup = getOptionsPopup();
       if (!popup || !popup.isConnected) {
         closeVolumeOptionsPopup();
         popup?.remove();
         popup = buildOptionsPopup();
-        ensurePlayerPositioning(overlayHost);
-        overlayHost.appendChild(popup);
+        ensurePlayerPositioning(player);
+        player.appendChild(popup);
       }
       return popup;
     }
     function positionOptionsPopup(popup, resetScroll = false) {
       const btn = document.getElementById(OPTIONS_BUTTON_ID);
       const player = getPlayerContainer();
-      const overlayHost = getVideoOverlayContainer(void 0, player);
-      if (!btn || !overlayHost || !popup) return;
-      const playerRect = overlayHost.getBoundingClientRect();
+      if (!btn || !player || !popup) return;
+      const playerRect = player.getBoundingClientRect();
       const btnRect = btn.getBoundingClientRect();
-      const bottomPx = playerRect.bottom - btnRect.top + 8;
+      const barRect = Array.from(player.querySelectorAll(".ytp-progress-bar-padding")).map((bar) => (bar.closest(".ytp-progress-bar") || bar.parentElement)?.getBoundingClientRect()).find((rect) => rect && rect.width > 0 && rect.height > 0);
+      const bottomPx = barRect ? playerRect.bottom - barRect.top + 8 : playerRect.bottom - btnRect.top + 8;
       popup.style.right = `${Math.max(8, playerRect.right - btnRect.right)}px`;
       popup.style.bottom = `${Math.max(8, bottomPx)}px`;
       popup.style.left = "auto";
@@ -4832,96 +4635,67 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       if (resetScroll) body.scrollTop = 0;
       else body.scrollTop = Math.min(body.scrollTop, Math.max(0, body.scrollHeight - body.clientHeight));
     }
-    function hideTwitchControls() {
-      const controlsRoot = getTwitchPlayerControlsRoot();
-      const controlsShell = getTwitchPlayerControlsShell();
-      const controls = getTwitchPlayerControlsSection();
-      if (controlsShell) {
-        controlsShell.setAttribute("aria-hidden", "true");
-      }
-      if (controlsRoot) {
-        controlsRoot.setAttribute("data-a-visible", "false");
-        controlsRoot.setAttribute("aria-hidden", "true");
-      }
-      if (controls) {
-        controls.setAttribute("aria-hidden", "true");
-      }
-    }
-    function isPointerOverTwitchPlayerArea() {
+    function keepYouTubeControlsVisible() {
       const player = getPlayerContainer();
-      const controlsRoot = getTwitchPlayerControlsRoot();
-      return !!(player?.matches?.(":hover") || controlsRoot?.matches?.(":hover"));
+      if (!player) return;
+      clearOptionsCloseControlsHide();
+      player.classList.add("tm-volume-options-controls-hold");
+      if (typeof player.showControls === "function") {
+        try {
+          player.showControls();
+        } catch (e) {
+        }
+      }
+      player.classList.remove("ytp-autohide", "ytp-hide-controls");
     }
-    function isClickOutsideTwitchPlayerArea(event) {
-      const target = event.target;
-      if (getPlayerContainer()?.contains?.(target)) return false;
-      if (getTwitchPlayerControlsRoot()?.contains?.(target)) return false;
-      return true;
+    function releaseYouTubeControlsVisibility() {
+      getPlayerContainer()?.classList?.remove("tm-volume-options-controls-hold");
     }
-    function isTwitchVideoSurfaceClick(event) {
+    function clearOptionsCloseControlsHide() {
+      getPlayerContainer()?.classList?.remove(OPTIONS_CLOSE_HIDE_CONTROLS_CLASS);
+      if (!optionsCloseHideControlsHandler) return;
+      document.removeEventListener("pointermove", optionsCloseHideControlsHandler, true);
+      document.removeEventListener("pointerdown", optionsCloseHideControlsHandler, true);
+      optionsCloseHideControlsHandler = null;
+    }
+    function hideControlsUntilPlayerPointerReturn() {
+      const player = getPlayerContainer();
+      if (!player) return;
+      clearOptionsCloseControlsHide();
+      player.classList.add(OPTIONS_CLOSE_HIDE_CONTROLS_CLASS);
+      optionsCloseHideControlsHandler = (event) => {
+        if (getPlayerContainer()?.contains?.(event.target)) {
+          clearOptionsCloseControlsHide();
+        }
+      };
+      document.addEventListener("pointermove", optionsCloseHideControlsHandler, true);
+      document.addEventListener("pointerdown", optionsCloseHideControlsHandler, true);
+    }
+    function isYouTubeVideoSurfaceClick(event) {
       const target = event.target;
       const player = getPlayerContainer();
       if (!target || !player?.contains?.(target)) return false;
       return !target.closest?.(
-        '[data-a-target="player-controls"], button, a, input, select, textarea, [role="button"], [role="slider"], [role="menuitem"]'
+        '.ytp-chrome-bottom, .ytp-chrome-top, button, a, input, select, textarea, [role="button"], [role="slider"], [role="menuitem"]'
       );
     }
-    function startKeyboardControlsHold() {
-      controlsVisibility.hold("keyboard-volume", KEYBOARD_CONTROLS_HOLD_MS);
-    }
     function startOptionsControlsHold() {
-      controlsVisibility.hold("options");
+      keepYouTubeControlsVisible();
+      ensurePlayerControlsObserver();
     }
     function stopOptionsControlsHold() {
-      controlsVisibility.release("options");
-    }
-    function clearPostCloseControlsHold() {
-      controlsVisibility.release("post-close");
-      if (optionsPostCloseOutsideHandler) {
-        document.removeEventListener("click", optionsPostCloseOutsideHandler, true);
-        optionsPostCloseOutsideHandler = null;
-      }
-    }
-    function endPostCloseControlsHold(hideControls) {
-      clearPostCloseControlsHold();
-      if (hideControls && !isNativeSettingsMenuOpen()) {
-        hideTwitchControls();
-      }
-    }
-    function startPostCloseControlsHold() {
-      if (isNativeSettingsMenuOpen()) return;
-      clearPostCloseControlsHold();
-      controlsVisibility.hold("post-close", TWITCH_CONTROLS_OUTSIDE_CLOSE_HOLD_MS, () => {
-        endPostCloseControlsHold(!isPointerOverTwitchPlayerArea());
-      });
-      optionsPostCloseOutsideHandler = (event) => {
-        if (isClickOnNativeSettingsUi(event)) return;
-        if (!isClickOutsideTwitchPlayerArea(event)) return;
-        endPostCloseControlsHold(true);
-      };
-      document.addEventListener("click", optionsPostCloseOutsideHandler, true);
-    }
-    function markTwitchVolumeInteraction(overlay) {
-      markVolumeChangedWhileExpanded(overlay);
-      startPostCloseControlsHold();
-    }
-    function releaseTwitchVolumeFocusSoon(overlay) {
-      window.setTimeout(() => {
-        const active = document.activeElement;
-        if (active && overlay?.contains?.(active)) {
-          active.blur();
-        }
-      }, 0);
+      releaseYouTubeControlsVisibility();
     }
     function openVolumeOptionsPopup() {
-      clearPostCloseControlsHold();
       ensureOptionsStyles();
       const popup = ensureOptionsPopup();
       if (!popup) return;
+      closeYouTubeSettingsPopupIfOpen();
       optionsPopupOpener = document.activeElement;
       refreshOptionsPopupState();
       popup.removeAttribute("hidden");
       positionOptionsPopup(popup, true);
+      getPlayerContainer()?.classList?.add("tm-volume-options-open");
       startOptionsControlsHold();
       document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute("aria-expanded", "true");
       popup.focus({ preventScroll: true });
@@ -4929,13 +4703,18 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         optionsPopupOutsideHandler = (event) => {
           const btn = document.getElementById(OPTIONS_BUTTON_ID);
           if (popup.contains(event.target) || btn?.contains(event.target)) return;
-          if (event.target?.closest?.(TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR)) {
+          if (event.target?.closest?.(".ytp-settings-button")) {
             window.setTimeout(() => closeVolumeOptionsPopup(), 0);
             return;
           }
-          const clickedOutsideControls = !getTwitchPlayerControlsRoot()?.contains?.(event.target);
+          const clickedOutsidePlayer = !getPlayerContainer()?.contains?.(event.target);
+          const clickedVideoSurface = isYouTubeVideoSurfaceClick(event);
           closeVolumeOptionsPopup();
-          if (clickedOutsideControls) startPostCloseControlsHold();
+          if (clickedOutsidePlayer) hideControlsUntilPlayerPointerReturn();
+          if (clickedVideoSurface) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
         };
         document.addEventListener("click", optionsPopupOutsideHandler, true);
       }
@@ -4956,6 +4735,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         if (popup.contains(document.activeElement)) document.activeElement.blur();
         popup.setAttribute("hidden", "");
       }
+      getPlayerContainer()?.classList?.remove("tm-volume-options-open");
       stopOptionsControlsHold();
       document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute("aria-expanded", "false");
       if (optionsPopupOutsideHandler) {
@@ -4976,33 +4756,29 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       }
       optionsPopupOpener = null;
     }
-    function setupNativeSettingsCloseHandler() {
-      if (window.__tmTwitchVolumeNativeSettingsCloseBound) return;
-      window.__tmTwitchVolumeNativeSettingsCloseBound = true;
-      document.addEventListener("click", (event) => {
-        if (event.target?.closest?.(TWITCH_NATIVE_SETTINGS_BUTTON_SELECTOR)) {
-          window.setTimeout(() => closeVolumeOptionsPopup(), 0);
-        }
-      }, false);
-      ensureNativeSettingsHoldIsolation();
+    function disconnectPlayerControlsObserver() {
+      playerControlsObserver?.disconnect();
+      playerControlsObserver = null;
+      playerControlsObserverTarget = null;
     }
-    function disconnectNativeSettingsObserver() {
-      nativeSettingsObserver?.disconnect();
-      nativeSettingsObserver = null;
-      nativeSettingsObserverTarget = null;
+    function onPlayerControlsMutation() {
+      if (isOptionsPopupOpen() && areYouTubeControlsHidden()) {
+        keepYouTubeControlsVisible();
+      }
+      const overlay = document.getElementById(OVERLAY_ID);
+      if (overlay?.dataset?.tmKeepExpanded === "true" && areYouTubeControlsHidden()) {
+        clearExpandedHold(overlay);
+        setOverlayExpanded(overlay, false);
+      }
     }
-    function ensureNativeSettingsHoldIsolation() {
-      const settingsBtn = getTwitchSettingsButton();
-      if (!settingsBtn) return;
-      if (nativeSettingsObserverTarget === settingsBtn) return;
-      disconnectNativeSettingsObserver();
-      nativeSettingsObserverTarget = settingsBtn;
-      nativeSettingsObserver = new MutationObserver(() => {
-        if (isNativeSettingsMenuOpen()) {
-          endPostCloseControlsHold(false);
-        }
-      });
-      nativeSettingsObserver.observe(settingsBtn, { attributes: true, attributeFilter: ["aria-expanded"] });
+    function ensurePlayerControlsObserver() {
+      const player = getPlayerContainer();
+      if (!player) return;
+      if (playerControlsObserverTarget === player) return;
+      disconnectPlayerControlsObserver();
+      playerControlsObserverTarget = player;
+      playerControlsObserver = new MutationObserver(onPlayerControlsMutation);
+      playerControlsObserver.observe(player, { attributes: true, attributeFilter: ["class"] });
     }
     function toggleVolumeOptionsPopup() {
       if (isOptionsPopupOpen()) {
@@ -5018,7 +4794,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       }
       createStylesIfNeeded();
       const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
-      overlay._tmVolumeVideo = video;
       const cleanupRegistry = createCleanupRegistry();
       const keyboardFeedback = createVolumeFeedback({ window, player });
       cleanupRegistry.add(() => keyboardFeedback.dispose());
@@ -5033,29 +4808,28 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         overlay.dataset.tmHovering = "true";
         setOverlayExpanded(overlay, true);
         updateOverlayOpacity(overlay);
-        releaseTwitchVolumeFocusSoon(overlay);
       });
       overlay.addEventListener("mouseleave", () => {
         overlay.dataset.tmHovering = "false";
         overlay.dataset.tmDragging = "false";
-        collapseOverlayIfIdle(overlay, true);
         updateOverlayOpacity(overlay);
+        collapseOverlayIfIdle(overlay, true);
       });
       overlay.addEventListener("focusin", () => {
         setOverlayExpanded(overlay, true);
         updateOverlayOpacity(overlay);
       });
       overlay.addEventListener("focusout", () => {
-        collapseOverlayIfIdle(overlay);
         updateOverlayOpacity(overlay);
+        collapseOverlayIfIdle(overlay);
       });
       const collapseHeldSliderOnVideoClick = (event) => {
-        if (overlay.dataset.tmKeepExpanded !== "true" || !isTwitchVideoSurfaceClick(event)) return;
+        if (overlay.dataset.tmKeepExpanded !== "true" || !isYouTubeVideoSurfaceClick(event)) return;
         clearExpandedHold(overlay);
         setOverlayExpanded(overlay, false);
       };
       cleanupRegistry.listen(document, "click", collapseHeldSliderOnVideoClick, true);
-      const { iconCell, topRow, label, tickOverlay, slider } = createVolumeControlElements({
+      const { iconCell, label, tickOverlay, slider } = createVolumeControlElements({
         document,
         overlay,
         sliderId: SLIDER_ID,
@@ -5071,119 +4845,34 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       iconCell.addEventListener("click", (e) => {
         e.stopPropagation();
         e.preventDefault();
-        markUserVolumeIntent();
         toggleMute(video);
         saveMute(isMuted(video));
         setSliderFromPlayer(slider, label, video);
-        markTwitchVolumeInteraction(overlay);
-        releaseTwitchVolumeFocusSoon(overlay);
-      });
-      topRow.style.display = "flex";
-      topRow.style.alignItems = "center";
-      topRow.style.gap = "0";
-      topRow.style.flex = "0 0 auto";
-      topRow.style.position = "relative";
-      topRow.style.width = `${VOLUME_LABEL_ROW_WIDTH_PX}px`;
-      topRow.style.height = "40px";
-      topRow.style.boxSizing = "border-box";
-      Object.assign(label.style, {
-        font: '500 14px/40px "YouTube Noto", Roboto, Arial, Helvetica, sans-serif',
-        color: "#fff",
-        textAlign: "center",
-        textShadow: "0 0 2px rgb(0, 0, 0)",
-        userSelect: "none",
-        letterSpacing: "0",
-        position: "absolute",
-        left: "0",
-        top: "0",
-        width: "1px",
-        height: "1px",
-        overflow: "hidden",
-        clipPath: "inset(50%)",
-        whiteSpace: "nowrap"
+        markVolumeChangedWhileExpanded(overlay);
       });
       const syncInitialSliderState = (value, muted = false) => {
         syncVolumeControl({ slider, label, overlay, value, muted, updateSliderBar, updateVolumeIndicator });
       };
       const initVol = getSavedVolume();
-      if (readSavedMute() === null) saveMute(isMuted(video));
       if (initVol !== null) {
-        syncInitialSliderState(initVol, isMutedForDisplay(video));
+        syncInitialSliderState(initVol, isMuted(video));
       } else {
-        syncInitialSliderState(getUnderlyingVolume(video), isMutedForDisplay(video));
+        syncInitialSliderState(getVolume(video), isMuted(video));
       }
-      const applySliderValue = (value, { preserveMute = false, markInteraction = true } = {}) => {
-        setVolume(video, value, { preserveMute });
-        const muted = preserveMute ? isMutedForDisplay(video) : isMuted(video);
-        saveMute(muted);
-        label.textContent = muted ? "Muted" : `${value}%`;
+      const applySliderValue = (value, { markInteraction = true } = {}) => {
+        requestedVolumeIntent = { value, until: Date.now() + USER_VOLUME_INTENT_GRACE_MS, overlay };
+        setVolume(video, value);
+        saveMute(false);
+        label.textContent = `${value}%`;
         updateSliderBar(slider);
-        updateVolumeIndicator(overlay, value, muted);
+        updateVolumeIndicator(overlay, value, isMuted(video));
         scheduleSaveVolume(value);
-        if (markInteraction) markTwitchVolumeInteraction(overlay);
+        if (markInteraction) markVolumeChangedWhileExpanded(overlay);
       };
-      const applyKeyboardVolumeStep = (event) => {
-        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        const direction = event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
-        if (!direction) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const currentValue = getUnderlyingVolume(video);
-        const nextValue = clampVolume(currentValue + direction * KEYBOARD_VOLUME_STEP);
-        if (nextValue !== currentValue) {
-          markUserVolumeIntent();
-          slider.value = String(nextValue);
-          applySliderValue(nextValue, { preserveMute: true, markInteraction: false });
-          startKeyboardControlsHold();
-        }
-        keyboardFeedback.show(nextValue, isMutedForDisplay(video));
-      };
-      slider.addEventListener("keydown", applyKeyboardVolumeStep);
-      let playerWasLastPressed = false;
-      const trackLastPressedArea = (event) => {
-        const activePlayer = getPlayerContainer(video) || player;
-        playerWasLastPressed = !!activePlayer?.contains?.(event.target);
-      };
-      document.addEventListener("pointerdown", trackLastPressedArea, true);
-      const applyPlayerKeyboardVolumeStep = (event) => {
-        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-        if (isOptionsPopupOpen()) return;
-        const target = event.target;
-        if (target instanceof window.Element && target.closest('input, textarea, select, [contenteditable="true"]')) return;
-        const activePlayer = getPlayerContainer(video) || player;
-        if (!playerWasLastPressed && !activePlayer?.contains?.(document.activeElement)) return;
-        applyKeyboardVolumeStep(event);
-      };
-      document.addEventListener("keydown", applyPlayerKeyboardVolumeStep, true);
-      const onExtensionKey = (event) => {
-        const key = focusedTwitchExtensionKey(event, getPlayerContainer(video) || player);
-        if (!key || isOptionsPopupOpen()) return;
-        if (key === " ") {
-          keyboardFeedback.clear();
-          if (video.paused) {
-            video.play().catch(() => {
-            });
-          } else {
-            video.pause();
-          }
-        } else {
-          applyKeyboardVolumeStep({ key, preventDefault() {
-          }, stopPropagation() {
-          } });
-        }
-      };
-      window.addEventListener("message", onExtensionKey);
-      cleanupRegistry.add(() => window.removeEventListener("message", onExtensionKey));
       cleanupRegistry.add(bindWheelVolumeStep({
         target: iconCell,
         slider,
         getVolumeStep,
-        beforeApply: () => markUserVolumeIntent(),
         applyValue: applySliderValue
       }));
       const rangePointer = bindRangePointerInteraction({
@@ -5196,162 +4885,85 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         applyValue: applySliderValue,
         setExpanded: () => setOverlayExpanded(overlay, true),
         updateOpacity: () => updateOverlayOpacity(overlay),
-        collapseIfIdle: (force) => collapseOverlayIfIdle(overlay, force),
-        onFinish: (event, wasDragging) => {
-          if (wasDragging && event?.type !== "blur") releaseTwitchVolumeFocusSoon(overlay);
-        },
-        finishLayout: (force) => {
-          collapseOverlayIfIdle(overlay, force);
-          updateOverlayOpacity(overlay);
-        }
+        collapseIfIdle: (force) => collapseOverlayIfIdle(overlay, force)
       });
       cleanupRegistry.add(() => rangePointer.dispose());
       slider.addEventListener("input", () => {
-        markUserVolumeIntent();
         applySliderValue(rangePointer.readPressAwareValue());
       });
       slider.addEventListener("change", () => {
-        markUserVolumeIntent();
         applySliderValue(readSteppedSliderValue(slider));
         cancelScheduledSaveVolume();
         saveVolume(Number(slider.value) || 0);
-        releaseTwitchVolumeFocusSoon(overlay);
       });
+      const applyKeyboardVolumeStep = (event, { markInteraction = true } = {}) => {
+        const direction = event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
+        if (!direction) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
+        const currentValue = Number(slider.value) || 0;
+        const nextValue = clampVolume(currentValue + direction * KEYBOARD_VOLUME_STEP);
+        if (nextValue === currentValue) return;
+        slider.value = String(nextValue);
+        applySliderValue(nextValue, { markInteraction });
+      };
+      slider.addEventListener("keydown", applyKeyboardVolumeStep);
+      const applyPlayerKeyboardVolumeStep = (event) => {
+        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        if (isOptionsPopupOpen()) return;
+        if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+        if (!player.contains(event.target) && !player.contains(document.activeElement)) return;
+        slider.value = String(getUnderlyingVolume(video));
+        applyKeyboardVolumeStep(event, { markInteraction: false });
+        keyboardFeedback.show(Number(slider.value), isMuted(video));
+      };
+      document.addEventListener("keydown", applyPlayerKeyboardVolumeStep, true);
+      cleanupRegistry.add(() => document.removeEventListener("keydown", applyPlayerKeyboardVolumeStep, true));
       const onVideoVolumeChange = () => {
-        const now = Date.now();
-        if (now <= startupLockUntil) {
-          if (now > userIntentUntil && !startupCorrectionApplied) {
-            const savedValue = getSavedVolume();
-            const muted = isMuted(video);
-            if (savedValue !== null && Math.abs(getUnderlyingVolume(video) - savedValue) > 1) {
-              setVolume(video, savedValue, { preserveMute: muted });
-            }
-            startupCorrectionApplied = true;
-          }
-          setSliderFromPlayer(slider, label, video);
-          return;
-        }
-        try {
-          const muted = isMuted(video);
-          const playerVolume = getVolume(video);
-          const savedValue = getSavedVolume();
-          if (isNativeVolumeReplacementEnabled() && now > userIntentUntil && savedValue !== null && Math.abs(playerVolume - savedValue) > 1) {
-            cancelScheduledSaveVolume();
-            setVolume(video, savedValue, { preserveMute: muted });
-            if (!isNormalizationEnabled()) saveMute(muted);
-            setSliderFromPlayer(slider, label, video);
+        if (!document.getElementById(OVERLAY_ID)) return;
+        const muted = isMuted(video);
+        saveMute(muted);
+        const playerVolume = getVolume(video);
+        const intent = requestedVolumeIntent;
+        if (intent?.overlay === overlay) {
+          if (Math.abs(playerVolume - intent.value) <= USER_VOLUME_TOLERANCE) {
+            requestedVolumeIntent = null;
+          } else if (Date.now() <= intent.until && !muted) {
             return;
+          } else {
+            requestedVolumeIntent = null;
           }
-          setSliderFromPlayer(slider, label, video);
-          if (!isNormalizationEnabled()) saveMute(muted);
-          if (!muted) {
-            scheduleSaveVolume(playerVolume);
-          }
-        } catch (e) {
         }
+        setSliderFromPlayer(slider, label, video);
+        if (!muted) scheduleSaveVolume(playerVolume);
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
-      let sourceMutePending = false;
-      const onSourceReset = () => {
-        if (!isNormalizationEnabled()) return;
-        const savedMute = readSavedMute();
-        if (savedMute === null) return;
-        sourceMutePending = true;
-        startupLockUntil = Math.max(startupLockUntil, Date.now() + 2e3);
-        startupCorrectionApplied = false;
-      };
-      const onSourceReady = (event) => {
-        if (!isNormalizationEnabled() || event.type === "playing" && !sourceMutePending) return;
-        const savedMute = readSavedMute();
-        if (savedMute !== null) setMuted(video, savedMute);
-        sourceMutePending = event.type !== "playing";
-      };
-      for (const type of ["emptied", "loadstart"]) video.addEventListener(type, onSourceReset, true);
-      for (const type of ["loadedmetadata", "playing"]) video.addEventListener(type, onSourceReady);
-      cleanupRegistry.add(() => {
-        for (const type of ["emptied", "loadstart"]) video.removeEventListener(type, onSourceReset, true);
-        for (const type of ["loadedmetadata", "playing"]) video.removeEventListener(type, onSourceReady);
-      });
-      cleanupRegistry.add(bindNativeVolumeInput({
-        window,
-        video,
-        player,
-        selector: '[data-a-target="player-volume-slider"]',
-        normalizer,
-        onChange: () => {
-          markUserVolumeIntent();
-          saveMute(isMuted(video));
-          onVideoVolumeChange();
-        }
-      }));
-      const onNativeMuteInput = (event) => {
-        if (isOptionsPopupOpen() || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-        const target = event.target;
-        if (!(target instanceof window.Element) || target.closest('input, textarea, select, [contenteditable="true"]')) return;
-        const activePlayer = getPlayerContainer(video) || player;
-        const muteButton = event.type === "click" && target.closest('[data-a-target="player-mute-unmute-button"]') && activePlayer.contains(target);
-        const muteKey = event.type === "keydown" && event.key.toLowerCase() === "m" && (playerWasLastPressed || activePlayer.contains(document.activeElement));
-        if (!muteButton && !muteKey) return;
-        window.queueMicrotask(() => {
-          if (!overlayLifecycle.owns(overlay) || !video.isConnected) return;
-          saveMute(isMuted(video));
-          setSliderFromPlayer(slider, label, video);
-        });
-      };
-      for (const type of ["click", "keydown"]) document.addEventListener(type, onNativeMuteInput, true);
-      cleanupRegistry.add(() => {
-        for (const type of ["click", "keydown"]) document.removeEventListener(type, onNativeMuteInput, true);
-      });
+      cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: ".ytp-volume-area", normalizer, onChange: onVideoVolumeChange }));
+      updateOverlayAppearance(overlay);
+      if (isAlwaysExpandedEnabled()) {
+        setOverlayExpanded(overlay, true, true);
+      }
+      placeOverlay(overlay, player, controlsHost);
+      if (initVol === null) setSliderFromPlayer(slider, label, video);
+      else syncInitialSliderState(initVol, isMuted(video));
+      setOverlayExpanded(overlay, false, true);
+      updateSliderThickness(overlay);
+      updateVideoOverlayPosition(overlay, player);
       const onLayoutChange = () => {
-        if (!overlay.isConnected) return;
-        const activePlayer = getPlayerContainer(video);
-        if (areTwitchControlsHidden(activePlayer)) {
-          if (isSliderOnVideo()) {
-            updateVideoOverlayPosition(overlay, getVideoOverlayContainer(video, activePlayer), activePlayer);
-          }
-          if (isOverlayInteractionFocused(overlay)) {
-            updateOverlayOpacity(overlay);
-            return;
-          }
-          if (!isAlwaysExpandedEnabled()) {
-            overlay.dataset.tmDragging = "false";
-            clearExpandedHold(overlay);
-            setOverlayExpanded(overlay, false, true);
-          }
-          updateOverlayOpacity(overlay);
-          return;
-        }
-        if (isOverlayInteractionFocused(overlay)) return;
-        placeOverlay(overlay, activePlayer, getTwitchControlsHost(activePlayer));
+        if (!overlay.isConnected || isOverlayInteractionFocused(overlay)) return;
+        placeOverlay(overlay, player, controlsHost);
       };
       window.addEventListener("resize", onLayoutChange);
       const controlsObserver = new MutationObserver(onLayoutChange);
-      const controlsRootForLayout = getTwitchPlayerControlsRoot(player);
-      const controlsForLayout = getTwitchPlayerControlsSection(player);
-      if (controlsRootForLayout) {
-        controlsObserver.observe(controlsRootForLayout, { attributes: true, attributeFilter: ["data-a-visible", "class", "aria-hidden", "style"] });
-      }
-      if (controlsForLayout) {
-        controlsObserver.observe(controlsForLayout, { attributes: true, attributeFilter: ["class", "aria-hidden", "style"] });
-      }
-      updateOverlayAppearance(overlay);
-      placeOverlay(overlay, player, controlsHost);
-      setSliderFromPlayer(slider, label, video);
-      setOverlayExpanded(overlay, false, true);
-      updateSliderThickness(overlay);
+      controlsObserver.observe(player, { attributes: true, attributeFilter: ["class"] });
       const cleanup = () => {
+        if (requestedVolumeIntent?.overlay === overlay) requestedVolumeIntent = null;
         video.removeEventListener("volumechange", onVideoVolumeChange);
         window.removeEventListener("resize", onLayoutChange);
-        document.removeEventListener("keydown", applyPlayerKeyboardVolumeStep, true);
-        document.removeEventListener("pointerdown", trackLastPressedArea, true);
         controlsObserver.disconnect();
         cleanupRegistry.dispose();
-        controlsVisibility.dispose();
-        controlsVisibility = makeControlsVisibilityManager();
-        if (optionsPostCloseOutsideHandler) {
-          document.removeEventListener("click", optionsPostCloseOutsideHandler, true);
-          optionsPostCloseOutsideHandler = null;
-        }
         clearExpandedHold(overlay);
       };
       overlayLifecycle.set(overlay, cleanup);
@@ -5359,11 +4971,10 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     }
     function disposeActiveOverlay() {
       normalizer.bind(null);
+      flushScheduledSaveVolume();
       stopOptionsPreview();
-      cancelDelayedFirstAttachRestore();
+      requestedVolumeIntent = null;
       overlayLifecycle.dispose();
-      cachedApi = null;
-      cachedApiFromElement = null;
     }
     function removeOverlay() {
       cancelScheduledSaveVolume();
@@ -5371,66 +4982,62 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       document.getElementById(OVERLAY_ID)?.remove();
       applyNativeVolumeVisibility();
     }
-    function cancelDelayedFirstAttachRestore() {
-      if (!delayedFirstAttachRestoreTimer) return;
-      window.clearTimeout(delayedFirstAttachRestoreTimer);
-      delayedFirstAttachRestoreTimer = 0;
-    }
     function attachSliderIfPossible() {
-      resetVideoElement();
-      const video = getVideoElement();
-      const player = getPlayerContainer(video);
-      const controlsHost = getTwitchControlsHost(player);
-      if (isTwitchPreviewPlayer(player)) {
+      if (!isYouTubeSupportedPage()) {
         removeOverlay();
         removeVolumeOptionsButton();
-        return true;
+        disconnectPlayerControlsObserver();
+        disconnectAttachObserver();
+        return false;
+      }
+      const video = getVideoElement();
+      const player = getPlayerContainer(video);
+      const controlsHost = getYouTubeControlsHost(player);
+      if (!player) {
+        return false;
       }
       if (!isOverlayEnabled()) {
         removeOverlay();
+        applyNativeVolumeVisibility();
         injectVolumeOptionsButton();
         return !!document.getElementById(OPTIONS_BUTTON_ID);
       }
-      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) disposeActiveOverlay();
-      let overlay = document.getElementById(OVERLAY_ID);
-      if (overlay && overlay._tmVolumeVideo !== video) {
-        disposeActiveOverlay();
-        overlay = null;
-      }
-      if (!overlay && video && !normalizer.isBoundTo(video)) {
-        restoreSavedVolumeBeforeControls(video);
-        if (isNormalizationEnabled()) syncNormalization(video);
-      }
-      if (!video || !player || !controlsHost) {
+      if (!video) {
         injectVolumeOptionsButton();
         return false;
       }
-      if (!overlay) {
-        startupLockUntil = Math.max(startupLockUntil, Date.now() + 2e3);
+      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) disposeActiveOverlay();
+      let existingOverlay = document.getElementById(OVERLAY_ID);
+      if (existingOverlay && existingOverlay._tmVolumeVideo !== video) {
+        disposeActiveOverlay();
+        existingOverlay.remove();
+        existingOverlay = null;
+      }
+      if (!existingOverlay && isNormalizationEnabled() && !normalizer.isBoundTo(video)) {
+        syncNormalization(video, getSavedVolume() ?? getRawVolume(video));
         restoreSavedVolume(video);
-        const createdOverlay = createOverlay(video, player, controlsHost);
-        createdOverlay._tmVolumeVideo = video;
-        cancelDelayedFirstAttachRestore();
-        delayedFirstAttachRestoreTimer = window.setTimeout(() => {
-          delayedFirstAttachRestoreTimer = 0;
-          if (!overlayLifecycle.owns(createdOverlay) || !createdOverlay.isConnected || createdOverlay._tmVolumeVideo !== video || !video.isConnected) return;
-          restoreSavedVolume(video);
-          updateOverlayOpacity(createdOverlay);
-        }, 1500);
-      } else if (!isOverlayInteractionFocused(overlay)) {
-        placeOverlay(overlay, player, controlsHost);
+      }
+      if (!controlsHost && !isSliderOnVideo()) {
+        injectVolumeOptionsButton();
+        return false;
+      }
+      if (existingOverlay) {
+        placeOverlay(existingOverlay, player, controlsHost);
       } else {
-        updateOverlayOpacity(overlay);
+        restoreSavedVolume(video);
+        const overlay = createOverlay(video, player, controlsHost);
+        overlay._tmVolumeVideo = video;
       }
       applyNativeVolumeVisibility();
       injectVolumeOptionsButton();
-      ensureNativeSettingsHoldIsolation();
+      ensurePlayerControlsObserver();
       ensureAttachObserver();
       syncNormalization();
       return true;
     }
     function getAttachObserverRoot() {
-      return document.body;
+      if (!isYouTubeSupportedPage()) return null;
+      return document.getElementById("movie_player") || document.querySelector(".html5-video-player") || document.getElementById("primary");
     }
     function mutationAddsVideo(mutations) {
       return mutations.some((mutation) => [...mutation.addedNodes].some(
@@ -5440,42 +5047,61 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     let lastAttach = 0;
     const ATTACH_COOLDOWN_MS = 1e3;
     let attachQueued = false;
+    let trailingAttachTimer = 0;
+    function isYouTubeSupportedPage() {
+      return document.location.pathname === "/watch";
+    }
     function handleAttachObserverMutations(mutations) {
-      syncTwitchAudioCompatibility(window, getVideoElement(), mutations);
+      if (!isYouTubeSupportedPage()) return;
       const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
       const hasRemovedNodes = mutations.some((m) => m.removedNodes && m.removedNodes.length > 0);
-      if (!hasAddedNodes && !hasRemovedNodes || attachQueued) return;
+      if (!hasAddedNodes && !hasRemovedNodes) return;
+      const videoAdded = isOverlayEnabled() && mutationAddsVideo(mutations);
+      if (videoAdded && isNormalizationEnabled()) {
+        resetVideoElement();
+        const video = getVideoElement();
+        if (video && !normalizer.isBoundTo(video) && attachSliderIfPossible()) {
+          lastAttach = Date.now();
+          return;
+        }
+      }
+      if (attachQueued) return;
       applyNativeVolumeVisibility();
       const overlay = document.getElementById(OVERLAY_ID);
       const button = document.getElementById(OPTIONS_BUTTON_ID);
       const overlayMissing = isOverlayEnabled() && (!overlay || !overlay.isConnected);
-      const videoMayHaveChanged = isOverlayEnabled() && !!overlay && mutationAddsVideo(mutations);
       const buttonMissing = !button || !button.isConnected;
       const buttonMisplaced = !buttonMissing && !isOptionsButtonInPreferredSlot();
       if (buttonMissing || buttonMisplaced) {
         injectVolumeOptionsButton();
       }
+      const videoMayHaveChanged = !!overlay && videoAdded;
       if (!overlayMissing && !videoMayHaveChanged) return;
       attachQueued = true;
       requestAnimationFrame(() => {
         attachQueued = false;
-        if (!isOverlayEnabled()) {
-          injectVolumeOptionsButton();
-          return;
-        }
-        const currentOverlay = document.getElementById(OVERLAY_ID);
-        if (!videoMayHaveChanged && currentOverlay && currentOverlay.isConnected) {
-          injectVolumeOptionsButton();
-          return;
-        }
+        if (videoMayHaveChanged) resetVideoElement();
         const now = Date.now();
-        if (now - lastAttach < ATTACH_COOLDOWN_MS) return;
+        if (now - lastAttach < ATTACH_COOLDOWN_MS) {
+          clearTimeout(trailingAttachTimer);
+          trailingAttachTimer = window.setTimeout(() => {
+            trailingAttachTimer = 0;
+            resetVideoElement();
+            if (isYouTubeSupportedPage() && attachSliderIfPossible()) lastAttach = Date.now();
+          }, ATTACH_COOLDOWN_MS - (now - lastAttach));
+          return;
+        }
+        if (!isYouTubeSupportedPage()) return;
         if (attachSliderIfPossible()) {
           lastAttach = now;
         }
       });
     }
     function disconnectAttachObserver() {
+      if (trailingAttachTimer) {
+        window.clearTimeout(trailingAttachTimer);
+        trailingAttachTimer = 0;
+      }
       attachObserver?.disconnect();
       attachObserver = null;
       attachObserverTarget = null;
@@ -5509,118 +5135,89 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       attachBootstrapObserver.observe(bootstrapRoot, { childList: true, subtree: true });
     }
     function setupInitialAttempts() {
-      const maxAttempts = 20;
-      const delayMs = 500;
       const attemptAttach = (attempt) => {
-        if (attachSliderIfPossible() || attempt >= maxAttempts) return;
-        window.setTimeout(() => attemptAttach(attempt + 1), delayMs);
+        if (attachSliderIfPossible() || attempt >= INITIAL_ATTACH_MAX_ATTEMPTS) return;
+        window.setTimeout(() => attemptAttach(attempt + 1), INITIAL_ATTACH_RETRY_MS);
       };
       attemptAttach(0);
     }
-    function setupPlayerBoundaryResizeHandler() {
-      window.addEventListener("resize", () => {
-        if (playerBoundaryResizeFrame) return;
-        playerBoundaryResizeFrame = window.requestAnimationFrame(() => {
-          playerBoundaryResizeFrame = 0;
-          resetVideoElement();
-          attachSliderIfPossible();
-          applyNativeVolumeVisibility();
-        });
-      }, true);
-    }
-    function setupNavigationHandler() {
-      if (window.__tmTwitchVolumeNavPatched) return;
-      window.__tmTwitchVolumeNavPatched = true;
-      const getPathFromUrlArg = (urlArg) => {
-        try {
-          if (urlArg === void 0 || urlArg === null || urlArg === "") {
-            return window.location.pathname;
-          }
-          return new URL(String(urlArg), window.location.href).pathname;
-        } catch (e) {
-          return window.location.pathname;
-        }
-      };
-      const runReattach = () => {
-        if (navReattachTimer) {
-          clearTimeout(navReattachTimer);
-          navReattachTimer = 0;
-        }
-        if (navLateRestoreTimer) {
-          clearTimeout(navLateRestoreTimer);
-          navLateRestoreTimer = 0;
-        }
-        cachedApi = null;
-        cachedApiFromElement = null;
+    function setupYtNavigationHandler() {
+      if (window.__tmYtVolumeNavBound) return;
+      window.__tmYtVolumeNavBound = true;
+      const protectIncomingPlayback = (event) => {
+        const video = event.target;
+        if (!(video instanceof window.HTMLVideoElement) || !video.matches("#movie_player video.html5-main-video")) return;
+        if (!isYouTubeSupportedPage() || !isOverlayEnabled() || !isNormalizationEnabled() || normalizer.isBoundTo(video)) return;
         resetVideoElement();
-        closeVolumeOptionsPopup();
-        controlsVisibility.dispose();
-        controlsVisibility = makeControlsVisibilityManager();
-        disconnectNativeSettingsObserver();
-        disconnectAttachObserver();
-        startupLockUntil = Date.now() + 3500;
-        startupCorrectionApplied = false;
-        navReattachTimer = window.setTimeout(() => {
-          removeOverlay();
-          removeVolumeOptionsButton();
-          attachSliderIfPossible();
-          navReattachTimer = 0;
-        }, NAV_REATTACH_DELAY_MS);
-        navLateRestoreTimer = window.setTimeout(() => {
-          navLateRestoreTimer = 0;
-          if (Date.now() <= userIntentUntil) return;
-          const vid = getVideoElement();
-          if (!vid) return;
-          if (isTwitchPreviewPlayer(getPlayerContainer(vid))) return;
-          const saved = getSavedVolume();
-          if (saved !== null && Math.abs(getVolume(vid) - saved) > 1) {
-            restoreSavedVolume(vid);
-            const sliderEl = document.getElementById(SLIDER_ID);
-            const labelEl = document.getElementById(VALUE_LABEL_ID);
-            if (sliderEl) setSliderFromPlayer(sliderEl, labelEl, vid);
-          }
-        }, NAV_LATE_RESTORE_DELAY_MS);
+        cachedYtPlayer = null;
+        attachSliderIfPossible();
+        if (normalizer.isBoundTo(video)) normalizer.setSourceChanging(false);
       };
-      const scheduleReattachIfPathChanged = (nextPath) => {
-        const targetPath = nextPath || window.location.pathname;
-        if (targetPath === lastKnownPath) return;
-        lastKnownPath = targetPath;
+      for (const type of ["loadstart", "play"]) window.addEventListener(type, protectIncomingPlayback, true);
+      const cancelPendingReattach = () => {
         if (navDebounceTimer) {
           clearTimeout(navDebounceTimer);
           navDebounceTimer = 0;
         }
+        if (navReattachTimer) {
+          clearTimeout(navReattachTimer);
+          navReattachTimer = 0;
+        }
+      };
+      const runReattach = () => {
+        cancelPendingReattach();
+        resetVideoElement();
+        cachedYtPlayer = null;
+        closeVolumeOptionsPopup();
+        clearOptionsCloseControlsHide();
+        disconnectPlayerControlsObserver();
+        disconnectAttachObserver();
+        navReattachTimer = window.setTimeout(() => {
+          navReattachTimer = 0;
+          removeOverlay();
+          removeVolumeOptionsButton();
+          if (attachSliderIfPossible()) normalizer.setSourceChanging(false);
+        }, NAV_REATTACH_DELAY_MS);
+      };
+      const scheduleReattach = () => {
+        cancelPendingReattach();
         navDebounceTimer = window.setTimeout(() => {
           navDebounceTimer = 0;
           runReattach();
         }, NAV_DEBOUNCE_MS);
       };
-      const originalPushState = history.pushState;
-      history.pushState = function() {
-        const result = originalPushState.apply(this, arguments);
-        scheduleReattachIfPathChanged(getPathFromUrlArg(arguments[2]));
-        return result;
+      const handleNavigationStart = () => {
+        normalizer.setSourceChanging(true);
+        if (isOverlayEnabled() && isNativeVolumeReplacementEnabled()) {
+          document.documentElement.classList.add("tm-yt-volume-native-replacement-active");
+        }
       };
-      const originalReplaceState = history.replaceState;
-      history.replaceState = function() {
-        const result = originalReplaceState.apply(this, arguments);
-        scheduleReattachIfPathChanged(getPathFromUrlArg(arguments[2]));
-        return result;
+      const handleNavigationComplete = () => {
+        resetVideoElement();
+        cachedYtPlayer = null;
+        applyNativeVolumeVisibility();
+        const attached = attachSliderIfPossible();
+        if (attached || !isYouTubeSupportedPage()) {
+          normalizer.setSourceChanging(false);
+          cancelPendingReattach();
+          return;
+        }
+        scheduleReattach();
       };
-      window.addEventListener("popstate", () => {
-        scheduleReattachIfPathChanged(window.location.pathname);
-      }, true);
+      window.addEventListener("yt-navigate-start", handleNavigationStart, true);
+      window.addEventListener("yt-navigate-finish", handleNavigationComplete, true);
+      window.addEventListener("yt-page-data-updated", handleNavigationComplete, true);
+      window.addEventListener("popstate", handleNavigationComplete, true);
     }
     function init() {
+      applyNativeVolumeVisibility();
       setupInitialAttempts();
       setupAttachObserver();
-      setupPlayerBoundaryResizeHandler();
-      setupNavigationHandler();
-      setupNativeSettingsCloseHandler();
+      setupYtNavigationHandler();
     }
     init();
   }
 
-  // src/entries/twitch.user.js
-  if (location.hostname.endsWith(".ext-twitch.tv")) startTwitchExtensionKeys(window);
-  else startTwitchVolumeSlider();
+  // src/entries/youtube.user.js
+  startYouTubeVolumeSlider();
 })();

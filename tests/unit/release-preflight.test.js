@@ -50,13 +50,13 @@ test('release preflight verifies both archived assets and supports historical ba
   assert.equal(current.youtubeAsset, paths.youtubeAsset);
   assert.equal(current.twitchAsset, paths.twitchAsset);
   assert.deepEqual(current.expectedHashes, { youtube: manifest.youtube.archive, twitch: manifest.twitch.archive });
-  const historical = await preflightRelease({ root, tag: 'v2.7', packageVersion: '2.9', mode: 'historical' });
+  const historical = await preflightRelease({ root, tag: 'v2.7', packageVersion: '3.0', mode: 'historical' });
   assert.equal(historical.mode, 'historical');
 });
 
 test('release preflight rejects package mismatches and unsupported modes', async t => {
   const { root } = await releaseFixture(t);
-  await assert.rejects(preflightRelease({ root, tag: 'v2.7', packageVersion: '2.9' }), /does not match package/);
+  await assert.rejects(preflightRelease({ root, tag: 'v2.7', packageVersion: '3.0' }), /does not match package/);
   await assert.rejects(preflightRelease({ root, tag: 'v2.7', packageVersion: '2.7', mode: 'unknown' }), /Unsupported release mode/);
 });
 

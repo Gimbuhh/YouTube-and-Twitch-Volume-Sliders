@@ -531,7 +531,8 @@ for (const config of platforms) {
     await f.advance();
     assert.equal(indicator.hidden, false);
     assert.equal(indicator.textContent, '');
-    assert.equal(indicator.title, 'Auto-normalize volume is on');
+    assert.equal(indicator.title, '');
+    assert.equal(indicator.dataset.tmTooltip, 'Auto-normalize volume is on');
     const artwork = indicator.innerHTML;
     assert.equal(slider.value, '50');
     assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
@@ -565,7 +566,8 @@ for (const config of platforms) {
     f.audio.streams[0].getAudioTracks()[0].muted = true;
     await f.advance(); assert.equal(indicator.innerHTML, artwork);
     assert.equal(indicator.hidden, true);
-    assert.equal(indicator.title, 'Auto-normalize volume is on');
+    assert.equal(indicator.title, '');
+    assert.equal(indicator.dataset.tmTooltip, 'Auto-normalize volume is on');
     assert.match(f.document.getElementById('tm-volume-options-normalization-status').textContent, /unavailable|accessible audio/);
     f.audio.captureMuted = false;
     f.audio.streams[0].getAudioTracks()[0].muted = false;

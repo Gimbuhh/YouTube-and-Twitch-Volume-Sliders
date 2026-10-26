@@ -36,7 +36,7 @@ Final `npm run check`: **217 tests passed, zero failures or skips**. The increas
 
 `node tests/browser/normalization.mjs` passed all seven final-artifact cases: both platforms at selected 30%/40%, YouTube with Blob worklet loading blocked by CSP, Twitch using native audio frames, and Twitch with both analysis APIs unavailable. The cases cover mute/preference preservation, loud-return timing, CORS fallback, resource release, and continued ordinary playback.
 
-Both generated scripts remain version 2.9. Exact UTF-8 artifact bytes (including newlines), compared with the clean baseline:
+The audit leaves the userscript versions unchanged. The following historical artifact bytes (including newlines) and hashes compare that audit with its clean baseline:
 
 | Artifact | Before | After | Final SHA-256 |
 | --- | ---: | ---: | --- |
