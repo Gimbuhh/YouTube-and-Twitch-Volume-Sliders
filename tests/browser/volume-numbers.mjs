@@ -58,7 +58,11 @@ try {
           clone.setAttribute('width', pixels); clone.setAttribute('height', pixels);
           const glyph = text.cloneNode(true);
           // Rasterize the actual SVG placement and resolved styling, excluding shadows/arcs.
-          glyph.style.font = style.font;
+          // Computed font shorthand can be empty for system fonts. Copy the
+          // resolved longhands so compact 100 does not regain the SVG's 16px default.
+          for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontStretch', 'fontKerning', 'fontVariantNumeric', 'fontFeatureSettings']) {
+            glyph.style[property] = style[property];
+          }
           glyph.style.letterSpacing = style.letterSpacing;
           glyph.style.fontSynthesis = 'none';
           glyph.style.fill = 'white';
@@ -81,7 +85,8 @@ try {
           }
           results.push({ value, text: text.textContent, dx: Math.abs((left + right + 1 - pixels) / (2 * zoom)),
             dy: Math.abs((top + bottom + 1 - pixels) / (2 * zoom)), radius, visible: right >= left && bottom >= top,
-            badgeClearance, stretched: text.hasAttribute('textLength') || text.hasAttribute('lengthAdjust'), size: style.fontSize });
+            badgeClearance, stretched: text.hasAttribute('textLength') || text.hasAttribute('lengthAdjust'), size: style.fontSize,
+            font: { family: style.fontFamily, weight: style.fontWeight, shorthand: style.font } });
         }
         return results;
       }, zoom);
