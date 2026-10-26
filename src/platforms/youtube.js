@@ -32,7 +32,6 @@ export function startYouTubeVolumeSlider() {
     const MUTE_STORAGE_KEY = 'tm-yt-muted';
     const VOLUME_MODE_KEY = 'tm-yt-volume-slider-mode';
     const SLIDER_LOCATION_KEY = 'tm-yt-volume-slider-location';
-    const REPLACE_NATIVE_PLACEMENT_KEY = 'tm-yt-volume-slider-replace-placement';
     const VOLUME_STEP_KEY = 'tm-yt-volume-slider-step';
     const LEGACY_SNAP_TO_5_KEY = 'tm-yt-volume-slider-snap-to-5';
     const ALWAYS_EXPANDED_KEY = 'tm-yt-volume-slider-always-expanded';
@@ -59,7 +58,6 @@ export function startYouTubeVolumeSlider() {
     const VOLUME_ACCENT_LIGHT = '#cc4444';
     const VOLUME_ACCENT_DARK = '#bb3333';
     const VOLUME_ACCENT_MID = '#cc5555';
-    const VOLUME_ACCENT_DISABLED = 'rgba(187, 51, 51, 0.55)';
     const VOLUME_ARC_TRACK = 'rgba(255, 255, 255, 0.38)';
     const VOLUME_PANEL_DROP_SHADOW = 'drop-shadow(0 2px 5px rgba(0, 0, 0, 0.06))';
     const USER_SETTINGS = {
@@ -67,8 +65,6 @@ export function startYouTubeVolumeSlider() {
         volumeSliderMode: 'saved',
         // Slider location: 'saved', 'controls', or 'video'. Default: 'saved'
         sliderLocation: 'saved',
-        // Replace-native placement: 'saved', 'native', or 'custom'. Default: 'saved'
-        replaceNativePlacement: 'saved',
         // Volume adjustment step: 'saved', 1, 2, 5, or 10. Default: 'saved'
         volumeStep: 'saved',
         // Keep the volume pill expanded: 'saved', true, or false. Default: 'saved'
@@ -109,9 +105,9 @@ export function startYouTubeVolumeSlider() {
 
 
 
-    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, isSliderOnVideo, setSliderLocation, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled } = createVolumeSettings({
         document, storage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { normalization: 'tm-yt-volume-slider-normalization', mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+        keys: { normalization: 'tm-yt-volume-slider-normalization', mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
         onNormalizationChanged: () => syncNormalization(),
@@ -256,7 +252,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function placeOverlayInControls(overlay, controlsHost) {
         if (!overlay || !controlsHost) return;
         const nativeVolumeArea = getNativeVolumeArea(controlsHost);
-        if (shouldUseNativeReplacementSlot() && nativeVolumeArea && nativeVolumeArea.parentElement === controlsHost) {
+        if (isNativeVolumeReplacementEnabled() && nativeVolumeArea && nativeVolumeArea.parentElement === controlsHost) {
             if (overlay.parentElement !== controlsHost || overlay.nextElementSibling !== nativeVolumeArea) {
                 controlsHost.insertBefore(overlay, nativeVolumeArea);
             }
@@ -497,7 +493,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         installOptionsStyles({
             document, platform: 'youtube', styleId: OPTIONS_STYLE_ID,
             optionsButtonId: OPTIONS_BUTTON_ID, optionsPopupId: OPTIONS_POPUP_ID,
-            accentDark: VOLUME_ACCENT_DARK, accentDisabled: VOLUME_ACCENT_DISABLED,
+            accentDark: VOLUME_ACCENT_DARK,
             closeHideControlsClass: OPTIONS_CLOSE_HIDE_CONTROLS_CLASS
         });
     }
@@ -603,7 +599,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
 
     const { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
-        getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
+        getVolumeSliderMode, setVolumeSliderMode,
         getVolumeAppearance, setVolumeAppearance,
         isNormalizationEnabled, setNormalizationEnabled, getNormalizationStatus: () => normalizer.getStatus(),
         getNormalizationDetails: () => normalizer.getDetails(),

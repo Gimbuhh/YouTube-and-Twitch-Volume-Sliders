@@ -1,8 +1,10 @@
 import { clampVolume } from './volume.js';
 import { createAudiblePlayback } from './normalization-playback.js';
+import { installMediaOutputGuard, reserveMediaOutput } from './normalization-output.js';
 
 // Own selected volume and lifecycle independently of the processed output.
 export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, onStatusChanged = () => {} }) {
+  installMediaOutputGuard(window);
   let enabled = false, sourceChanging = false, session = null, status = 'Off', lastUiAt = -Infinity;
   const now = () => window.performance.now();
   function report(next) {
@@ -35,6 +37,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
   }
   function reset(owned) {
     release(owned);
+    reserveMediaOutput(window, owned.video);
     owned.blocked = false; owned.started = now(); owned.lastFrame = 0;
     silence(owned);
     report('Starting audio analysis');
@@ -42,11 +45,12 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
   function unavailable(owned, error) {
     if (session !== owned) return;
     release(owned); owned.blocked = true; owned.error = String(error?.message || error || 'Audio unavailable');
+    owned.sourceConflict = error?.name === 'AudioSourceConflict';
     owned.retryAt = now() + (owned.retryDelay || 1000);
     owned.retryDelay = Math.min(30000, (owned.retryDelay || 1000) * 2);
     try { nativeWrite(owned, owned.preferred); }
     catch { /* the native element is restored even if its site API fails */ }
-    report('Audio unavailable — normal volume');
+    report(owned.sourceConflict ? 'Another audio processor is active — normal volume' : 'Audio unavailable — normal volume');
   }
   async function connect(owned) {
     if (owned.connecting || owned.playback || owned.blocked) return;
@@ -81,6 +85,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     const owned = session;
     if (!owned) return;
     if (owned.blocked) {
+      if (owned.sourceConflict) { return; }
       if (sourceChanging || owned.video.paused || owned.video.readyState < 2 || now() < owned.retryAt) return;
       try { reset(owned); } catch (error) { unavailable(owned, error); return; }
     }
@@ -137,6 +142,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       window.queueMicrotask(() => { if (session === owned) tick(); });
     };
     owned.gesture = () => {
+      if (owned.sourceConflict) { return; }
       if (owned.blocked) reset(owned);
       owned.playback?.resume().catch(() => {});
       tick();
@@ -155,6 +161,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     setSourceChanging(value) { const next = !!value; if (sourceChanging === next) return; sourceChanging = next; if (session) { if (next) { session.changingAt = now(); reset(session); } else tick(); } },
     getStatus: () => status,
     getDetails() {
+      if (session?.sourceConflict) { return 'Turn off the other audio processor, then reload to use Auto-normalize volume.'; }
       if (!session || !status.startsWith('Active')) return '';
       const output = Math.round(100 * (session.metrics?.gain || 0));
       return `${output < session.preferred ? 'Reducing loud audio' : output > session.preferred ? 'Raising quiet audio' : 'No volume adjustment'}\nOutput ${output}% · Selected ${session.preferred}%`;

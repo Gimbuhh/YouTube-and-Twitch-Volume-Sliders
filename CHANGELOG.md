@@ -14,11 +14,13 @@ All notable changes to the maintained userscripts are documented here. Historica
   - Temporary audio access failures retry automatically.
   - A waveform icon shows normalization is on, including during pause and mute, and hides if analysis is blocked or unavailable.
   - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.
+  - Normalization takes priority over Twitch's 7TV compressor when enabled, with clear feedback when switching requires a reload.
 
 ### Changed
 
 - **Both:** Volume arrows show a compact on-video percentage and matching speaker icon with normalization on or off.
-- **Both:** Volume Slider Options groups listening and placement settings in **General**, with visual controls in **Appearance**, clearer toggles, and compact audio feedback. The options icon animates with the menu state. The borderless Mode dropdown stays above both tabs, keeps choices readable across browser themes, and points its arrow up while open and down when closed.
+- **Both:** Volume Slider Options groups listening and behavior settings in **General**, with visual controls in **Appearance**, clearer toggles, and compact audio feedback. The options icon animates with the menu state. The borderless Mode dropdown stays above both tabs, keeps choices readable across browser themes, and points its arrow up while open and down when closed.
+- **Both:** Replace native always uses the original volume position; the redundant Placement choices are removed.
 
 ### Fixed
 

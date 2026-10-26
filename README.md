@@ -84,7 +84,7 @@ Install version **2.9**: [YouTube userscript](https://github.com/Gimbuhh/YouTube
 
 ## Settings
 
-Open **Volume Slider Options** beside the player’s native settings button. **Mode** stays above the tabs: choose On, Off, or Replace native. Its arrow points up while choices are open and down when closed. **General** contains audio normalization, adjustment step, placement, and behavior. **Appearance** contains icon style and bar thickness, plus size and opacity when **General → Show on video** is enabled.
+Open **Volume Slider Options** beside the player’s native settings button. **Mode** stays above the tabs: choose On, Off, or Replace native. Replace native always uses the site's original volume position. Its arrow points up while choices are open and down when closed. **General** contains audio normalization, adjustment step, and behavior. **Appearance** contains icon style and bar thickness, plus size and opacity when **General → Show on video** is enabled.
 
 Options opens with the menu focused. Press Tab to enter the first setting, or Shift+Tab to enter the last. With a tab focused, Left/Right Arrow switches tabs; Home/End selects the first/last tab. Tab moves through the visible controls, and Escape closes Options.
 
@@ -120,7 +120,7 @@ Stream restarts keep that selected level. Player Up/Down keys change it in five-
 
 The mode uses LUFS-based analysis to match listening levels and processes the player's audio directly to reduce loud spikes before playback. Quieter sources rise gradually, silence and very low background levels are ignored, and volume recovers smoothly after brief loud sounds. Automatic boost is limited, so especially quiet recordings may remain below target. Stereo channels stay linked without cancelling each other's measurements.
 
-Audio stays quiet until protection is ready on page loads and video changes. Normalization adds a small audio delay and cannot guarantee identical loudness for every recording. Browser activation and source restrictions still apply; if processing is unavailable, ordinary playback continues at your selected volume with a status warning. See [normalization](docs/normalization.md) for details and [testing](docs/testing.md#audio-normalization) for verification.
+Audio stays quiet until protection is ready on page loads and video changes. Normalization adds a small audio delay and cannot guarantee identical loudness for every recording. Browser activation and source restrictions still apply; if processing is unavailable, ordinary playback continues at your selected volume with a status warning. Normalization takes priority over Twitch's 7TV compressor when enabled; switching processors requires a reload. See [normalization](docs/normalization.md) for details and [testing](docs/testing.md#audio-normalization) for verification.
 
 The status below the toggle shows whether normalization is active, waiting, or unavailable. While active, it also shows whether audio is being raised or reduced. **Output** is the volume currently applied to the player; **Selected** is your chosen slider percentage. Browser audio capture support and stream restrictions vary. If capture fails or becomes inaccessible, ordinary playback continues at your chosen volume. You may need to click the player to activate analysis after a reload. Turning normalization off, or setting the slider mode to **Off**, releases analysis and restores your chosen volume while preserving mute. The opt-in remains saved when slider mode is Off.
 

@@ -9,9 +9,11 @@
   - A small waveform icon shows normalization is on. Pause and mute keep it visible; blocked or unavailable analysis hides it.
   - Turning normalization off or setting slider mode to Off restores your chosen volume while preserving mute. If the browser cannot analyze a stream, ordinary playback continues at your chosen level.
   - Audio analysis stays on your device and uses only the playing media. It requires no microphone access and sends no audio anywhere.
+  - On Twitch, normalization takes priority over 7TV's compressor when enabled and explains when switching processors requires a reload.
 
 ## Changed
 
+- **Both:** Replace native uses the site's original volume position automatically, without separate placement choices.
 - **Both:** Arrow-key volume feedback shows your selected percentage and a matching speaker icon on both sites, with normalization on or off.
 - **Both:** Volume Slider Options is easier to navigate with **General** and **Appearance** tabs. The button's slider handles move when the menu opens and return when it closes. The borderless Mode dropdown is available from either tab, with readable choices and an arrow that shows whether it is open. Audio feedback separates output from your selected volume; the Appearance hint points to **General → Show on video** for size and opacity controls.
 

@@ -3,7 +3,7 @@ import { VOLUME_STEPS } from './volume.js';
 export function createOptionsUi(dependencies) {
   const {
     document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
-    getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
+    getVolumeSliderMode, setVolumeSliderMode,
     getVolumeAppearance, setVolumeAppearance,
     isNormalizationEnabled, setNormalizationEnabled, getNormalizationStatus, getNormalizationDetails,
     getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
@@ -68,7 +68,6 @@ export function createOptionsUi(dependencies) {
         if (!popup) return;
 
         const selectedMode = getVolumeSliderMode();
-        const selectedPlacement = getReplaceNativePlacement();
         const selectedAppearance = getVolumeAppearance();
         const selectedStep = getVolumeStep();
         const onVideo = isSliderOnVideo();
@@ -79,18 +78,6 @@ export function createOptionsUi(dependencies) {
 
         const modeSelect = popup.querySelector('#tm-volume-options-mode');
         if (modeSelect) modeSelect.value = selectedMode;
-
-        const placementSection = popup.querySelector('#tm-volume-options-placement-section');
-        const placementEnabled = selectedMode === 'replace-native';
-        if (placementSection) {
-            placementSection.dataset.disabled = placementEnabled ? 'false' : 'true';
-        }
-        ['native', 'custom'].forEach((placement) => {
-            const radio = popup.querySelector(`#tm-volume-options-placement-${placement}`);
-            if (!radio) return;
-            radio.setAttribute('aria-checked', selectedPlacement === placement ? 'true' : 'false');
-            radio.disabled = !placementEnabled;
-        });
 
         ['new', 'classic'].forEach((appearance) => {
             popup.querySelector(`#tm-volume-options-appearance-${appearance}`)
@@ -237,34 +224,10 @@ export function createOptionsUi(dependencies) {
         return section;
     }
 
-    function createPlacementSection() {
+    function createBehaviorSection() {
         const section = document.createElement('div');
         section.className = 'tm-volume-options-section';
-        section.id = 'tm-volume-options-placement-section';
-        section.appendChild(createOptionsSectionLabel('Placement'));
-
-        const segment = createOptionsSegment([
-            createOptionsRadio(
-                'tm-volume-options-placement-native',
-                'Native spot',
-                getReplaceNativePlacement() === 'native',
-                () => setReplaceNativePlacement('native')
-            ),
-            createOptionsRadio(
-                'tm-volume-options-placement-custom',
-                'Custom spot',
-                getReplaceNativePlacement() === 'custom',
-                () => setReplaceNativePlacement('custom')
-            )
-        ]);
-        segment.setAttribute('role', 'radiogroup');
-        segment.setAttribute('aria-label', 'Position when replacing native');
-        section.appendChild(segment);
-        section.appendChild(createBehaviorRows());
-        return section;
-    }
-
-    function createBehaviorRows() {
+        section.appendChild(createOptionsSectionLabel('Behavior'));
         const list = document.createElement('div');
         list.className = 'tm-volume-options-checklist';
         list.appendChild(createOptionsCheckboxRow(
@@ -279,7 +242,8 @@ export function createOptionsUi(dependencies) {
             isAlwaysExpandedEnabled(),
             (next) => setAlwaysExpandedEnabled(next)
         ));
-        return list;
+        section.appendChild(list);
+        return section;
     }
 
     function createVolumeStepSection() {
@@ -609,7 +573,7 @@ export function createOptionsUi(dependencies) {
             });
             body.scrollTop = 0;
         }
-        panels[0].append(createNormalizationSection(), createPlacementSection());
+        panels[0].append(createNormalizationSection(), createBehaviorSection());
         panels[1].append(createAppearanceSection(), createThicknessSection(), createSizeSection(), createOpacitySection());
         const hint = document.createElement('p');
         hint.className = 'tm-volume-options-help tm-volume-options-appearance-hint';

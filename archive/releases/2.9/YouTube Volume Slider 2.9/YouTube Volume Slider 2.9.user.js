@@ -404,17 +404,66 @@
 
   // src/shared/normalization-output.js
   var documents = /* @__PURE__ */ new WeakMap();
+  function registry(window2) {
+    let state = documents.get(window2);
+    if (!state) {
+      state = { sources: /* @__PURE__ */ new WeakMap(), reserved: /* @__PURE__ */ new WeakSet(), external: /* @__PURE__ */ new WeakSet() };
+      documents.set(window2, state);
+    }
+    return state;
+  }
+  function installMediaOutputGuard(window2) {
+    const state = registry(window2);
+    const Context = window2.AudioContext || window2.webkitAudioContext;
+    if (state.createSource || !Context?.prototype.createMediaElementSource) {
+      return;
+    }
+    state.createSource = Context.prototype.createMediaElementSource;
+    function externalSource(video, create) {
+      if (state.reserved.has(video) || state.sources.has(video)) {
+        throw new window2.DOMException("Volume Slider already owns this media element", "InvalidStateError");
+      }
+      const source = create();
+      state.external.add(video);
+      return source;
+    }
+    Context.prototype.createMediaElementSource = function(video) {
+      return externalSource(video, () => state.createSource.call(this, video));
+    };
+    if (window2.MediaElementAudioSourceNode) {
+      window2.MediaElementAudioSourceNode = new Proxy(window2.MediaElementAudioSourceNode, {
+        construct(target, args, newTarget) {
+          return externalSource(args[1]?.mediaElement, () => Reflect.construct(target, args, newTarget));
+        }
+      });
+    }
+  }
+  function assertMediaOutputAvailable(window2, video) {
+    if (registry(window2).external.has(video)) {
+      throw mediaOutputConflict();
+    }
+  }
+  function reserveMediaOutput(window2, video) {
+    assertMediaOutputAvailable(window2, video);
+    registry(window2).reserved.add(video);
+  }
+  function mediaOutputConflict() {
+    const error = new Error("Another audio processor already owns this player");
+    error.name = "AudioSourceConflict";
+    return error;
+  }
   function acquireMediaOutput(window2, video) {
+    installMediaOutputGuard(window2);
+    assertMediaOutputAvailable(window2, video);
     const url = video.currentSrc && new URL(video.currentSrc, window2.location.href);
     if (video.mediaKeys || !video.srcObject && (!url || url.origin !== window2.location.origin && !video.crossOrigin)) {
       throw new Error("Direct audio processing requires an accessible media source");
     }
-    let document2 = documents.get(window2);
-    if (!document2) {
+    const document2 = registry(window2);
+    if (!document2.context) {
       const Context = window2.AudioContext || window2.webkitAudioContext;
       const context = new Context({ latencyHint: "interactive" });
-      document2 = { context, sources: /* @__PURE__ */ new WeakMap() };
-      documents.set(window2, document2);
+      document2.context = context;
       const resume = () => {
         if (context.state === "suspended") {
           context.resume().catch(() => {
@@ -434,7 +483,15 @@
       connect(input) {
         if (document2.context.state !== "running") throw new Error("Audio processing requires player activation");
         if (!source) {
-          source = document2.context.createMediaElementSource(video);
+          assertMediaOutputAvailable(window2, video);
+          try {
+            source = document2.createSource.call(document2.context, video);
+          } catch (error) {
+            if (error.name === "InvalidStateError") {
+              throw mediaOutputConflict();
+            }
+            throw error;
+          }
           document2.sources.set(video, source);
           video.addEventListener("playing", document2.resume);
         }
@@ -647,6 +704,7 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
   // src/shared/normalization.js
   function createVolumeNormalizer({ window: window2, getVolume, setVolume, isMuted, onStatusChanged = () => {
   } }) {
+    installMediaOutputGuard(window2);
     let enabled = false, sourceChanging = false, session = null, status = "Off", lastUiAt = -Infinity;
     const now = () => window2.performance.now();
     function report(next) {
@@ -700,6 +758,7 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
     }
     function reset(owned) {
       release(owned);
+      reserveMediaOutput(window2, owned.video);
       owned.blocked = false;
       owned.started = now();
       owned.lastFrame = 0;
@@ -711,13 +770,14 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
       release(owned);
       owned.blocked = true;
       owned.error = String(error?.message || error || "Audio unavailable");
+      owned.sourceConflict = error?.name === "AudioSourceConflict";
       owned.retryAt = now() + (owned.retryDelay || 1e3);
       owned.retryDelay = Math.min(3e4, (owned.retryDelay || 1e3) * 2);
       try {
         nativeWrite(owned, owned.preferred);
       } catch {
       }
-      report("Audio unavailable \u2014 normal volume");
+      report(owned.sourceConflict ? "Another audio processor is active \u2014 normal volume" : "Audio unavailable \u2014 normal volume");
     }
     async function connect(owned) {
       if (owned.connecting || owned.playback || owned.blocked) return;
@@ -766,6 +826,9 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
       const owned = session;
       if (!owned) return;
       if (owned.blocked) {
+        if (owned.sourceConflict) {
+          return;
+        }
         if (sourceChanging || owned.video.paused || owned.video.readyState < 2 || now() < owned.retryAt) return;
         try {
           reset(owned);
@@ -853,6 +916,9 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
         });
       };
       owned.gesture = () => {
+        if (owned.sourceConflict) {
+          return;
+        }
         if (owned.blocked) reset(owned);
         owned.playback?.resume().catch(() => {
         });
@@ -891,6 +957,9 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
       },
       getStatus: () => status,
       getDetails() {
+        if (session?.sourceConflict) {
+          return "Turn off the other audio processor, then reload to use Auto-normalize volume.";
+        }
         if (!session || !status.startsWith("Active")) return "";
         const output = Math.round(100 * (session.metrics?.gain || 0));
         return `${output < session.preferred ? "Reducing loud audio" : output > session.preferred ? "Raising quiet audio" : "No volume adjustment"}
@@ -1492,8 +1561,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       refreshOptionsPopupState,
       getVolumeSliderMode,
       setVolumeSliderMode,
-      getReplaceNativePlacement,
-      setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
       isNormalizationEnabled,
@@ -1567,7 +1634,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     function syncOptionsPopupState(popup) {
       if (!popup) return;
       const selectedMode = getVolumeSliderMode();
-      const selectedPlacement = getReplaceNativePlacement();
       const selectedAppearance = getVolumeAppearance();
       const selectedStep = getVolumeStep();
       const onVideo = isSliderOnVideo();
@@ -1575,17 +1641,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       syncNormalizationStatus(popup);
       const modeSelect = popup.querySelector("#tm-volume-options-mode");
       if (modeSelect) modeSelect.value = selectedMode;
-      const placementSection = popup.querySelector("#tm-volume-options-placement-section");
-      const placementEnabled = selectedMode === "replace-native";
-      if (placementSection) {
-        placementSection.dataset.disabled = placementEnabled ? "false" : "true";
-      }
-      ["native", "custom"].forEach((placement) => {
-        const radio = popup.querySelector(`#tm-volume-options-placement-${placement}`);
-        if (!radio) return;
-        radio.setAttribute("aria-checked", selectedPlacement === placement ? "true" : "false");
-        radio.disabled = !placementEnabled;
-      });
       ["new", "classic"].forEach((appearance) => {
         popup.querySelector(`#tm-volume-options-appearance-${appearance}`)?.setAttribute("aria-checked", selectedAppearance === appearance ? "true" : "false");
       });
@@ -1710,32 +1765,10 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       section.append(label, select);
       return section;
     }
-    function createPlacementSection() {
+    function createBehaviorSection() {
       const section = document2.createElement("div");
       section.className = "tm-volume-options-section";
-      section.id = "tm-volume-options-placement-section";
-      section.appendChild(createOptionsSectionLabel("Placement"));
-      const segment = createOptionsSegment([
-        createOptionsRadio(
-          "tm-volume-options-placement-native",
-          "Native spot",
-          getReplaceNativePlacement() === "native",
-          () => setReplaceNativePlacement("native")
-        ),
-        createOptionsRadio(
-          "tm-volume-options-placement-custom",
-          "Custom spot",
-          getReplaceNativePlacement() === "custom",
-          () => setReplaceNativePlacement("custom")
-        )
-      ]);
-      segment.setAttribute("role", "radiogroup");
-      segment.setAttribute("aria-label", "Position when replacing native");
-      section.appendChild(segment);
-      section.appendChild(createBehaviorRows());
-      return section;
-    }
-    function createBehaviorRows() {
+      section.appendChild(createOptionsSectionLabel("Behavior"));
       const list = document2.createElement("div");
       list.className = "tm-volume-options-checklist";
       list.appendChild(createOptionsCheckboxRow(
@@ -1750,7 +1783,8 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         isAlwaysExpandedEnabled(),
         (next) => setAlwaysExpandedEnabled(next)
       ));
-      return list;
+      section.appendChild(list);
+      return section;
     }
     function createVolumeStepSection() {
       const section = document2.createElement("div");
@@ -2056,7 +2090,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         });
         body.scrollTop = 0;
       }
-      panels[0].append(createNormalizationSection(), createPlacementSection());
+      panels[0].append(createNormalizationSection(), createBehaviorSection());
       panels[1].append(createAppearanceSection(), createThicknessSection(), createSizeSection(), createOpacitySection());
       const hint = document2.createElement("p");
       hint.className = "tm-volume-options-help tm-volume-options-appearance-hint";
@@ -2087,9 +2121,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
   }
   function normalizeVolumeSliderMode(mode) {
     return normalizeChoice(mode, MODES);
-  }
-  function normalizeReplaceNativePlacement(placement) {
-    return normalizeChoice(placement, ["native", "custom"]);
   }
   function normalizeSliderLocation(location) {
     return normalizeChoice(location, LOCATIONS);
@@ -2166,9 +2197,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     function getVolumeSliderMode() {
       return normalizeVolumeSliderMode(userSettings.volumeSliderMode) || getSavedVolumeSliderMode();
     }
-    function getReplaceNativePlacement() {
-      return normalizeReplaceNativePlacement(userSettings.replaceNativePlacement) || normalizeReplaceNativePlacement(read(keys.replacePlacement)) || "native";
-    }
     function getSliderLocation() {
       return normalizeSliderLocation(userSettings.sliderLocation) || normalizeSliderLocation(read(keys.location)) || "controls";
     }
@@ -2230,10 +2258,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     }
     function setSliderLocation(location) {
       write(keys.location, normalizeSliderLocation(location) || "controls");
-      onPlacementChanged();
-    }
-    function setReplaceNativePlacement(placement) {
-      write(keys.replacePlacement, normalizeReplaceNativePlacement(placement) || "native");
       onPlacementChanged();
     }
     function getSavedVolumeStep() {
@@ -2399,15 +2423,12 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     }
     const isOverlayEnabled = () => getVolumeSliderMode() !== "off";
     const isNativeVolumeReplacementEnabled = () => getVolumeSliderMode() === "replace-native";
-    const shouldUseNativeReplacementSlot = () => isNativeVolumeReplacementEnabled() && getReplaceNativePlacement() === "native";
     return {
       isNormalizationEnabled,
       setNormalizationEnabled,
       getVolumeSliderMode,
-      getReplaceNativePlacement,
       isSliderOnVideo,
       setSliderLocation,
-      setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
       updateOverlayAppearance,
@@ -2433,8 +2454,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       updateOverlayOpacity,
       setVolumeSliderMode,
       isOverlayEnabled,
-      isNativeVolumeReplacementEnabled,
-      shouldUseNativeReplacementSlot
+      isNativeVolumeReplacementEnabled
     };
   }
 
@@ -2786,9 +2806,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
             #{{optionsPopupId}} .tm-volume-options-appearance-hint {
                 padding: 8px 16px 0;
             }
-            #{{optionsPopupId}} #tm-volume-options-placement-section > .tm-volume-options-checklist {
-                margin-top: 8px;
-            }
 {{platformOptionsCss}}
             .tm-volume-options-header {
                 align-items: center;
@@ -2987,16 +3004,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
                 color: #fff;
                 text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
             }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio {
-                cursor: not-allowed;
-                opacity: 0.4;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio:hover {
-                background: transparent;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio[aria-checked="true"] {
-                background: {{accentDisabled}};
-            }
             .tm-volume-options-opacity-row {
                 display: flex;
                 flex-direction: column;
@@ -3139,7 +3146,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     optionsButtonId,
     optionsPopupId,
     accentDark,
-    accentDisabled,
     closeHideControlsClass = ""
   }) {
     const style = createStyleElement(document2, styleId);
@@ -3148,7 +3154,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       optionsButtonId,
       optionsPopupId,
       accentDark,
-      accentDisabled,
       platformOptionsCss: getPlatformOptionsCss(platform, closeHideControlsClass)
     });
   }
@@ -3876,7 +3881,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     const MUTE_STORAGE_KEY = "tm-yt-muted";
     const VOLUME_MODE_KEY = "tm-yt-volume-slider-mode";
     const SLIDER_LOCATION_KEY = "tm-yt-volume-slider-location";
-    const REPLACE_NATIVE_PLACEMENT_KEY = "tm-yt-volume-slider-replace-placement";
     const VOLUME_STEP_KEY = "tm-yt-volume-slider-step";
     const LEGACY_SNAP_TO_5_KEY = "tm-yt-volume-slider-snap-to-5";
     const ALWAYS_EXPANDED_KEY = "tm-yt-volume-slider-always-expanded";
@@ -3903,7 +3907,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     const VOLUME_ACCENT_LIGHT = "#cc4444";
     const VOLUME_ACCENT_DARK = "#bb3333";
     const VOLUME_ACCENT_MID = "#cc5555";
-    const VOLUME_ACCENT_DISABLED = "rgba(187, 51, 51, 0.55)";
     const VOLUME_ARC_TRACK = "rgba(255, 255, 255, 0.38)";
     const VOLUME_PANEL_DROP_SHADOW = "drop-shadow(0 2px 5px rgba(0, 0, 0, 0.06))";
     const USER_SETTINGS = {
@@ -3911,8 +3914,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       volumeSliderMode: "saved",
       // Slider location: 'saved', 'controls', or 'video'. Default: 'saved'
       sliderLocation: "saved",
-      // Replace-native placement: 'saved', 'native', or 'custom'. Default: 'saved'
-      replaceNativePlacement: "saved",
       // Volume adjustment step: 'saved', 1, 2, 5, or 10. Default: 'saved'
       volumeStep: "saved",
       // Keep the volume pill expanded: 'saved', true, or false. Default: 'saved'
@@ -3943,12 +3944,12 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     let requestedVolumeIntent = null;
     const overlayLifecycle = createOverlayLifecycle();
     const { getVideoElement, resetVideoElement, ensurePlayerPositioning } = createVideoLocator(document, window);
-    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, isSliderOnVideo, setSliderLocation, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled } = createVolumeSettings({
       document,
       storage,
       userSettings: USER_SETTINGS,
       overlayId: OVERLAY_ID,
-      keys: { normalization: "tm-yt-volume-slider-normalization", mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+      keys: { normalization: "tm-yt-volume-slider-normalization", mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
       defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
       onPlacementChanged: () => {
         attachSliderIfPossible();
@@ -4072,7 +4073,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function placeOverlayInControls(overlay, controlsHost) {
       if (!overlay || !controlsHost) return;
       const nativeVolumeArea = getNativeVolumeArea(controlsHost);
-      if (shouldUseNativeReplacementSlot() && nativeVolumeArea && nativeVolumeArea.parentElement === controlsHost) {
+      if (isNativeVolumeReplacementEnabled() && nativeVolumeArea && nativeVolumeArea.parentElement === controlsHost) {
         if (overlay.parentElement !== controlsHost || overlay.nextElementSibling !== nativeVolumeArea) {
           controlsHost.insertBefore(overlay, nativeVolumeArea);
         }
@@ -4274,7 +4275,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         optionsButtonId: OPTIONS_BUTTON_ID,
         optionsPopupId: OPTIONS_POPUP_ID,
         accentDark: VOLUME_ACCENT_DARK,
-        accentDisabled: VOLUME_ACCENT_DISABLED,
         closeHideControlsClass: OPTIONS_CLOSE_HIDE_CONTROLS_CLASS
       });
     }
@@ -4358,8 +4358,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       refreshOptionsPopupState,
       getVolumeSliderMode,
       setVolumeSliderMode,
-      getReplaceNativePlacement,
-      setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
       isNormalizationEnabled,

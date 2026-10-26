@@ -18,10 +18,6 @@ export function normalizeVolumeSliderMode(mode) {
   return normalizeChoice(mode, MODES);
 }
 
-export function normalizeReplaceNativePlacement(placement) {
-  return normalizeChoice(placement, ['native', 'custom']);
-}
-
 export function normalizeSliderLocation(location) {
   return normalizeChoice(location, LOCATIONS);
 }
@@ -104,11 +100,6 @@ export function createVolumeSettings({
     return normalizeVolumeSliderMode(userSettings.volumeSliderMode) || getSavedVolumeSliderMode();
   }
 
-  function getReplaceNativePlacement() {
-    return normalizeReplaceNativePlacement(userSettings.replaceNativePlacement) ||
-      normalizeReplaceNativePlacement(read(keys.replacePlacement)) || 'native';
-  }
-
   function getSliderLocation() {
     return normalizeSliderLocation(userSettings.sliderLocation) ||
       normalizeSliderLocation(read(keys.location)) || 'controls';
@@ -181,11 +172,6 @@ export function createVolumeSettings({
 
   function setSliderLocation(location) {
     write(keys.location, normalizeSliderLocation(location) || 'controls');
-    onPlacementChanged();
-  }
-
-  function setReplaceNativePlacement(placement) {
-    write(keys.replacePlacement, normalizeReplaceNativePlacement(placement) || 'native');
     onPlacementChanged();
   }
 
@@ -388,12 +374,11 @@ export function createVolumeSettings({
 
   const isOverlayEnabled = () => getVolumeSliderMode() !== 'off';
   const isNativeVolumeReplacementEnabled = () => getVolumeSliderMode() === 'replace-native';
-  const shouldUseNativeReplacementSlot = () => isNativeVolumeReplacementEnabled() && getReplaceNativePlacement() === 'native';
 
   return {
     isNormalizationEnabled, setNormalizationEnabled,
-    getVolumeSliderMode, getReplaceNativePlacement,
-    isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance,
+    getVolumeSliderMode,
+    isSliderOnVideo, setSliderLocation, getVolumeAppearance, setVolumeAppearance,
     updateOverlayAppearance, getVolumeStep, setVolumeStep,
     isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
@@ -401,6 +386,6 @@ export function createVolumeSettings({
     getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent,
     beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview,
     updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode,
-    isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot
+    isOverlayEnabled, isNativeVolumeReplacementEnabled
   };
 }

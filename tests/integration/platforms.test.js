@@ -37,6 +37,31 @@ function addYouTubeVideoToEarlyControls(runtime) {
   player.insertBefore(video,player.firstChild);
 }
 
+for (const config of platforms) test(`${config.name}: replacement uses the native slot despite a retired custom placement preference`, async t => {
+  const {runtime}=await loadPlatform(config,(current,fixture)=>{
+    current.window.localStorage.setItem(config.modeKey,'replace-native');
+    current.window.localStorage.setItem(config.modeKey.replace('-mode','-replace-placement'),'custom');
+    if (config.file==='twitch') {
+      const mute=current.document.createElement('button');
+      mute.dataset.aTarget='player-mute-unmute-button';
+      fixture.player.querySelector('[data-a-target="player-volume-slider"]').appendChild(mute);
+    }
+  });
+  t.after(()=>runtime.close());
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const native=runtime.document.querySelector(config.file==='youtube'?'.ytp-volume-area':'[data-a-target="player-volume-slider"]');
+  assert.equal(overlay.nextElementSibling,native,'replacement occupies the original volume slot');
+  assert.equal(runtime.window.getComputedStyle(native).display,'none');
+  runtime.document.getElementById('tm-volume-options-button').click();
+  const popup=runtime.document.getElementById('tm-volume-options-popup');
+  assert.equal(popup.querySelector('[id^="tm-volume-options-placement"]'),null);
+  const onVideo=popup.querySelector('#tm-volume-options-location-video');
+  onVideo.click();
+  assert.equal(overlay.parentElement,overlay._tmVolumeVideo.parentElement,'Show on video still works');
+  onVideo.click();
+  assert.equal(overlay.nextElementSibling,native,'returning to controls uses the native position');
+});
+
 function addTwitchVideoToEarlyControls(runtime) {
   const player=runtime.document.querySelector('.video-player');
   const video=runtime.document.createElement('video');

@@ -25,6 +25,20 @@ Gain changes use `setTargetAtTime` to continue smoothly from the current exponen
 
 ## Analysis compatibility and privacy
 
+### Other audio processors
+
+Enabled normalization reserves control when it binds to the video, before waiting for samples or an active audio context. This gives it priority over Twitch's 7TV compressor during startup. If normalization is off when a fresh player loads, 7TV can attach normally.
+
+Only one processor can control a video element's audio. Chrome rejects a second media-element source, while Firefox can play parallel sources that bypass the normalizer's volume and mute gain. A document-owned guard observes both source-creation APIs, rejects external sources for reserved or already-managed elements, and leaves unrelated media alone. An already-active 7TV controller is also recognized when the Twitch script initializes late.
+
+An existing audio-source attachment cannot safely be taken over. If 7TV or another observed processor is already attached when normalization is enabled, normalization stays unavailable and the slider controls the selected native volume. This conflict does not trigger capture retries or repeated context creation.
+
+Twitch's 7TV compressor button is disabled with an accurate explanation while Volume Slider has reserved or attached to its player. That choice stays fixed for the element until reload or replacement, including after normalization is switched off: native source attachments cannot be undone, and 7TV may cache failed attachment attempts even before our source is created. 7TV's settings are unchanged.
+
+To switch to 7TV, turn Auto-normalize volume off and reload. To switch to normalization, turn 7TV's compressor and its automatic activation off, then reload. A replacement video element gets fresh ownership; same-element source restarts retain their existing owner.
+
+### Audio input and privacy
+
 Captured native AudioData is preferred for analysis. Browsers without audio-capable MediaStreamTrackProcessor support use an analysis-only AudioWorklet instead. These are compatible inputs to the same policy, not different normalization methods. AudioData closes after processing; capture readers and worklet ports are released on reset or disable. Temporary Blob module URLs are revoked.
 
 All analysis stays on the device. There is no microphone permission, recording, audio upload or remote processing dependency. Worklet permission is unnecessary for audible playback, and no site security policy is changed. A compact diagnostic state is available in the document's data-tm-audio-normalization attribute; it contains status, levels and timing, never audio samples.

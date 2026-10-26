@@ -13,6 +13,7 @@ import { installOptionsStyles } from '../shared/options-styles.js';
 import { installVolumeSliderStyles } from '../shared/slider-styles.js';
 import { bindRangePointerInteraction, bindWheelVolumeStep, createVolumeControlElements, syncVolumeControl } from '../shared/slider-interactions.js';
 import { createTwitchControlsVisibilityManager } from './twitch-controls-visibility.js';
+import { registerExistingTwitchAudio, syncTwitchAudioCompatibility } from './twitch-audio-compatibility.js';
 
 export function startTwitchVolumeSlider() {
     'use strict';
@@ -32,7 +33,6 @@ export function startTwitchVolumeSlider() {
     const MUTE_STORAGE_KEY = 'tm-twitch-muted';
     const VOLUME_MODE_KEY = 'tm-twitch-volume-slider-mode';
     const SLIDER_LOCATION_KEY = 'tm-twitch-volume-slider-location';
-    const REPLACE_NATIVE_PLACEMENT_KEY = 'tm-twitch-volume-slider-replace-placement';
     const VOLUME_STEP_KEY = 'tm-twitch-volume-slider-step';
     const LEGACY_SNAP_TO_5_KEY = 'tm-twitch-volume-slider-snap-to-5';
     const ALWAYS_EXPANDED_KEY = 'tm-twitch-volume-slider-always-expanded';
@@ -65,7 +65,6 @@ export function startTwitchVolumeSlider() {
     const VOLUME_ACCENT_LIGHT = '#a970ff';
     const VOLUME_ACCENT_DARK = '#9146ff';
     const VOLUME_ACCENT_MID = '#b38cff';
-    const VOLUME_ACCENT_DISABLED = 'rgba(145, 70, 255, 0.55)';
     const VOLUME_ARC_TRACK = 'rgba(255, 255, 255, 0.38)';
     const VOLUME_PANEL_DROP_SHADOW = 'drop-shadow(0 2px 5px rgba(0, 0, 0, 0.06))';
     const STARTUP_MUTE_GUARD_MS = 4000;
@@ -73,8 +72,6 @@ export function startTwitchVolumeSlider() {
     const USER_SETTINGS = {
         // Volume slider mode: 'saved', 'off', 'on', or 'replace-native'. Default: 'saved'
         volumeSliderMode: 'saved',
-        // Where to place the slider when replacing native volume: 'saved', 'native', or 'custom'. Default: 'saved'
-        replaceNativePlacement: 'saved',
         // Slider location: 'saved', 'controls', or 'video'. Default: 'saved'
         sliderLocation: 'saved',
         // Volume adjustment step: 'saved', 1, 2, 5, or 10. Default: 'saved'
@@ -126,9 +123,9 @@ export function startTwitchVolumeSlider() {
 
 
 
-    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, isSliderOnVideo, setSliderLocation, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled } = createVolumeSettings({
         document, storage, userSettings: USER_SETTINGS, overlayId: OVERLAY_ID,
-        keys: { normalization: 'tm-twitch-volume-slider-normalization', mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+        keys: { normalization: 'tm-twitch-volume-slider-normalization', mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
         defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
         onPlacementChanged: () => { attachSliderIfPossible(); applyNativeVolumeVisibility(); },
         onNormalizationChanged: () => syncNormalization(),
@@ -141,9 +138,10 @@ export function startTwitchVolumeSlider() {
             return document.getElementById(OVERLAY_ID);
         }
     });
+    registerExistingTwitchAudio(window, getVideoElement());
     const normalizer = createVolumeNormalizer({
         window, getVolume: getRawVolume, setVolume: setRawVolume, isMuted,
-        onStatusChanged: () => { syncNormalizationStatus(getOptionsPopup()); syncNormalizationIcon(); }
+        onStatusChanged: () => { syncNormalizationStatus(getOptionsPopup()); syncNormalizationIcon(); syncTwitchAudioCompatibility(window, getVideoElement()); }
     });
 
     function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
@@ -347,7 +345,7 @@ export function startTwitchVolumeSlider() {
     function placeOverlayInControls(overlay, controlsHost) {
         if (!overlay || !controlsHost) return;
         const nativeVolumeGroup = getNativeVolumeGroup(controlsHost);
-        if (shouldUseNativeReplacementSlot() && nativeVolumeGroup && nativeVolumeGroup.parentElement === controlsHost) {
+        if (isNativeVolumeReplacementEnabled() && nativeVolumeGroup && nativeVolumeGroup.parentElement === controlsHost) {
             if (overlay.parentElement !== controlsHost || overlay.nextElementSibling !== nativeVolumeGroup) {
                 controlsHost.insertBefore(overlay, nativeVolumeGroup);
             }
@@ -744,7 +742,7 @@ export function startTwitchVolumeSlider() {
         installOptionsStyles({
             document, platform: 'twitch', styleId: OPTIONS_STYLE_ID,
             optionsButtonId: OPTIONS_BUTTON_ID, optionsPopupId: OPTIONS_POPUP_ID,
-            accentDark: VOLUME_ACCENT_DARK, accentDisabled: VOLUME_ACCENT_DISABLED
+            accentDark: VOLUME_ACCENT_DARK
         });
     }
 
@@ -852,7 +850,7 @@ export function startTwitchVolumeSlider() {
 
     const { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview } = createOptionsUi({
         document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
-        getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
+        getVolumeSliderMode, setVolumeSliderMode,
         getVolumeAppearance, setVolumeAppearance,
         isNormalizationEnabled, setNormalizationEnabled, getNormalizationStatus: () => normalizer.getStatus(),
         getNormalizationDetails: () => normalizer.getDetails(),
@@ -1584,6 +1582,7 @@ export function startTwitchVolumeSlider() {
     let attachQueued = false;
 
     function handleAttachObserverMutations(mutations) {
+        syncTwitchAudioCompatibility(window, getVideoElement(), mutations);
         const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
         const hasRemovedNodes = mutations.some((m) => m.removedNodes && m.removedNodes.length > 0);
         if ((!hasAddedNodes && !hasRemovedNodes) || attachQueued) return;

@@ -182,9 +182,6 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
             #{{optionsPopupId}} .tm-volume-options-appearance-hint {
                 padding: 8px 16px 0;
             }
-            #{{optionsPopupId}} #tm-volume-options-placement-section > .tm-volume-options-checklist {
-                margin-top: 8px;
-            }
 {{platformOptionsCss}}
             .tm-volume-options-header {
                 align-items: center;
@@ -383,16 +380,6 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 color: #fff;
                 text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
             }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio {
-                cursor: not-allowed;
-                opacity: 0.4;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio:hover {
-                background: transparent;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio[aria-checked="true"] {
-                background: {{accentDisabled}};
-            }
             .tm-volume-options-opacity-row {
                 display: flex;
                 flex-direction: column;
@@ -537,7 +524,6 @@ export function installOptionsStyles({
   optionsButtonId,
   optionsPopupId,
   accentDark,
-  accentDisabled,
   closeHideControlsClass = ''
 }) {
   const style = createStyleElement(document, styleId);
@@ -546,7 +532,6 @@ export function installOptionsStyles({
     optionsButtonId,
     optionsPopupId,
     accentDark,
-    accentDisabled,
     platformOptionsCss: getPlatformOptionsCss(platform, closeHideControlsClass)
   });
 }

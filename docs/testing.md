@@ -28,6 +28,8 @@ Browser launchers use isolated temporary profiles and never access the user's no
 
 ### Firefox compatibility
 
+The default Chrome and Firefox checks each run eight synthetic Twitch audio-ownership cases. They model the source/compressor routing contract in the [official 7TV 1.10.5 package](https://addons.mozilla.org/firefox/downloads/file/5143797/7tv_new-1.10.5.xpi), without installing or executing the extension. Both source APIs are checked with normalization active, normalization still waiting for its first samples, 7TV attached before normalization is enabled, and 7TV already active before script initialization. Assertions cover early normalizer priority, audible zero, selected volume, mute, source restarts/replacement, disable/re-enable, unrelated media and the compressor button's reload explanation. Set `VOLUME_SLIDER_AUDIO_OWNERSHIP_DIST` to exercise preserved artifacts; the original Firefox build fails the parallel-source assertion, and the previous first-owner build fails the startup-priority assertion.
+
 Firefox compatibility runs by default; use `npm run test:firefox` to isolate it. `PLAYWRIGHT_BROWSERS_PATH` can select a task-local browser cache, and `VOLUME_SLIDER_FIREFOX_RESULTS` can select the screenshots/results directory.
 
 The Firefox suite requires continuous processed audio, peak protection, wheel/label/track synchronization, pause/mute recovery, source restarts and disable/re-enable on both sites. It also runs the 39 native gain graph cases at 44.1/48/96 kHz, including overlapping gain changes against a continuous exponential reference. Assertions use fresh buffer channel views because Firefox detaches earlier views when a source acquires its buffer. The broader UI/zoom and synthetic page-stall suites remain Chrome-specific.

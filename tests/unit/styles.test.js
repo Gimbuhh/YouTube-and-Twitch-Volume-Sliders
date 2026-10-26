@@ -21,9 +21,6 @@ function installStyles(platform) {
     optionsButtonId: 'tm-volume-options-button',
     optionsPopupId: 'tm-volume-options-popup',
     accentDark: platform === 'twitch' ? '#9146ff' : '#bb3333',
-    accentDisabled: platform === 'twitch'
-      ? 'rgba(145, 70, 255, 0.55)'
-      : 'rgba(187, 51, 51, 0.55)',
     closeHideControlsClass: 'tm-volume-options-close-hide-controls'
   });
   return { dom, document };
