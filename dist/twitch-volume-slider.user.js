@@ -233,7 +233,11 @@
         hide();
       }
     }, true);
-    window2.addEventListener("scroll", hide, true);
+    window2.addEventListener("scroll", (event) => {
+      if (event.target === document2 || event.target === window2 || event.target.contains?.(target)) {
+        hide();
+      }
+    }, true);
     window2.addEventListener("resize", hide);
     document2.addEventListener("fullscreenchange", hide);
   }

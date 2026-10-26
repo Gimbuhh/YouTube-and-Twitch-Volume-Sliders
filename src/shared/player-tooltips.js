@@ -160,7 +160,10 @@ export function installPlayerTooltips(window, platform) {
   document.addEventListener('focusout', event => { if (target?.contains(event.target)) { hide(); } }, true);
   for (const type of ['pointerdown', 'click']) { document.addEventListener(type, hide, true); }
   document.addEventListener('keydown', event => { if (event.key === 'Escape') { hide(); } }, true);
-  window.addEventListener('scroll', hide, true);
+  window.addEventListener('scroll', event => {
+    // Scrolling elsewhere (including the volume slider) cannot move this anchor.
+    if (event.target === document || event.target === window || event.target.contains?.(target)) { hide(); }
+  }, true);
   window.addEventListener('resize', hide);
   document.addEventListener('fullscreenchange', hide);
 }

@@ -48,7 +48,7 @@ The browser suite also checks the static normalization icon in both themes and i
 
 ## Tooltips
 
-Chrome and Firefox checks cover the Options label, site styling, keyboard and pointer access, scaling, dismissal, and removal with the control. YouTube cases verify the controls-bar baseline, menu suppression, and immediate handoffs between native and custom labels, including fading native tooltips and keyboard focus.
+Chrome and Firefox checks cover the Options label, site styling, keyboard and pointer access, scaling, scroll ownership, dismissal, and removal with the control. YouTube cases verify the controls-bar baseline, menu suppression, and immediate handoffs between native and custom labels, including fading native tooltips and keyboard focus.
 
 Twitch cases verify hover timing, pop-in motion, reduced motion, controls hiding and reappearing, fullscreen placement, and cleanup after player removal. Hit-testing checks that the tooltip is painted above a native menu in a separate body layer. Audio-ownership checks also exercise the explanation on the disabled 7TV compressor.
 
