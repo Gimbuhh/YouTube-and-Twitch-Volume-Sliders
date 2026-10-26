@@ -5,8 +5,8 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const selected = process.argv[2] || 'all';
 if (!['all', 'chrome', 'firefox'].includes(selected)) throw new Error('Usage: node scripts/browser-checks.mjs [all|chrome|firefox]');
 const suites = {
-  chrome: ['smoke.mjs', 'player-tooltips.mjs', 'normalization-icon.mjs', 'audio-ownership.mjs', 'normalization.mjs', 'native-audio-startup.mjs', 'native-gain-graph.mjs'],
-  firefox: ['firefox.mjs', ['player-tooltips.mjs', '--firefox'], ['audio-ownership.mjs', '--firefox'], ['native-gain-graph.mjs', '--firefox']]
+  chrome: ['smoke.mjs', 'volume-numbers.mjs', 'player-tooltips.mjs', 'normalization-icon.mjs', 'audio-ownership.mjs', 'normalization.mjs', 'native-audio-startup.mjs', 'native-gain-graph.mjs'],
+  firefox: ['firefox.mjs', ['volume-numbers.mjs', '--firefox'], ['player-tooltips.mjs', '--firefox'], ['audio-ownership.mjs', '--firefox'], ['native-gain-graph.mjs', '--firefox']]
 };
 for (const [browser, scripts] of Object.entries(suites)) {
   if (selected !== 'all' && selected !== browser) continue;

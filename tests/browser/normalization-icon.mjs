@@ -121,17 +121,13 @@ try {
       const geometry = async () => page.evaluate(() => {
         const root = document.querySelector('#tm-volume-slider-overlay');
         const rect = selector => { const r = root.querySelector(selector).getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
-        return { icon: rect('.tm-normalization-icon'), number: rect('.tm-volume-percent'), panel: rect('.tm-volume-panel-bg'), mute: rect('.tm-volume-icon-cell'), slider: rect('input[type="range"]'), animation: getComputedStyle(root.querySelector('.tm-normalization-icon')).animationName, dpr: devicePixelRatio };
+        return { icon: rect('.tm-normalization-icon'), panel: rect('.tm-volume-panel-bg'), mute: rect('.tm-volume-icon-cell'), slider: rect('input[type="range"]'), animation: getComputedStyle(root.querySelector('.tm-normalization-icon')).animationName, dpr: devicePixelRatio };
       });
       const assertGeometry = async () => {
         const boxes = await geometry();
-        const { icon, number } = boxes;
-        if (number.width) {
-          const cx = icon.x + icon.width / 2, cy = icon.y + icon.height / 2;
-          const dx = cx - Math.max(number.x, Math.min(cx, number.right));
-          const dy = cy - Math.max(number.y, Math.min(cy, number.bottom));
-          assert.ok(Math.hypot(dx, dy) >= icon.width / 2 - 0.1, `${platform}: circular icon leaves the selected number unobscured`);
-        }
+        const { icon } = boxes;
+        // SVG text rectangles include font leading. volume-numbers.mjs checks painted
+        // glyph pixels against the badge for every value instead of those empty bounds.
         const scale = boxes.mute.width / 40;
         const distanceFromCenter = Math.hypot(icon.x + icon.width / 2 - (boxes.mute.x + boxes.mute.width / 2), icon.y + icon.height / 2 - (boxes.mute.y + boxes.mute.height / 2));
         assert.ok(distanceFromCenter < 16 * scale + icon.width / 2, `${platform}: icon touches the arc instead of floating outside the pill`);

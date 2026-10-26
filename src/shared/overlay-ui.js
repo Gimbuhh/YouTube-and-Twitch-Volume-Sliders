@@ -1,5 +1,6 @@
 import { createSpeakerIconGroup, getSpeakerIconMode } from './speaker-icon.js';
 import { getVolumeTickInterval } from './volume.js';
+import { createVolumeNumberRenderer, VOLUME_NUMBER_FONT_FAMILY, VOLUME_NUMBER_FONT_SIZE, VOLUME_NUMBER_FONT_WEIGHT } from './volume-number.js';
 
 export function createVolumeOverlay({ document, overlayId }) {
   const overlay = document.createElement('div');
@@ -50,8 +51,7 @@ export function createOverlayUi(dependencies) {
     const VOLUME_INDICATOR_TEXT_Y = '20';
     const VOLUME_ARC_RADIUS = '14.5';
     const VOLUME_ARC_STROKE_WIDTH = '3';
-    const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = '22.5';
-    const VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX = 1.5;
+    const renderVolumeNumber = createVolumeNumberRenderer(document, Number(VOLUME_INDICATOR_CENTER));
 
     function updateSliderBar(slider) {
         const value = Number(slider.value) || 0;
@@ -109,19 +109,7 @@ export function createOverlayUi(dependencies) {
         }
         const percent = overlay.querySelector('.tm-volume-percent');
         if (percent) {
-            const text = muted ? 'M' : String(Math.round(pct));
-            const isCompact = text.length > 2;
-            percent.textContent = text;
-            percent.setAttribute('x', VOLUME_INDICATOR_CENTER);
-            percent.setAttribute('y', VOLUME_INDICATOR_TEXT_Y);
-            if (isCompact) {
-                percent.setAttribute('textLength', VOLUME_INDICATOR_COMPACT_TEXT_LENGTH);
-                percent.setAttribute('lengthAdjust', 'spacingAndGlyphs');
-            } else {
-                percent.removeAttribute('textLength');
-                percent.removeAttribute('lengthAdjust');
-            }
-            opticallyCenterVolumeText(percent);
+            renderVolumeNumber(percent, muted ? 'M' : String(Math.round(pct)));
         }
         const arc = overlay.querySelector('.tm-volume-arc');
         if (arc) {
@@ -132,32 +120,6 @@ export function createOverlayUi(dependencies) {
             arc.setAttribute('stroke-dasharray', dashValue);
             arc.style.strokeDasharray = dashValue;
         }
-    }
-
-    function opticallyCenterVolumeText(textElement) {
-        textElement.removeAttribute('transform');
-        if (typeof textElement.getBBox !== 'function') return;
-
-        // text-anchor centers the advance box; getBBox centers the visible glyphs.
-        let box;
-        try {
-            box = textElement.getBBox();
-        } catch {
-            return;
-        }
-
-        if (!box || !Number.isFinite(box.x) || !Number.isFinite(box.width) || box.width <= 0) {
-            return;
-        }
-
-        const visualCenter = box.x + (box.width / 2);
-        const correction = Number(VOLUME_INDICATOR_CENTER) - visualCenter;
-        const safeCorrection = Math.max(
-            -VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX,
-            Math.min(VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX, correction)
-        );
-        if (Math.abs(safeCorrection) < 0.01) return;
-        textElement.setAttribute('transform', `translate(${safeCorrection.toFixed(2)} 0)`);
     }
 
     function setOverlayExpanded(overlay, expanded, force = false, options = {}) {
@@ -418,9 +380,9 @@ export function createOverlayUi(dependencies) {
         percent.setAttribute('text-anchor', 'middle');
         percent.setAttribute('dominant-baseline', 'central');
         percent.setAttribute('alignment-baseline', 'central');
-        percent.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
-        percent.setAttribute('font-size', '15');
-        percent.setAttribute('font-weight', '700');
+        percent.setAttribute('font-family', VOLUME_NUMBER_FONT_FAMILY);
+        percent.setAttribute('font-size', String(VOLUME_NUMBER_FONT_SIZE));
+        percent.setAttribute('font-weight', String(VOLUME_NUMBER_FONT_WEIGHT));
         percent.textContent = '0';
         svg.appendChild(percent);
 

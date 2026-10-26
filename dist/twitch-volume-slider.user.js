@@ -1432,6 +1432,62 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     }
   }
 
+  // src/shared/volume-number.js
+  var VOLUME_NUMBER_FONT_FAMILY = '"Segoe UI", system-ui, sans-serif';
+  var VOLUME_NUMBER_FONT_WEIGHT = 600;
+  var VOLUME_NUMBER_FONT_SIZE = 16;
+  var VOLUME_NUMBER_COMPACT_SIZE = 15;
+  var VOLUME_NUMBER_COMPACT_SPACING = -0.25;
+  function createVolumeNumberRenderer(document2, center) {
+    let context;
+    let pixelRatio;
+    const positions = /* @__PURE__ */ new Map();
+    return (element, text) => {
+      const compact = text.length > 2;
+      const size = compact ? VOLUME_NUMBER_COMPACT_SIZE : VOLUME_NUMBER_FONT_SIZE;
+      const ratio = document2.defaultView?.devicePixelRatio || 1;
+      if (ratio !== pixelRatio) {
+        positions.clear();
+        pixelRatio = ratio;
+      }
+      if (element.textContent !== text) {
+        element.textContent = text;
+      }
+      element.toggleAttribute("data-compact", compact);
+      if (context === void 0) {
+        context = document2.defaultView?.CanvasRenderingContext2D ? document2.createElement("canvas").getContext("2d") : null;
+      }
+      if (!context) {
+        return;
+      }
+      let position = positions.get(text);
+      if (!position) {
+        context.font = `${VOLUME_NUMBER_FONT_WEIGHT} ${size}px ${VOLUME_NUMBER_FONT_FAMILY}`;
+        const metrics = context.measureText(text);
+        const {
+          actualBoundingBoxLeft: left,
+          actualBoundingBoxRight: right,
+          actualBoundingBoxAscent: ascent,
+          actualBoundingBoxDescent: descent
+        } = metrics;
+        if (![left, right, ascent, descent].every(Number.isFinite) || left + right <= 0 || ascent + descent <= 0) {
+          return;
+        }
+        const spacing = compact ? VOLUME_NUMBER_COMPACT_SPACING * (text.length - 1) : 0;
+        position = {
+          x: center + (left - right - spacing) / 2,
+          y: center + (ascent - descent) / 2
+        };
+        positions.set(text, position);
+      }
+      element.setAttribute("text-anchor", "start");
+      element.setAttribute("dominant-baseline", "alphabetic");
+      element.setAttribute("alignment-baseline", "alphabetic");
+      element.setAttribute("x", String(Number(position.x.toFixed(3))));
+      element.setAttribute("y", String(Number(position.y.toFixed(3))));
+    };
+  }
+
   // src/shared/overlay-ui.js
   function createVolumeOverlay({ document: document2, overlayId }) {
     const overlay = document2.createElement("div");
@@ -1488,8 +1544,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     const VOLUME_INDICATOR_TEXT_Y = "20";
     const VOLUME_ARC_RADIUS = "14.5";
     const VOLUME_ARC_STROKE_WIDTH = "3";
-    const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = "22.5";
-    const VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX = 1.5;
+    const renderVolumeNumber = createVolumeNumberRenderer(document2, Number(VOLUME_INDICATOR_CENTER));
     function updateSliderBar(slider) {
       const value = Number(slider.value) || 0;
       const pct = Math.min(Math.max(value, 0), 100);
@@ -1542,19 +1597,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       }
       const percent = overlay.querySelector(".tm-volume-percent");
       if (percent) {
-        const text = muted ? "M" : String(Math.round(pct));
-        const isCompact = text.length > 2;
-        percent.textContent = text;
-        percent.setAttribute("x", VOLUME_INDICATOR_CENTER);
-        percent.setAttribute("y", VOLUME_INDICATOR_TEXT_Y);
-        if (isCompact) {
-          percent.setAttribute("textLength", VOLUME_INDICATOR_COMPACT_TEXT_LENGTH);
-          percent.setAttribute("lengthAdjust", "spacingAndGlyphs");
-        } else {
-          percent.removeAttribute("textLength");
-          percent.removeAttribute("lengthAdjust");
-        }
-        opticallyCenterVolumeText(percent);
+        renderVolumeNumber(percent, muted ? "M" : String(Math.round(pct)));
       }
       const arc = overlay.querySelector(".tm-volume-arc");
       if (arc) {
@@ -1565,27 +1608,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         arc.setAttribute("stroke-dasharray", dashValue);
         arc.style.strokeDasharray = dashValue;
       }
-    }
-    function opticallyCenterVolumeText(textElement) {
-      textElement.removeAttribute("transform");
-      if (typeof textElement.getBBox !== "function") return;
-      let box;
-      try {
-        box = textElement.getBBox();
-      } catch {
-        return;
-      }
-      if (!box || !Number.isFinite(box.x) || !Number.isFinite(box.width) || box.width <= 0) {
-        return;
-      }
-      const visualCenter = box.x + box.width / 2;
-      const correction = Number(VOLUME_INDICATOR_CENTER) - visualCenter;
-      const safeCorrection = Math.max(
-        -VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX,
-        Math.min(VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX, correction)
-      );
-      if (Math.abs(safeCorrection) < 0.01) return;
-      textElement.setAttribute("transform", `translate(${safeCorrection.toFixed(2)} 0)`);
     }
     function setOverlayExpanded(overlay, expanded, force = false, options = {}) {
       if (!overlay) return;
@@ -1820,9 +1842,9 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       percent.setAttribute("text-anchor", "middle");
       percent.setAttribute("dominant-baseline", "central");
       percent.setAttribute("alignment-baseline", "central");
-      percent.setAttribute("font-family", "Arial, Helvetica, sans-serif");
-      percent.setAttribute("font-size", "15");
-      percent.setAttribute("font-weight", "700");
+      percent.setAttribute("font-family", VOLUME_NUMBER_FONT_FAMILY);
+      percent.setAttribute("font-size", String(VOLUME_NUMBER_FONT_SIZE));
+      percent.setAttribute("font-weight", String(VOLUME_NUMBER_FONT_WEIGHT));
       percent.textContent = "0";
       svg.appendChild(percent);
       appendSpeakerIcon("tm-volume-speaker-muted", "muted", "translate(8 8)");
@@ -3685,14 +3707,20 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
 
 #{{overlayId}} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
-  font: 700 15px/1 Arial, Helvetica, sans-serif;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
+  font: {{numberFont}};
+  font-variant-numeric: normal;
+  font-feature-settings: normal;
   font-synthesis: none;
   letter-spacing: 0;
-  text-shadow: 0 0 3px rgba(0, 0, 0, 0.75);
+  text-shadow: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.95));
   text-rendering: geometricPrecision;
   user-select: none;
+}
+
+#{{overlayId}} .tm-volume-percent[data-compact] {
+  font-size: {{numberCompactSize}}px;
+  letter-spacing: {{numberCompactSpacing}}px;
 }
 
 #{{overlayId}} .tm-volume-indicator.muted {
@@ -3878,6 +3906,9 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       valueLabelId,
       panelDropShadow,
       normalizationAccent: platform === "twitch" ? "#a970ff" : "#cc4444",
+      numberFont: `${VOLUME_NUMBER_FONT_WEIGHT} ${VOLUME_NUMBER_FONT_SIZE}px/1 ${VOLUME_NUMBER_FONT_FAMILY}`,
+      numberCompactSize: VOLUME_NUMBER_COMPACT_SIZE,
+      numberCompactSpacing: VOLUME_NUMBER_COMPACT_SPACING,
       ...getSliderPlatformStyles(platform, overlayId)
     });
   }

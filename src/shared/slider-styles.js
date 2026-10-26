@@ -1,4 +1,5 @@
 import { createStyleElement, fillStyleTemplate } from './styles.js';
+import { VOLUME_NUMBER_FONT_FAMILY, VOLUME_NUMBER_FONT_SIZE, VOLUME_NUMBER_FONT_WEIGHT, VOLUME_NUMBER_COMPACT_SIZE, VOLUME_NUMBER_COMPACT_SPACING } from './volume-number.js';
 
 const SLIDER_STYLE_TEMPLATE = String.raw`
 #{{overlayId}} {
@@ -261,14 +262,20 @@ const SLIDER_STYLE_TEMPLATE = String.raw`
 
 #{{overlayId}} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
-  font: 700 15px/1 Arial, Helvetica, sans-serif;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
+  font: {{numberFont}};
+  font-variant-numeric: normal;
+  font-feature-settings: normal;
   font-synthesis: none;
   letter-spacing: 0;
-  text-shadow: 0 0 3px rgba(0, 0, 0, 0.75);
+  text-shadow: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.95));
   text-rendering: geometricPrecision;
   user-select: none;
+}
+
+#{{overlayId}} .tm-volume-percent[data-compact] {
+  font-size: {{numberCompactSize}}px;
+  letter-spacing: {{numberCompactSpacing}}px;
 }
 
 #{{overlayId}} .tm-volume-indicator.muted {
@@ -457,6 +464,9 @@ export function installVolumeSliderStyles({ document, platform, overlayId, value
     valueLabelId,
     panelDropShadow,
     normalizationAccent: platform === 'twitch' ? '#a970ff' : '#cc4444',
+    numberFont: `${VOLUME_NUMBER_FONT_WEIGHT} ${VOLUME_NUMBER_FONT_SIZE}px/1 ${VOLUME_NUMBER_FONT_FAMILY}`,
+    numberCompactSize: VOLUME_NUMBER_COMPACT_SIZE,
+    numberCompactSpacing: VOLUME_NUMBER_COMPACT_SPACING,
     ...getSliderPlatformStyles(platform, overlayId)
   });
 }

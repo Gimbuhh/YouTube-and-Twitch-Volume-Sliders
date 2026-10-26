@@ -18,6 +18,7 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 ### Changed
 
+- **Both:** Volume numbers use clearer type, more consistent centering, and a natural-width “100”.
 - **Both:** Control tooltips match the site's styling and behavior, and the Options button is labeled **Volume Slider Options**.
 - **Both:** Volume arrows show a compact on-video percentage and matching speaker icon with normalization on or off.
 - **Both:** Volume Slider Options groups listening and behavior settings in **General**, with visual controls in **Appearance**, clearer toggles, and compact audio feedback. The options icon animates with the menu state. The borderless Mode dropdown stays above both tabs, keeps choices readable across browser themes, and points its arrow up while open and down when closed.

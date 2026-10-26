@@ -26,6 +26,8 @@ The suite uses deterministic local YouTube and Twitch player contracts while rou
 
 Browser launchers use isolated temporary profiles and never access the user's normal browser session. All suites share the prepared distribution files and run sequentially; the runner does not repeat builds for each browser.
 
+Both browser suites rasterize every volume numeral from 1–100 at 75–200% scaling. They check visible-glyph centering, clearance from the arc and normalization badge, natural text proportions, and restoration after mute. These checks execute the built userscripts rather than the typography previews.
+
 ### Firefox compatibility
 
 The default Chrome and Firefox checks each run eight synthetic Twitch audio-ownership cases. They model the source/compressor routing contract in the [official 7TV 1.10.5 package](https://addons.mozilla.org/firefox/downloads/file/5143797/7tv_new-1.10.5.xpi), without installing or executing the extension. Both source APIs are checked with normalization active, normalization still waiting for its first samples, 7TV attached before normalization is enabled, and 7TV already active before script initialization. Assertions cover early normalizer priority, audible zero, selected volume, mute, source restarts/replacement, disable/re-enable, unrelated media and the compressor button's reload explanation. Set `VOLUME_SLIDER_AUDIO_OWNERSHIP_DIST` to exercise preserved artifacts; the original Firefox build fails the parallel-source assertion, and the previous first-owner build fails the startup-priority assertion.

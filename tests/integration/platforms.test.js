@@ -1001,13 +1001,13 @@ for(const config of platforms){
     assert.equal(arcTrack.getAttribute('r'),'14.5');
     assert.equal(arcTrack.getAttribute('stroke-width'),'3');
     assert.notEqual(runtime.window.getComputedStyle(arcTrack).vectorEffect,'non-scaling-stroke');
-    assert.equal(percent.getAttribute('font-family'),'Arial, Helvetica, sans-serif');
-    assert.equal(percent.getAttribute('font-size'),'15');
-    assert.equal(percent.getAttribute('font-weight'),'700');
-    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'15px');
-    assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'700');
+    assert.equal(percent.getAttribute('font-family'),'"Segoe UI", system-ui, sans-serif');
+    assert.equal(percent.getAttribute('font-size'),'16');
+    assert.equal(percent.getAttribute('font-weight'),'600');
+    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'16px');
+    assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'600');
     assert.doesNotMatch(runtime.window.getComputedStyle(percent).fontFamily,/YouTube Noto/);
-    assert.equal(runtime.window.getComputedStyle(percent).fontVariantNumeric,'tabular-nums');
+    assert.equal(runtime.window.getComputedStyle(percent).fontVariantNumeric,'normal');
     runtime.close();
   });
 
@@ -1051,40 +1051,54 @@ for(const config of platforms){
     runtime.close();
   });
 
-  test(`${config.name}: max volume number uses fitted compact text`,async()=>{
+  test(`${config.name}: max volume number keeps natural glyph proportions`,async()=>{
     const {runtime}=await loadPlatform(config,current=>{
       current.window.localStorage.setItem(config.volumeKey,'100');
     });
     const percent=runtime.document.querySelector('.tm-volume-percent');
     assert.equal(percent.textContent,'100');
-    assert.equal(percent.getAttribute('textLength'),'22.5');
-    assert.equal(percent.getAttribute('lengthAdjust'),'spacingAndGlyphs');
+    assert.equal(percent.hasAttribute('textLength'),false);
+    assert.equal(percent.hasAttribute('lengthAdjust'),false);
+    assert.equal(percent.hasAttribute('data-compact'),true);
     assert.equal(percent.getAttribute('x'),'20');
     assert.equal(percent.getAttribute('y'),'20');
     assert.equal(runtime.window.getComputedStyle(percent).fontSize,'15px');
     runtime.close();
   });
 
-  test(`${config.name}: volume number uses rendered bounds for optical centering`,async()=>{
+  test(`${config.name}: volume numbers center visible glyphs in both axes and reuse measurements`,async()=>{
+    const measurements=[];
     const {runtime}=await loadPlatform(config,current=>{
       current.window.localStorage.setItem(config.volumeKey,'14');
-      current.window.SVGElement.prototype.getBBox=function(){
-        if(this.classList?.contains('tm-volume-percent')&&this.textContent==='14'){
-          return {x:14.8,y:10,width:12,height:14};
+      current.window.CanvasRenderingContext2D=function(){};
+      current.window.HTMLCanvasElement.prototype.getContext=()=>({
+        measureText(text){
+          measurements.push(text);
+          return text==='14'
+            ? {actualBoundingBoxLeft:1,actualBoundingBoxRight:13,actualBoundingBoxAscent:12,actualBoundingBoxDescent:0}
+            : {actualBoundingBoxLeft:0,actualBoundingBoxRight:16,actualBoundingBoxAscent:11,actualBoundingBoxDescent:1};
         }
-        return {x:14,y:10,width:12,height:14};
-      };
+      });
     });
     const percent=runtime.document.querySelector('.tm-volume-percent');
     const slider=runtime.document.getElementById('tm-volume-slider-range');
     assert.equal(percent.textContent,'14');
-    assert.equal(percent.getAttribute('x'),'20');
-    assert.equal(percent.getAttribute('transform'),'translate(-0.80 0)');
+    assert.equal(percent.getAttribute('x'),'14');
+    assert.equal(percent.getAttribute('y'),'26');
+    assert.equal(percent.getAttribute('text-anchor'),'start');
+    assert.equal(percent.hasAttribute('transform'),false);
 
     slider.value='50';
     slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
     assert.equal(percent.textContent,'50');
+    assert.equal(percent.getAttribute('x'),'12');
+    assert.equal(percent.getAttribute('y'),'25');
     assert.equal(percent.hasAttribute('transform'),false);
+    slider.value='14';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(percent.getAttribute('x'),'14');
+    assert.equal(percent.getAttribute('y'),'26');
+    assert.equal(measurements.filter(text=>text==='14').length,1);
     runtime.close();
   });
 
