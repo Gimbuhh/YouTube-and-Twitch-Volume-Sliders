@@ -118,9 +118,37 @@ test('programme gain leaves transient attenuation to the native renderer', () =>
   const programme = state.getProgrammeGain();
   state.short(1);
   assert.equal(state.getProgrammeGain(), programme);
-  assert.ok(state.getGain() < programme * .3);
   state.setSelected(1);
   assert.ok(state.getProgrammeGain() <= 1);
   state.setSelected(0);
   assert.equal(state.getProgrammeGain(), 0);
+});
+
+test('programme matching confirms quieter material and recovers from a sustained loud passage within fourteen seconds', () => {
+  const state = createProgrammeState(.3), target = 10 ** ((NORMALIZATION_PROFILE.targetLufs + .691) / 10);
+  const feed = (seconds, power) => { for (let i = 0; i < seconds * 20; i++) state.frame({ power, rawPower: power, duration: .05 }); };
+  feed(8, target);
+  const established = state.getProgrammeGain();
+  feed(1.2, target * 10 ** (12 / 10));
+  assert.ok(20 * Math.log10(state.getProgrammeGain() / established) < -11);
+  feed(3, target);
+  assert.ok(20 * Math.log10(state.getProgrammeGain() / established) < -10, 'word gaps must not trigger rapid recovery');
+  feed(11, target);
+  assert.ok(20 * Math.log10(state.getProgrammeGain() / established) > -1);
+});
+
+test('brief loud events and silence do not pump the programme gain', () => {
+  const state = createProgrammeState(.3), target = 10 ** ((NORMALIZATION_PROFILE.targetLufs + .691) / 10);
+  const feed = (seconds, power) => { for (let i = 0; i < seconds * 20; i++) state.frame({ power, rawPower: power, duration: .05 }); };
+  feed(8, target);
+  for (let i = 0; i < 8; i++) { feed(.3, target * 16); feed(.7, target); }
+  assert.equal(state.getProgrammeGain(), 1, 'brief peaks belong to the native limiter');
+  feed(4, target * 16);
+  const held = state.getProgrammeGain();
+  feed(30, 0);
+  assert.equal(state.getProgrammeGain(), held, 'silence must not relax protection');
+  feed(.05, target * 16);
+  assert.equal(state.getProgrammeGain(), held);
+  feed(20, target / 100);
+  assert.ok(state.getProgrammeGain() <= 10 ** (6 / 20));
 });

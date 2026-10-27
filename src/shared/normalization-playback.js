@@ -51,8 +51,9 @@ export function createAudiblePlayback({ window, video, track, selected, onMetric
         gate.gain.cancelScheduledValues(context.currentTime); gate.gain.setValueAtTime(0, context.currentTime);
         if (!silent) gate.gain.linearRampToValueAtTime(1, context.currentTime + .005);
       }
+      output.setPaused(paused);
     },
-    resume() { return context.state === 'suspended' ? context.resume() : Promise.resolve(); },
+    resume() { return output.resume(); },
     dispose() {
       if (stopped) return;
       stopped = true; gate.gain.value = 0; video.volume = 0;

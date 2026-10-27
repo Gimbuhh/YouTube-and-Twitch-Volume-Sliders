@@ -5,11 +5,15 @@ export { NORMALIZATION_PROFILE };
 export function programmeCommands(input,rate=48000,selected=.3,energyHeadroomLu=3){
  const block=Math.round(rate/200),commands=new Float32Array(Math.ceil(input.length/2/block));
  const meter=createLufsMeter(rate),state=createProgrammeState(selected,energyHeadroomLu);
+ const energyCeiling=10**((NORMALIZATION_PROFILE.targetLufs+.691+energyHeadroomLu)/10);
+ // The offline reference has no native energy graph, so cap its commands here.
+ let shortCap=Infinity;
+ const short=power=>{shortCap=power>0?Math.sqrt(energyCeiling/power):Infinity;state.short(power);};
  const left=new Float32Array(block),right=new Float32Array(block);
  for(let offset=0,k=0;offset<input.length/2;offset+=block,k++){
-  const count=Math.min(block,input.length/2-offset);commands[k]=state.getGain();
+  const count=Math.min(block,input.length/2-offset);commands[k]=Math.min(state.getProgrammeGain(),shortCap)*selected;
   for(let i=0;i<count;i++){left[i]=input[(offset+i)*2];right[i]=input[(offset+i)*2+1];}
-  meter.process([left.subarray(0,count),right.subarray(0,count)],state.frame,state.short);
+  meter.process([left.subarray(0,count),right.subarray(0,count)],state.frame,short);
  }
  return {commands,block};
 }

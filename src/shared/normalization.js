@@ -5,16 +5,34 @@ import { installMediaOutputGuard, reserveMediaOutput } from './normalization-out
 // Own selected volume and lifecycle independently of the processed output.
 export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, onStatusChanged = () => {} }) {
   installMediaOutputGuard(window);
-  let enabled = false, sourceChanging = false, session = null, status = 'Off', lastUiAt = -Infinity;
+  let enabled = false, sourceChanging = false, session = null, status = 'Off', lastUiAt = -Infinity, lastDiagnostic = null;
   const now = () => window.performance.now();
-  function report(next) {
+  function report(next, immediate = false) {
     const changed = status !== next; status = next;
+    schedule();
+    if (!changed && !immediate && now() - lastUiAt < 500) return;
     if (session) {
-      window.document.documentElement.dataset.tmAudioNormalization = JSON.stringify({ status, selected: session.preferred,
-        output: session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)), backend: session.playback?.backend || 'starting',
+      const diagnostic = JSON.stringify({ status, selected: session.preferred,
+        output: session.preferred === 0 ? 0 : session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)), backend: session.playback?.backend || 'starting',
         context: session.playback?.context.state, metrics: session.metrics || null, error: session.error || null });
+      if (diagnostic !== lastDiagnostic) {
+        lastDiagnostic = diagnostic;
+        window.document.documentElement.dataset.tmAudioNormalization = diagnostic;
+      }
     }
-    if (changed || now() - lastUiAt >= 500) { lastUiAt = now(); onStatusChanged(); }
+    lastUiAt = now(); onStatusChanged();
+  }
+  function schedule() {
+    const owned = session;
+    if (!owned) return;
+    // Audio rendering is sample-clocked. Poll quickly only while establishing
+    // it; media events wake lifecycle checks immediately at all other times.
+    const cadence = owned.blocked || owned.video.paused || owned.video.ended ? 500
+      : sourceChanging || owned.track?.muted || owned.track?.readyState === 'ended' || !owned.metrics || !owned.playback?.running ? 50 : 250;
+    if (owned.cadence === cadence) return;
+    window.clearInterval(owned.timer);
+    owned.cadence = cadence;
+    owned.timer = window.setInterval(tick, cadence);
   }
   function nativeWrite(owned, value, options = { preserveMute: true }) {
     owned.writing = true;
@@ -82,14 +100,17 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     } catch (error) { if (session === owned && owned.generation === generation) unavailable(owned, error); }
   }
   function tick() {
+    try { check(); } finally { schedule(); }
+  }
+  function check() {
     const owned = session;
     if (!owned) return;
+    if (!owned.video.isConnected) { bind(null); return; }
     if (owned.blocked) {
       if (owned.sourceConflict) { return; }
       if (sourceChanging || owned.video.paused || owned.video.readyState < 2 || now() < owned.retryAt) return;
       try { reset(owned); } catch (error) { unavailable(owned, error); return; }
     }
-    if (!owned.video.isConnected) { bind(null); return; }
     try {
       silence(owned); sync(owned);
       if (sourceChanging) {
@@ -124,7 +145,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       const owned = session; session = null;
       window.clearInterval(owned.timer);
       for (const type of ['emptied', 'loadstart', 'seeking']) owned.video.removeEventListener(type, owned.reset);
-      for (const type of ['playing', 'loadedmetadata', 'seeked', 'pause', 'volumechange']) owned.video.removeEventListener(type, owned.update);
+      for (const type of ['play', 'playing', 'loadedmetadata', 'seeked', 'pause', 'ended', 'volumechange']) owned.video.removeEventListener(type, owned.update);
       window.document.removeEventListener('pointerdown', owned.gesture, true);
       window.document.removeEventListener('keydown', owned.gesture, true);
       release(owned);
@@ -133,13 +154,17 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         catch { /* outgoing player failures must not retain analysis resources */ }
       }
       delete window.document.documentElement.dataset.tmAudioNormalization;
+      lastDiagnostic = null;
     }
     if (!enabled || !video) { report(enabled ? 'Waiting for playback' : 'Off'); return; }
     const owned = session = { video, preferred: clampVolume(preferredVolume ?? getVolume(video)), generation: 0, started: now(), changingAt: now(), lastFrame: 0 };
     owned.reset = event => { if (event?.type !== 'seeking') sourceChanging = false; try { reset(owned); } catch (error) { unavailable(owned, error); } };
-    owned.update = () => {
+    owned.update = event => {
       if (owned.writing || owned.blocked) return;
-      window.queueMicrotask(() => { if (session === owned) tick(); });
+      if (event.type === 'play' || event.type === 'playing') { owned.started = now(); owned.lastFrame = 0; }
+      if (owned.updateQueued) return;
+      owned.updateQueued = true;
+      window.queueMicrotask(() => { owned.updateQueued = false; if (session === owned) tick(); });
     };
     owned.gesture = () => {
       if (owned.sourceConflict) { return; }
@@ -148,10 +173,9 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       tick();
     };
     for (const type of ['emptied', 'loadstart', 'seeking']) video.addEventListener(type, owned.reset);
-    for (const type of ['playing', 'loadedmetadata', 'seeked', 'pause', 'volumechange']) video.addEventListener(type, owned.update);
+    for (const type of ['play', 'playing', 'loadedmetadata', 'seeked', 'pause', 'ended', 'volumechange']) video.addEventListener(type, owned.update);
     window.document.addEventListener('pointerdown', owned.gesture, true);
     window.document.addEventListener('keydown', owned.gesture, true);
-    owned.timer = window.setInterval(tick, 50);
     try { reset(owned); tick(); } catch (error) { unavailable(owned, error); }
   }
   return {
@@ -172,6 +196,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       if (!owned || owned.writing) return;
       owned.preferred = clampVolume(getVolume(video));
       if (!owned.blocked) { silence(owned); sync(owned); }
+      report(status, true);
     },
     setPreferredVolume(video, value, options) {
       const owned = session?.video === video ? session : null;
@@ -179,6 +204,7 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       owned.preferred = clampVolume(value);
       if (owned.blocked) nativeWrite(owned, owned.preferred, options);
       else { nativeWrite(owned, owned.playback?.connected ? 100 : 0, options); sync(owned); }
+      report(status, true);
     }
   };
 }

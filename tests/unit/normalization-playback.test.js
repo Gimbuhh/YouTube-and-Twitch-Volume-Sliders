@@ -36,3 +36,29 @@ test('generated worklet stops startup messages within the first measured block a
     assert.equal(processor.process([[samples, samples]]), false, 'stopped worklet must terminate');
   }
 });
+
+test('pausing during initial activation retains protected output and resumes the same source', async t => {
+  const runtime = createRuntime(); t.after(() => runtime.close());
+  const video = runtime.document.createElement('video'); runtime.document.body.append(video);
+  const audio = mockAudioCapture(runtime.window, video), BaseContext = runtime.window.AudioContext, failures = [];
+  let finish;
+  runtime.window.AudioContext = class extends BaseContext {
+    constructor() { super(); this.state = 'suspended'; }
+    resume() { return new Promise(resolve => { finish = () => { this.state = 'running'; resolve(); }; }); }
+  };
+  const playback = createAudiblePlayback({ window: runtime.window, video, selected: .3, onMetrics() {}, onFailure: error => failures.push(error) });
+  t.after(() => playback.dispose());
+  audio.paused = true;
+  playback.setState({ selected: .3, muted: false, paused: true });
+  finish(); await playback.ready;
+  assert.deepEqual(failures, []);
+  assert.equal(playback.connected, true);
+  assert.equal(playback.context.state, 'suspended');
+  assert.equal(playback.context.sources.size, 1);
+  playback.context.resume = BaseContext.prototype.resume;
+  audio.paused = false; video.dispatchEvent(new runtime.window.Event('play'));
+  playback.setState({ selected: .3, muted: false, paused: false });
+  await playback.resume();
+  assert.equal(playback.running, true);
+  assert.equal(playback.context.sources.size, 1);
+});

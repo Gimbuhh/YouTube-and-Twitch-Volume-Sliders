@@ -342,10 +342,16 @@
     let states = [], weights = [], rawEnergy = [], frameEnergy = [], attackEnergy = [];
     let frameSamples = 0, frameCount = 0, attackSamples = 0;
     let previousAttack = 0, rapidSamples = 0, reportEnergy = 0, reportSamples = 0;
+    let trackingAttack = false;
     const lufs = (power) => power > 0 ? -0.691 + 10 * Math.log10(power) : -Infinity;
     return {
       process(channels, onFrame, onAttack) {
         if (!channels.length || !channels[0]?.length) return;
+        if (trackingAttack && !onAttack) {
+          attackSamples = previousAttack = rapidSamples = reportEnergy = reportSamples = 0;
+          attackEnergy.fill(0);
+        }
+        trackingAttack = !!onAttack;
         if (channels.length !== states.length) {
           if (channels.length > 6) throw new RangeError("Unsupported channel layout");
           states = channels.map(() => new Float64Array(4));
@@ -359,7 +365,7 @@
         }
         let offset = 0;
         while (offset < channels[0].length) {
-          const count = Math.min(channels[0].length - offset, frameLength - frameSamples, attackLength - attackSamples);
+          const count = Math.min(channels[0].length - offset, frameLength - frameSamples, trackingAttack ? attackLength - attackSamples : Infinity);
           const end = offset + count;
           for (let channel = 0; channel < channels.length; channel++) {
             const input = channels[channel], state = states[channel], weight = weights[channel];
@@ -377,7 +383,7 @@
               z3 = h2 * filtered - ha2 * weighted;
               const power2 = weight * weighted * weighted;
               energy += power2;
-              attack += power2;
+              if (trackingAttack) attack += power2;
             }
             state[0] = z0;
             state[1] = z1;
@@ -389,8 +395,8 @@
           }
           offset = end;
           frameSamples += count;
-          attackSamples += count;
-          if (attackSamples === attackLength) {
+          if (trackingAttack) attackSamples += count;
+          if (trackingAttack && attackSamples === attackLength) {
             const energy = attackEnergy.reduce((sum, value) => sum + value, 0);
             const power2 = energy / attackLength;
             if (power2 > 1e-8 && power2 > previousAttack * 2) rapidSamples = Math.round(sampleRate * 0.1);
@@ -431,20 +437,30 @@
   }
 
   // src/shared/normalization-gain.js
-  var NORMALIZATION_PROFILE = Object.freeze({ targetLufs: -18, energyHeadroomLu: 3, lookaheadMs: 20, attackMs: 1, releaseMs: 180, holdMs: 20, riseDbPerSecond: 24, peakDb: -10 });
+  var NORMALIZATION_PROFILE = Object.freeze({
+    targetLufs: -18,
+    energyHeadroomLu: 3,
+    lookaheadMs: 20,
+    attackMs: 1,
+    releaseMs: 180,
+    holdMs: 20,
+    riseDbPerSecond: 24,
+    peakDb: -10,
+    referenceDecayLuPerSecond: 3,
+    programmeRecoveryMs: 1200,
+    recoveryConfirmationMs: 3e3
+  });
   function createProgrammeState(selected = 0.3, energyHeadroomLu = NORMALIZATION_PROFILE.energyHeadroomLu) {
     const history2 = [];
-    const targetPower = 10 ** ((NORMALIZATION_PROFILE.targetLufs + 0.691) / 10), energyCeiling = targetPower * 10 ** (energyHeadroomLu / 10);
-    let gain = 0, waiting = true, programmeGain = 1, shortCap = Infinity, time = 0, referenceHold = 0;
+    const targetPower = 10 ** ((NORMALIZATION_PROFILE.targetLufs + 0.691) / 10);
+    const energyCeiling = targetPower * 10 ** (energyHeadroomLu / 10);
+    let startupGain = 0, waiting = true, programmeGain = 1, time = 0, referenceHold = 0, lowerDuration = 0;
     return {
       setSelected(value) {
         selected = Math.max(0, Math.min(1, value));
       },
-      getGain() {
-        return (waiting ? gain : Math.min(programmeGain, shortCap, selected > 0 ? 1 / selected : 0)) * selected;
-      },
       getProgrammeGain() {
-        return selected > 0 ? Math.min(waiting ? gain : programmeGain, 1 / selected) : 0;
+        return selected > 0 ? Math.min(waiting ? startupGain : programmeGain, 1 / selected) : 0;
       },
       frame(frame) {
         if (waiting && (frame.rawPower < 1e-9 || frame.power < 1e-9)) return;
@@ -453,7 +469,8 @@
         while (history2.length && history2[0].time <= time - 3) history2.shift();
         if (frame.rawPower < 1e-4 || frame.power <= 0) return;
         history2.push({ time, power: frame.power, duration: frame.duration });
-        const ordered = history2.slice().sort((a, b) => a.power - b.power), duration = history2.reduce((sum, item) => sum + item.duration, 0);
+        const ordered = history2.slice().sort((a, b) => a.power - b.power);
+        const duration = history2.reduce((sum, item) => sum + item.duration, 0);
         let cumulative = 0, reference = 0;
         for (const item of ordered) {
           cumulative += item.duration;
@@ -462,23 +479,28 @@
             break;
           }
         }
-        referenceHold *= 10 ** (-0.5 * frame.duration / 10);
+        lowerDuration = reference < referenceHold * 10 ** (-1 / 10) ? lowerDuration + frame.duration : 0;
+        const recovering = lowerDuration >= NORMALIZATION_PROFILE.recoveryConfirmationMs / 1e3;
+        referenceHold = recovering && referenceHold > targetPower ? Math.max(targetPower, referenceHold * 10 ** (-NORMALIZATION_PROFILE.referenceDecayLuPerSecond * frame.duration / 10)) : referenceHold * 10 ** (-0.5 * frame.duration / 10);
         if (duration >= 1) referenceHold = Math.max(referenceHold, reference);
         reference = Math.max(reference, referenceHold);
         let desired = Math.min(1 / selected, 10 ** (6 / 20), Math.max(0.1, Math.sqrt(targetPower / reference)));
         if (!referenceHold) desired = Math.min(1, desired);
         if (desired < programmeGain) programmeGain = desired;
-        else programmeGain = Math.exp(Math.log(programmeGain) + (Math.log(desired) - Math.log(programmeGain)) * (1 - Math.exp(-frame.duration / (time < 3 ? 0.9 : 3))));
+        else {
+          const recovery = time < 3 ? 0.9 : recovering && desired <= 1 ? NORMALIZATION_PROFILE.programmeRecoveryMs / 1e3 : 3;
+          programmeGain = Math.exp(Math.log(programmeGain) + (Math.log(desired) - Math.log(programmeGain)) * (1 - Math.exp(-frame.duration / recovery)));
+        }
       },
       short(power) {
-        shortCap = power > 0 ? Math.sqrt(energyCeiling / power) : Infinity;
-        if (waiting && power >= 1e-9) gain = Math.min(1, shortCap);
+        if (waiting && power >= 1e-9) startupGain = Math.min(1, Math.sqrt(energyCeiling / power));
       }
     };
   }
 
   // src/shared/normalization-graph.js
   var GAIN_DB_RANGE = 60;
+  var CONTROL_RANGE = 8;
   var curves;
   function controlCurves() {
     if (curves) return curves;
@@ -488,8 +510,8 @@
     curves = {
       absolute: new Float32Array([1, 0, 1]),
       square: sample(4097, (x) => x * x),
-      peak: sample(65537, (x) => x > peak / 4 ? Math.min(1, 20 * Math.log10(x * 4 / peak) / GAIN_DB_RANGE) : 0),
-      energy: sample(131073, (x) => x > energy / 16 ? Math.min(1, 10 * Math.log10(x * 16 / energy) / GAIN_DB_RANGE) : 0),
+      peak: sample(65537, (x) => x > peak / CONTROL_RANGE ? Math.min(1, 20 * Math.log10(x * CONTROL_RANGE / peak) / GAIN_DB_RANGE) : 0),
+      energy: sample(131073, (x) => x > energy / CONTROL_RANGE ** 2 ? Math.min(1, 10 * Math.log10(x * CONTROL_RANGE ** 2 / energy) / GAIN_DB_RANGE) : 0),
       gain: sample(4097, (x) => 10 ** (-Math.max(0, x) * GAIN_DB_RANGE / 20))
     };
     return curves;
@@ -553,7 +575,7 @@
     ]));
     programme.connect(shelf);
     shelf.connect(highPass);
-    const scale = gain(0.25, false), square = shape(tables.square, false), sum = gain(2);
+    const scale = gain(1 / CONTROL_RANGE, false), square = shape(tables.square, false), sum = gain(2);
     highPass.connect(scale);
     scale.connect(square);
     square.connect(sum);
@@ -564,7 +586,7 @@
     sum.connect(energy);
     const energyAttenuation = shape(tables.energy);
     energy.connect(energyAttenuation);
-    const peakScale = gain(0.25, false), absolute = shape(tables.absolute, false), split = own(context.createChannelSplitter(2));
+    const peakScale = gain(1 / CONTROL_RANGE, false), absolute = shape(tables.absolute, false), split = own(context.createChannelSplitter(2));
     programme.connect(peakScale);
     peakScale.connect(absolute);
     absolute.connect(split);
@@ -635,7 +657,7 @@
   function registry(window2) {
     let state = documents.get(window2);
     if (!state) {
-      state = { sources: /* @__PURE__ */ new WeakMap(), reserved: /* @__PURE__ */ new WeakSet(), external: /* @__PURE__ */ new WeakSet() };
+      state = { sources: /* @__PURE__ */ new WeakMap(), routes: /* @__PURE__ */ new WeakMap(), active: /* @__PURE__ */ new Set(), reserved: /* @__PURE__ */ new WeakSet(), external: /* @__PURE__ */ new WeakSet() };
       documents.set(window2, state);
     }
     return state;
@@ -689,6 +711,41 @@
     const state = documents.get(window2);
     return !!video && !!state && (state.reserved.has(video) || state.sources.has(video));
   }
+  function reconcile(document2) {
+    for (const route of document2.active) {
+      if (!route.video.isConnected) {
+        document2.sources.get(route.video)?.disconnect();
+        document2.active.delete(route);
+      }
+    }
+    const context = document2.context;
+    if (context.state === "running") document2.activated = true;
+    if (document2.active.size) {
+      if (document2.suspending) return document2.suspending.then(() => reconcile(document2));
+      if (context.state === "suspended") {
+        return context.resume().then(() => {
+          if (context.state === "running") return reconcile(document2);
+        });
+      }
+      return Promise.resolve();
+    }
+    if (context.state === "running" && !document2.suspending && context.suspend) {
+      document2.suspending = context.suspend().finally(() => {
+        document2.suspending = null;
+        if (document2.active.size) {
+          reconcile(document2).catch(() => {
+          });
+        }
+      });
+      return document2.suspending;
+    }
+    return Promise.resolve();
+  }
+  function activity(document2, route, paused) {
+    if (!paused && (route.pending || document2.sources.has(route.video))) document2.active.add(route);
+    else document2.active.delete(route);
+    return reconcile(document2);
+  }
   function acquireMediaOutput(window2, video) {
     installMediaOutputGuard(window2);
     assertMediaOutputAvailable(window2, video);
@@ -702,23 +759,41 @@
       const context = new Context({ latencyHint: "interactive" });
       document2.context = context;
       const resume = () => {
-        if (context.state === "suspended") {
-          context.resume().catch(() => {
-          });
-        }
+        reconcile(document2).catch(() => {
+        });
       };
       window2.document.addEventListener("pointerdown", resume, true);
       window2.document.addEventListener("keydown", resume, true);
-      document2.resume = resume;
     }
+    let route = document2.routes.get(video);
+    if (!route) {
+      route = { video, pending: false };
+      document2.routes.set(video, route);
+      for (const type of ["play", "playing", "pause", "ended"]) {
+        video.addEventListener(type, () => {
+          activity(document2, route, video.paused || video.ended).catch(() => {
+          });
+        });
+      }
+    }
+    route.pending = true;
     let source = document2.sources.get(video);
     return {
       context: document2.context,
       get source() {
         return source;
       },
+      setPaused(paused) {
+        activity(document2, route, paused).catch(() => {
+        });
+      },
+      resume() {
+        return activity(document2, route, video.paused || video.ended);
+      },
       connect(input) {
-        if (document2.context.state !== "running") throw new Error("Audio processing requires player activation");
+        const context = document2.context;
+        const activatedPause = context.state === "suspended" && document2.activated && (video.paused || video.ended);
+        if (context.state !== "running" && !activatedPause) throw new Error("Audio processing requires player activation");
         if (!source) {
           assertMediaOutputAvailable(window2, video);
           try {
@@ -730,16 +805,18 @@
             throw error;
           }
           document2.sources.set(video, source);
-          video.addEventListener("playing", document2.resume);
         }
         source.disconnect();
         source.connect(input);
       },
       restore() {
+        route.pending = false;
         if (source) {
           source.disconnect();
           if (video.isConnected) source.connect(document2.context.destination);
         }
+        activity(document2, route, video.paused || video.ended).catch(() => {
+        });
       }
     };
   }
@@ -814,9 +891,10 @@
           gate.gain.setValueAtTime(0, context.currentTime);
           if (!silent) gate.gain.linearRampToValueAtTime(1, context.currentTime + 5e-3);
         }
+        output.setPaused(paused);
       },
       resume() {
-        return context.state === "suspended" ? context.resume() : Promise.resolve();
+        return output.resume();
       },
       dispose() {
         if (stopped) return;
@@ -942,26 +1020,39 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
   function createVolumeNormalizer({ window: window2, getVolume, setVolume, isMuted, onStatusChanged = () => {
   } }) {
     installMediaOutputGuard(window2);
-    let enabled = false, sourceChanging = false, session = null, status = "Off", lastUiAt = -Infinity;
+    let enabled = false, sourceChanging = false, session = null, status = "Off", lastUiAt = -Infinity, lastDiagnostic = null;
     const now = () => window2.performance.now();
-    function report(next) {
+    function report(next, immediate = false) {
       const changed = status !== next;
       status = next;
+      schedule();
+      if (!changed && !immediate && now() - lastUiAt < 500) return;
       if (session) {
-        window2.document.documentElement.dataset.tmAudioNormalization = JSON.stringify({
+        const diagnostic = JSON.stringify({
           status,
           selected: session.preferred,
-          output: session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)),
+          output: session.preferred === 0 ? 0 : session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)),
           backend: session.playback?.backend || "starting",
           context: session.playback?.context.state,
           metrics: session.metrics || null,
           error: session.error || null
         });
+        if (diagnostic !== lastDiagnostic) {
+          lastDiagnostic = diagnostic;
+          window2.document.documentElement.dataset.tmAudioNormalization = diagnostic;
+        }
       }
-      if (changed || now() - lastUiAt >= 500) {
-        lastUiAt = now();
-        onStatusChanged();
-      }
+      lastUiAt = now();
+      onStatusChanged();
+    }
+    function schedule() {
+      const owned = session;
+      if (!owned) return;
+      const cadence = owned.blocked || owned.video.paused || owned.video.ended ? 500 : sourceChanging || owned.track?.muted || owned.track?.readyState === "ended" || !owned.metrics || !owned.playback?.running ? 50 : 250;
+      if (owned.cadence === cadence) return;
+      window2.clearInterval(owned.timer);
+      owned.cadence = cadence;
+      owned.timer = window2.setInterval(tick, cadence);
     }
     function nativeWrite(owned, value, options = { preserveMute: true }) {
       owned.writing = true;
@@ -1060,8 +1151,19 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
       }
     }
     function tick() {
+      try {
+        check();
+      } finally {
+        schedule();
+      }
+    }
+    function check() {
       const owned = session;
       if (!owned) return;
+      if (!owned.video.isConnected) {
+        bind(null);
+        return;
+      }
       if (owned.blocked) {
         if (owned.sourceConflict) {
           return;
@@ -1073,10 +1175,6 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
           unavailable(owned, error);
           return;
         }
-      }
-      if (!owned.video.isConnected) {
-        bind(null);
-        return;
       }
       try {
         silence(owned);
@@ -1121,7 +1219,7 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
         session = null;
         window2.clearInterval(owned2.timer);
         for (const type of ["emptied", "loadstart", "seeking"]) owned2.video.removeEventListener(type, owned2.reset);
-        for (const type of ["playing", "loadedmetadata", "seeked", "pause", "volumechange"]) owned2.video.removeEventListener(type, owned2.update);
+        for (const type of ["play", "playing", "loadedmetadata", "seeked", "pause", "ended", "volumechange"]) owned2.video.removeEventListener(type, owned2.update);
         window2.document.removeEventListener("pointerdown", owned2.gesture, true);
         window2.document.removeEventListener("keydown", owned2.gesture, true);
         release(owned2);
@@ -1132,6 +1230,7 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
           }
         }
         delete window2.document.documentElement.dataset.tmAudioNormalization;
+        lastDiagnostic = null;
       }
       if (!enabled || !video) {
         report(enabled ? "Waiting for playback" : "Off");
@@ -1146,9 +1245,16 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
           unavailable(owned, error);
         }
       };
-      owned.update = () => {
+      owned.update = (event) => {
         if (owned.writing || owned.blocked) return;
+        if (event.type === "play" || event.type === "playing") {
+          owned.started = now();
+          owned.lastFrame = 0;
+        }
+        if (owned.updateQueued) return;
+        owned.updateQueued = true;
         window2.queueMicrotask(() => {
+          owned.updateQueued = false;
           if (session === owned) tick();
         });
       };
@@ -1162,10 +1268,9 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
         tick();
       };
       for (const type of ["emptied", "loadstart", "seeking"]) video.addEventListener(type, owned.reset);
-      for (const type of ["playing", "loadedmetadata", "seeked", "pause", "volumechange"]) video.addEventListener(type, owned.update);
+      for (const type of ["play", "playing", "loadedmetadata", "seeked", "pause", "ended", "volumechange"]) video.addEventListener(type, owned.update);
       window2.document.addEventListener("pointerdown", owned.gesture, true);
       window2.document.addEventListener("keydown", owned.gesture, true);
-      owned.timer = window2.setInterval(tick, 50);
       try {
         reset(owned);
         tick();
@@ -1213,6 +1318,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
           silence(owned);
           sync(owned);
         }
+        report(status, true);
       },
       setPreferredVolume(video, value, options) {
         const owned = session?.video === video ? session : null;
@@ -1226,6 +1332,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
           nativeWrite(owned, owned.playback?.connected ? 100 : 0, options);
           sync(owned);
         }
+        report(status, true);
       }
     };
   }

@@ -3,6 +3,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { launchFirefox } from '../helpers/browser.js';
+import { checkIdleResumeRace } from '../helpers/resume-race.mjs';
 
 const directory = process.env.VOLUME_SLIDER_FIREFOX_RESULTS || join(tmpdir(), 'volume-slider-firefox-checks');
 await mkdir(directory, { recursive: true });
@@ -76,14 +77,19 @@ try {
     await page.evaluate(() => { document.querySelector('video').muted = false; });
     await page.waitForFunction(() => window.__peak() > .001);
     await page.evaluate(() => document.querySelector('video').pause());
-    await page.waitForFunction(() => window.__peak() < 1e-7);
+    await page.waitForFunction(() => window.__contexts[0].state === 'suspended');
+    const pausedTime = await page.evaluate(() => window.__contexts[0].currentTime);
+    await page.waitForTimeout(150);
+    assert.equal(await page.evaluate(() => window.__contexts[0].currentTime), pausedTime, 'paused DSP kept rendering');
     await page.evaluate(() => document.querySelector('video').play());
+    await page.waitForFunction(() => window.__contexts[0].state === 'running');
     await page.waitForFunction(() => window.__peak() > .001);
     await page.evaluate(() => { const video = document.querySelector('video'); video.src = '/restart.wav'; video.load(); video.play(); });
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status === 'Active' && window.__peak() > .001);
     await page.locator('#tm-volume-options-button').click();
     await page.locator('#tm-volume-options-normalization').uncheck();
     await page.waitForFunction(() => !document.documentElement.dataset.tmAudioNormalization && document.querySelector('video').volume === .25 && window.__peak() > .001);
+    await checkIdleResumeRace(page, '__contexts');
     await page.locator('#tm-volume-options-normalization').check();
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status === 'Active' && window.__peak() > .001);
     result.errors = [...errors];

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { launchChrome } from '../helpers/browser.js';
+import { checkIdleResumeRace } from '../helpers/resume-race.mjs';
 
 const directory = process.argv[2] || fileURLToPath(new URL('../../dist/', import.meta.url));
 const resultsDirectory = process.env.VOLUME_SLIDER_NORMALIZATION_RESULTS || join(tmpdir(), 'volume-slider-native-checks');
@@ -91,8 +92,12 @@ try {
     await page.evaluate(() => { document.querySelector('video').muted = false; });
     await page.waitForFunction(() => window.__peak() > .001);
     await page.evaluate(() => document.querySelector('video').pause());
-    await page.waitForFunction(() => window.__peak() < 1e-7);
+    await page.waitForFunction(() => window.__graphContexts[0].state === 'suspended');
+    const pausedTime = await page.evaluate(() => window.__graphContexts[0].currentTime);
+    await page.waitForTimeout(150);
+    assert.equal(await page.evaluate(() => window.__graphContexts[0].currentTime), pausedTime, 'paused DSP kept rendering');
     await page.evaluate(() => document.querySelector('video').play());
+    await page.waitForFunction(() => window.__graphContexts[0].state === 'running');
     await page.waitForFunction(() => window.__peak() > .001);
     await page.evaluate(() => { const slider=document.querySelector('#tm-volume-slider-range');slider.value='40';slider.dispatchEvent(new Event('input',{bubbles:true}));slider.dispatchEvent(new Event('change',{bubbles:true})); });
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').selected === 40);
@@ -157,6 +162,7 @@ try {
     await page.locator('#tm-volume-options-normalization').uncheck();
     await page.waitForFunction(() => !document.documentElement.dataset.tmAudioNormalization && document.querySelector('video').volume === .4);
     await page.waitForFunction(() => window.__peak() > .001);
+    await checkIdleResumeRace(page, '__graphContexts');
     await page.locator('#tm-volume-options-normalization').check();
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status?.startsWith('Active'));
     await page.waitForFunction(() => window.__peak() > .001);

@@ -46,6 +46,7 @@ export function mockAudioCapture(window, video) {
     createAnalyser() { return Object.assign(this.node(), { getFloatTimeDomainData: array => array.fill(1) }); }
     createChannelSplitter() { return this.node(); }
     resume() { this.state = 'running'; return Promise.resolve(); }
+    suspend() { this.state = 'suspended'; return Promise.resolve(); }
     close() { this.closed = true; this.state = 'closed'; return Promise.resolve(); }
   }
   window.AudioContext = AudioContext;

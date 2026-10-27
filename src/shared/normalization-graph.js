@@ -1,6 +1,8 @@
 import { NORMALIZATION_PROFILE } from './normalization-gain.js';
 
 const GAIN_DB_RANGE = 60;
+// Include programme boost and speaker downmix in the detector's input range.
+const CONTROL_RANGE = 8;
 let curves;
 
 function controlCurves() {
@@ -11,8 +13,8 @@ function controlCurves() {
   curves = {
     absolute: new Float32Array([1, 0, 1]),
     square: sample(4097, x => x * x),
-    peak: sample(65537, x => x > peak / 4 ? Math.min(1, 20 * Math.log10(x * 4 / peak) / GAIN_DB_RANGE) : 0),
-    energy: sample(131073, x => x > energy / 16 ? Math.min(1, 10 * Math.log10(x * 16 / energy) / GAIN_DB_RANGE) : 0),
+    peak: sample(65537, x => x > peak / CONTROL_RANGE ? Math.min(1, 20 * Math.log10(x * CONTROL_RANGE / peak) / GAIN_DB_RANGE) : 0),
+    energy: sample(131073, x => x > energy / CONTROL_RANGE ** 2 ? Math.min(1, 10 * Math.log10(x * CONTROL_RANGE ** 2 / energy) / GAIN_DB_RANGE) : 0),
     gain: sample(4097, x => 10 ** (-Math.max(0, x) * GAIN_DB_RANGE / 20))
   };
   return curves;
@@ -57,13 +59,13 @@ export function createNativeGainGraph(context, { selected = .3 } = {}) {
   const highPass = own(context.createIIRFilter([1, -2, 1], [1, 2 * (h * h - 1) / highPassDenominator,
     (1 - h / .5003270373238773 + h * h) / highPassDenominator]));
   programme.connect(shelf); shelf.connect(highPass);
-  const scale = gain(.25, false), square = shape(tables.square, false), sum = gain(2);
+  const scale = gain(1 / CONTROL_RANGE, false), square = shape(tables.square, false), sum = gain(2);
   highPass.connect(scale); scale.connect(square); square.connect(sum);
   const energy = own(context.createConvolver()), count = Math.round(rate * .005), impulse = context.createBuffer(1, count, rate);
   impulse.getChannelData(0).fill(1 / count); energy.normalize = false; energy.buffer = impulse; sum.connect(energy);
   const energyAttenuation = shape(tables.energy); energy.connect(energyAttenuation);
 
-  const peakScale = gain(.25, false), absolute = shape(tables.absolute, false), split = own(context.createChannelSplitter(2));
+  const peakScale = gain(1 / CONTROL_RANGE, false), absolute = shape(tables.absolute, false), split = own(context.createChannelSplitter(2));
   programme.connect(peakScale); peakScale.connect(absolute); absolute.connect(split);
   const left = gain(1), right = gain(1); split.connect(left, 0); split.connect(right, 1);
   const peak = maximum(left, right), peakAttenuation = shape(tables.peak); peak.connect(peakAttenuation);

@@ -2,7 +2,8 @@
 
 - **Both:** **Auto-normalize volume** keeps listening levels steadier between videos and streams, catches loud spikes before playback, and restores volume smoothly afterward.
   - The feature starts off. Enable **Volume Slider Options → General → Audio → Auto-normalize volume** separately on each site; a status below the toggle shows whether it is active, waiting, or unavailable.
-  - Quiet audio receives limited boost, speech stays steadier between words, and the usual listening level is remembered through quiet passages and silent gaps. Volume returns smoothly after brief loud sounds, with fewer small fluctuations. Audio settings show the adjusted output percentage.
+  - Quiet audio receives limited boost, speech stays steadier between words, and the usual listening level is remembered through quiet passages and silent gaps. Volume returns smoothly after loud passages. Audio settings show the adjusted output percentage.
+  - Normalization uses less background work during playback and pauses audio processing with the player.
   - Stream restarts preserve your selected level and mute choice, including after blocked Twitch ads. Player volume arrows change the selection in five-point steps; native volume controls still work.
   - Audio stays quiet until protection is ready, including page loads, same-page video changes, and source restarts.
   - Temporary audio access failures recover automatically when capture becomes available.
@@ -13,6 +14,7 @@
 
 ## Changed
 
+- **Both:** Numbers inside the volume ring look cleaner and sit more evenly in the center, including at 100%.
 - **Both:** Tooltips match each site's styling and menu behavior. The Options button is labeled **Volume Slider Options**.
 - **Both:** Replace native uses the site's original volume position automatically, without separate placement choices.
 - **Both:** Arrow-key volume feedback shows your selected percentage and a matching speaker icon on both sites, with normalization on or off.

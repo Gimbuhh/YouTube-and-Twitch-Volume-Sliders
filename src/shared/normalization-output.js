@@ -6,7 +6,7 @@ const documents = new WeakMap();
 function registry(window) {
   let state = documents.get(window);
   if (!state) {
-    state = { sources: new WeakMap(), reserved: new WeakSet(), external: new WeakSet() };
+    state = { sources: new WeakMap(), routes: new WeakMap(), active: new Set(), reserved: new WeakSet(), external: new WeakSet() };
     documents.set(window, state);
   }
   return state;
@@ -71,6 +71,44 @@ export function ownsMediaOutput(window, video) {
   return !!video && !!state && (state.reserved.has(video) || state.sources.has(video));
 }
 
+// Suspending preserves the element attachment and the programme history. Track
+// ordinary routes too: disabling one normalizer must not silence another player.
+function reconcile(document) {
+  for (const route of document.active) {
+    if (!route.video.isConnected) {
+      document.sources.get(route.video)?.disconnect();
+      document.active.delete(route);
+    }
+  }
+  const context = document.context;
+  if (context.state === 'running') document.activated = true;
+  if (document.active.size) {
+    if (document.suspending) return document.suspending.then(() => reconcile(document));
+    if (context.state === 'suspended') {
+      return context.resume().then(() => {
+        // A pause or detachment can arrive while resume is still in flight.
+        // Recheck after activation instead of leaving an idle context running.
+        if (context.state === 'running') return reconcile(document);
+      });
+    }
+    return Promise.resolve();
+  }
+  if (context.state === 'running' && !document.suspending && context.suspend) {
+    document.suspending = context.suspend().finally(() => {
+      document.suspending = null;
+      if (document.active.size) { reconcile(document).catch(() => {}); }
+    });
+    return document.suspending;
+  }
+  return Promise.resolve();
+}
+
+function activity(document, route, paused) {
+  if (!paused && (route.pending || document.sources.has(route.video))) document.active.add(route);
+  else document.active.delete(route);
+  return reconcile(document);
+}
+
 export function acquireMediaOutput(window, video) {
   installMediaOutputGuard(window);
   assertMediaOutputAvailable(window, video);
@@ -83,21 +121,31 @@ export function acquireMediaOutput(window, video) {
     const Context = window.AudioContext || window.webkitAudioContext;
     const context = new Context({ latencyHint: 'interactive' });
     document.context = context;
-    const resume = () => {
-      if (context.state === 'suspended') {
-        context.resume().catch(() => {});
-      }
-    };
+    const resume = () => { reconcile(document).catch(() => {}); };
     window.document.addEventListener('pointerdown', resume, true);
     window.document.addEventListener('keydown', resume, true);
-    document.resume = resume;
   }
+  let route = document.routes.get(video);
+  if (!route) {
+    route = { video, pending: false };
+    document.routes.set(video, route);
+    for (const type of ['play', 'playing', 'pause', 'ended']) {
+      video.addEventListener(type, () => { activity(document, route, video.paused || video.ended).catch(() => {}); });
+    }
+  }
+  route.pending = true;
   let source = document.sources.get(video);
   return { context: document.context,
     get source() { return source; },
+    setPaused(paused) { activity(document, route, paused).catch(() => {}); },
+    resume() { return activity(document, route, video.paused || video.ended); },
     connect(input) {
       // Do not divert ordinary audio into a context still awaiting activation.
-      if (document.context.state !== 'running') throw new Error('Audio processing requires player activation');
+      const context = document.context;
+      // Activation may have succeeded and then returned to idle because the
+      // user paused. Keep its protected route ready for the next play event.
+      const activatedPause = context.state === 'suspended' && document.activated && (video.paused || video.ended);
+      if (context.state !== 'running' && !activatedPause) throw new Error('Audio processing requires player activation');
       if (!source) {
         // Activation can yield before connection; another processor may win
         // that interval. Check again at the actual source-creation boundary.
@@ -110,10 +158,13 @@ export function acquireMediaOutput(window, video) {
           throw error;
         }
         document.sources.set(video, source);
-        video.addEventListener('playing', document.resume);
       }
       source.disconnect(); source.connect(input);
     },
-    restore() { if (source) { source.disconnect(); if (video.isConnected) source.connect(document.context.destination); } }
+    restore() {
+      route.pending = false;
+      if (source) { source.disconnect(); if (video.isConnected) source.connect(document.context.destination); }
+      activity(document, route, video.paused || video.ended).catch(() => {});
+    }
   };
 }

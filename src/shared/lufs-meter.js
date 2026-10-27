@@ -27,11 +27,17 @@ export function createLufsMeter(sampleRate) {
   let states = [], weights = [], rawEnergy = [], frameEnergy = [], attackEnergy = [];
   let frameSamples = 0, frameCount = 0, attackSamples = 0;
   let previousAttack = 0, rapidSamples = 0, reportEnergy = 0, reportSamples = 0;
+  let trackingAttack = false;
   const lufs = power => power > 0 ? -0.691 + 10 * Math.log10(power) : -Infinity;
 
   return {
     process(channels, onFrame, onAttack) {
       if (!channels.length || !channels[0]?.length) return;
+      if (trackingAttack && !onAttack) {
+        attackSamples = previousAttack = rapidSamples = reportEnergy = reportSamples = 0;
+        attackEnergy.fill(0);
+      }
+      trackingAttack = !!onAttack;
       if (channels.length !== states.length) {
         if (channels.length > 6) throw new RangeError('Unsupported channel layout');
         states = channels.map(() => new Float64Array(4));
@@ -49,7 +55,7 @@ export function createLufsMeter(sampleRate) {
       while (offset < channels[0].length) {
         // Stop at measurement boundaries so each channel can keep its filter
         // state in local scalars for a block, rather than reload it per sample.
-        const count = Math.min(channels[0].length - offset, frameLength - frameSamples, attackLength - attackSamples);
+        const count = Math.min(channels[0].length - offset, frameLength - frameSamples, trackingAttack ? attackLength - attackSamples : Infinity);
         const end = offset + count;
         for (let channel = 0; channel < channels.length; channel++) {
           const input = channels[channel], state = states[channel], weight = weights[channel];
@@ -67,17 +73,17 @@ export function createLufsMeter(sampleRate) {
             z3 = h2 * filtered - ha2 * weighted;
             const power = weight * weighted * weighted;
             energy += power;
-            attack += power;
+            if (trackingAttack) attack += power;
           }
           state[0] = z0; state[1] = z1; state[2] = z2; state[3] = z3;
           rawEnergy[channel] = raw; frameEnergy[channel] = energy; attackEnergy[channel] = attack;
         }
         offset = end;
         frameSamples += count;
-        attackSamples += count;
+        if (trackingAttack) attackSamples += count;
         // Reuse the K-weighted samples for faster spike protection, without
         // changing the programme meter's 50 ms frames or LUFS windows.
-        if (attackSamples === attackLength) {
+        if (trackingAttack && attackSamples === attackLength) {
           const energy = attackEnergy.reduce((sum, value) => sum + value, 0);
           const power = energy / attackLength;
           // Fast delivery matters around sharp rises. Steady audio retains

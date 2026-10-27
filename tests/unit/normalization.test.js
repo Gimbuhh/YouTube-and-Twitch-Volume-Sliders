@@ -9,20 +9,20 @@ function fixture(t) {
   const { window, document } = runtime;
   const video = document.createElement('video'); document.body.append(video); video.volume = .5;
   const audio = mockAudioCapture(window, video), timers = new Map(), errors = {};
-  let now = 0, timerId = 0, raw = 50;
+  let now = 0, timerId = 0, raw = 50, reads = 0;
   Object.defineProperty(window.performance, 'now', { value: () => now });
-  window.setInterval = callback => { timers.set(++timerId, callback); return timerId; };
+  window.setInterval = (callback, delay) => { timers.set(++timerId, { callback, delay, next: now + delay }); return timerId; };
   window.clearInterval = id => timers.delete(id);
   const normalizer = createVolumeNormalizer({window,
-    getVolume: () => raw, isMuted: () => video.muted,
+    getVolume: () => { reads++; return raw; }, isMuted: () => video.muted,
     setVolume: (_video, value) => { if(errors.write) throw errors.write; raw=value; }
   });
   const flush = () => new Promise(resolve => setImmediate(resolve));
-  const advance = async (seconds=.2) => { await flush(); for(let i=0;i<Math.ceil(seconds*20);i++){now+=50;await flush();for(const callback of [...timers.values()])callback();} };
+  const advance = async (seconds=.2) => { await flush(); for(let i=0;i<Math.ceil(seconds*20);i++){now+=50;await flush();for(const [id,timer] of [...timers])if(timers.has(id)&&now>=timer.next){timer.next+=timer.delay;timer.callback();}} };
   t.after(() => { errors.write=null;normalizer.setEnabled(false);runtime.close(); });
   return {window,document,video,audio,normalizer,timers,errors,advance,
     async start(){normalizer.setEnabled(true);normalizer.bind(video,50);await advance();},
-    get raw(){return raw;}, get output(){return JSON.parse(document.documentElement.dataset.tmAudioNormalization||'{}').output;},
+    get reads(){return reads;}, get raw(){return raw;}, get output(){return JSON.parse(document.documentElement.dataset.tmAudioNormalization||'{}').output;},
     native(value){raw=value;normalizer.acceptNativeVolume(video);}, passive(value){raw=value;video.volume=value/100;video.dispatchEvent(new window.Event('volumechange'));}
   };
 }
@@ -60,10 +60,33 @@ test('same-element resets and enable cycles reuse one document context and sourc
 
 test('pause, mute, zero volume and healthy silence retain the current session',async t=>{
   const f=fixture(t);await f.start();f.audio.paused=true;await f.advance(5);assert.equal(f.normalizer.getStatus(),'Waiting for playback');
-  f.audio.paused=false;f.video.muted=true;await f.advance();assert.equal(f.normalizer.getStatus(),'Waiting for audio');
+  f.audio.paused=false;f.video.dispatchEvent(new f.window.Event('play'));f.video.muted=true;await f.advance();assert.equal(f.normalizer.getStatus(),'Waiting for audio');
   f.video.muted=false;f.normalizer.setPreferredVolume(f.video,0);await f.advance();assert.equal(f.output,0);
   f.normalizer.setPreferredVolume(f.video,50);f.audio.amplitude=0;await f.advance(5);assert.equal(f.normalizer.getStatus(),'Active');
   assert.equal(f.audio.captures,1);f.normalizer.setEnabled(false);assert.equal(f.video.muted,false);
+});
+
+test('healthy and paused lifecycle checks slow down and unchanged diagnostics are not rewritten', async t => {
+  const f = fixture(t); await f.start();
+  let reads = f.reads;
+  await f.advance(1);
+  assert.ok(f.reads - reads <= 4, 'healthy playback needs at most four watchdog reads per second');
+  f.audio.paused = true; f.video.dispatchEvent(new f.window.Event('pause'));
+  await f.advance(1);
+  assert.equal(f.audio.contexts[0].state, 'suspended');
+  let writes = 0;
+  const observer = new f.window.MutationObserver(records => { writes += records.length; });
+  observer.observe(f.document.documentElement, { attributes: true, attributeFilter: ['data-tm-audio-normalization'] });
+  t.after(() => observer.disconnect());
+  reads = f.reads;
+  await f.advance(2);
+  assert.ok(f.reads - reads <= 4, 'paused playback needs at most two watchdog reads per second');
+  assert.equal(writes, 0, 'unchanged paused status must not cause DOM mutations');
+  f.audio.paused = false; f.video.dispatchEvent(new f.window.Event('play'));
+  await f.advance(.1);
+  assert.equal(f.audio.contexts[0].state, 'running');
+  assert.equal(f.normalizer.getStatus(), 'Active', 'play events resume without waiting for a watchdog');
+  assert.equal(f.audio.captures, 1);
 });
 
 test('paused startup stays protected without capturing before playback',async t=>{

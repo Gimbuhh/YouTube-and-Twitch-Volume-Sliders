@@ -10,14 +10,14 @@ const directory=process.argv.slice(2).find(arg=>arg!=='--firefox')||(useFirefox?
 const browser=useFirefox?await launchFirefox():await launchChrome(['--disable-background-networking','--mute-audio']),results=[];
 try{
  const page=await browser.newPage();await page.route('**/*',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>Native gain kernel checks</title>'}));await page.goto('http://native-kernel.test/');const code=(await build({stdin:{contents:"import {createNativeGainGraph} from './src/shared/normalization-graph.js';window.createNativeGraph=createNativeGainGraph;",resolveDir:fileURLToPath(new URL('../../',import.meta.url))},bundle:true,write:false,format:'iife'})).outputFiles[0].text;await page.addScriptTag({content:code});
- for(const rate of [44100,48000,96000])for(const kind of ['impulses','tone','stereo','silence','zero','recovery']){
+ for(const rate of [44100,48000,96000])for(const kind of ['impulses','boosted','surround','tone','stereo','silence','zero','recovery']){
   const info=await page.evaluate(async({rate,kind})=>{
    const phases=kind==='impulses'?[0,1,31,63,127,128,239]:[0],rows=[];
    for(const phase of phases){
-    const seconds=kind==='recovery'?3:1,count=Math.round(rate*seconds),context=new OfflineAudioContext(2,count+Math.ceil(rate*.1),rate),source=context.createBufferSource(),buffer=context.createBuffer(2,count,rate),left=buffer.getChannelData(0),right=buffer.getChannelData(1),selected=kind==='zero'?0:.3,graph=window.createNativeGraph(context,{selected});
-    if(kind==='impulses')left[Math.round(rate*.1)+phase]=right[Math.round(rate*.1)+phase]=1;
+    const seconds=kind==='recovery'?3:1,count=Math.round(rate*seconds),context=new OfflineAudioContext(2,count+Math.ceil(rate*.1),rate),source=context.createBufferSource(),buffer=context.createBuffer(kind==='surround'?6:2,count,rate),left=buffer.getChannelData(0),right=buffer.getChannelData(1),selected=kind==='zero'?0:.3,graph=window.createNativeGraph(context,{selected});
+    if(kind==='impulses'||kind==='boosted'||kind==='surround')for(let c=0;c<buffer.numberOfChannels;c++)buffer.getChannelData(c)[Math.round(rate*.1)+phase]=kind==='boosted'?2.4:1;
     else if(kind!=='silence')for(let i=0;i<count;i++){const t=i/rate,level=kind==='tone'?.03:kind==='recovery'?(t>=.5&&t<.8?.95:.05):.8,value=level*Math.sin(2*Math.PI*997*t);left[i]=value;right[i]=kind==='stereo'?-value:value;}
-    graph.setGain(1,0);source.buffer=buffer;source.connect(graph.input);graph.output.connect(context.destination);source.start();const rendered=await context.startRendering(),l=rendered.getChannelData(0),r=rendered.getChannelData(1),delay=Math.round(graph.lookaheadMs*rate/1000);
+    graph.setGain(kind==='boosted'||kind==='surround'?10**(6/20):1,0);source.buffer=buffer;source.connect(graph.input);graph.output.connect(context.destination);source.start();const rendered=await context.startRendering(),l=rendered.getChannelData(0),r=rendered.getChannelData(1),delay=Math.round(graph.lookaheadMs*rate/1000);
     // Firefox detaches channel views when playback acquires a buffer's content.
     const referenceLeft=buffer.getChannelData(0),referenceRight=buffer.getChannelData(1);
     let peak=0,nonfinite=0,error=0,phaseError=0,baselineEnergy=0,recoveryEnergy=0,baselineCount=0,recoveryCount=0;
@@ -28,7 +28,7 @@ try{
     rows.push({phase,peak,nonfinite,error,phaseError,recoveryDb:kind==='recovery'?10*Math.log10((recoveryEnergy/recoveryCount)/(baselineEnergy/baselineCount)):null,lookaheadMs:graph.lookaheadMs,nodeCount:graph.nodeCount});graph.dispose();
    }return rows;
   },{rate,kind});
-  for(const row of info){results.push({rate,kind,...row});assert.equal(row.nonfinite,0);assert.ok(row.peak<=.3*10**(-10/20)+.00001,'sample ceiling exceeded');if(kind==='impulses')assert.ok(row.peak>.09,'impulse disappeared');if(kind==='tone')assert.ok(row.error<.00001,'quiet tone changed');if(kind==='stereo'){assert.ok(row.peak>.001);assert.ok(row.phaseError<.000001)}if(kind==='silence'||kind==='zero')assert.equal(row.peak,0);if(kind==='recovery')assert.ok(row.recoveryDb>-.35&&row.recoveryDb<.1,'gain failed to recover');}
+  for(const row of info){results.push({rate,kind,...row});assert.equal(row.nonfinite,0);assert.ok(row.peak<=.3*10**(-10/20)+.00001,'sample ceiling exceeded');if(['impulses','boosted','surround'].includes(kind))assert.ok(row.peak>.09,'impulse disappeared');if(kind==='tone')assert.ok(row.error<.00001,'quiet tone changed');if(kind==='stereo'){assert.ok(row.peak>.001);assert.ok(row.phaseError<.000001)}if(kind==='silence'||kind==='zero')assert.equal(row.peak,0);if(kind==='recovery')assert.ok(row.recoveryDb>-.35&&row.recoveryDb<.1,'gain failed to recover');}
   console.log(JSON.stringify({rate,kind,results:info}));
  }
  for(const rate of [44100,48000,96000]){

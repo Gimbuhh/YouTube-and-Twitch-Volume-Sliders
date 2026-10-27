@@ -34,6 +34,25 @@ test('meter results do not depend on audio callback chunk boundaries', () => {
   assert.deepEqual(measure([signal, signal], 48000, 127), measure([signal, signal], 48000, signal.length));
 });
 
+test('stopping startup attack measurements preserves every programme frame', () => {
+  for (const rate of [44100, 48000, 96000]) for (const chunk of [128, 480, 4096]) {
+    const signal = tone(rate, 1, .1), meter = createLufsMeter(rate), frames = [];
+    let attacks = 0;
+    for (let i = 0; i < signal.length; i += chunk) {
+      const samples = signal.subarray(i, i + chunk);
+      meter.process([samples, samples], frame => frames.push(frame), i < rate * .05 ? () => attacks++ : undefined);
+    }
+    assert.ok(attacks > 0, 'early measurements still open the startup gate');
+    const expected = measure([signal, signal], rate, chunk);
+    for (let i = 0; i < frames.length; i++) for (const key of Object.keys(expected[i])) {
+      const value = expected[i][key];
+      if (typeof value === 'number' && Number.isFinite(value)) assert.ok(Math.abs(frames[i][key] - value) < 1e-10, `${rate}/${chunk}/${key}`);
+      else assert.equal(frames[i][key], value);
+    }
+    assert.equal(frames.length, expected.length);
+  }
+});
+
 test('changing chunk sizes preserves multichannel measurements at every supported reference rate', () => {
   for (const rate of [44100, 48000, 96000]) for (const count of [1, 2, 4, 5, 6]) {
     const channels = Array.from({ length: count }, (_, channel) =>

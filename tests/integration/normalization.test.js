@@ -40,12 +40,9 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
   const originalSetInterval = runtime.window.setInterval.bind(runtime.window);
   const originalClearInterval = runtime.window.clearInterval.bind(runtime.window);
   runtime.window.setInterval = (callback, delay, ...args) => {
-    if (controlledTime || delay <= 100) {
-      const id = originalSetInterval(() => {}, 100000);
-      ticks.set(id, { callback: () => callback(...args), delay, next: now + delay });
-      return id;
-    }
-    return originalSetInterval(callback, delay, ...args);
+    const id = originalSetInterval(() => {}, 100000);
+    ticks.set(id, { callback: () => callback(...args), delay, next: now + delay });
+    return id;
   };
   runtime.window.clearInterval = id => { ticks.delete(id); originalClearInterval(id); };
   if (controlledTime) {
@@ -523,7 +520,7 @@ for (const config of platforms) {
   });
 
   test(`${config.file}: normalization icon survives ordinary idle states and hides for analysis problems`, async t => {
-    const f = await prepare(config, t, { saved: true });
+    const f = await prepare(config, t, { saved: true, controlledTime: true });
     const indicator = f.document.querySelector('.tm-normalization-icon');
     const icon = f.document.querySelector('.tm-volume-icon-cell');
     const slider = f.document.getElementById('tm-volume-slider-range');
@@ -550,16 +547,21 @@ for (const config of platforms) {
     assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
     if (config.file === 'youtube') f.api.unMute(); else f.api.setMuted(false);
     await f.advance(.2); assert.equal(indicator.hidden, false);
-    f.audio.paused = true; await f.advance(.2); assert.equal(indicator.hidden, false);
-    f.audio.paused = false; await f.advance(.2); assert.equal(indicator.hidden, false);
+    f.audio.paused = true; f.video.dispatchEvent(new f.window.Event('pause')); await f.advance(.2); assert.equal(indicator.hidden, false);
+    f.audio.paused = false; f.video.dispatchEvent(new f.window.Event('play')); await f.advance(.2); assert.equal(indicator.hidden, false);
     // Volume zero is also an ordinary listening choice.
     slider.value = '0'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
     await f.advance(.2); assert.equal(indicator.hidden, false);
     assert.equal(f.document.getElementById('tm-volume-options-normalization-status').textContent, 'Waiting for audio');
     slider.value = '50'; slider.dispatchEvent(new f.window.Event('input', { bubbles: true }));
     await f.advance(.2);
-    f.audio.contexts[0].state = 'suspended'; await f.advance(.2);
+    const context = f.audio.contexts[0], resume = context.resume.bind(context);
+    // Ordinary suspension resumes automatically. Model a browser that refuses
+    // activation until a gesture, rather than just changing the state string.
+    context.resume = () => Promise.resolve();
+    context.state = 'suspended'; await f.advance(.6);
     assert.equal(indicator.hidden, true, 'activation is required before analysis can resume');
+    context.resume = resume;
     f.document.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
     await f.advance(.2); assert.equal(indicator.hidden, false);
     f.audio.captureMuted = true;
