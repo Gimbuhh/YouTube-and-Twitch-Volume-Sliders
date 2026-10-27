@@ -26,8 +26,9 @@ for (let i = 0; i < count; i++) monoWav.writeInt16LE(wav.readInt16LE(44 + i * 4)
 const browser = await launchChrome(['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--mute-audio']);
 const results = [];
 try {
-  for (const platform of ['youtube', 'twitch']) for (const mode of ['worklet', 'native', 'csp', 'unavailable', 'activation']) {
+  for (const platform of ['youtube', 'twitch']) for (const mode of ['worklet', 'native', 'compensated', 'csp', 'unavailable', 'activation']) {
     const native = mode !== 'worklet';
+    const compensation = mode === 'compensated' ? .54 : 1;
     const youtube = platform === 'youtube', origin = youtube ? 'https://www.youtube.com' : 'https://www.twitch.tv', prefix = youtube ? 'yt' : 'twitch';
     const context = await browser.newContext(), page = await context.newPage(), errors = [];
     page.setDefaultTimeout(10000);
@@ -41,7 +42,11 @@ try {
     const current=()=>document.querySelector('video');
     const capture=HTMLMediaElement.prototype.captureStream;window.__captures=[];
     HTMLMediaElement.prototype.captureStream=function(){const stream=capture.call(this);window.__captures.push(stream);return stream};
-    const api={getVolume:()=>current().volume*${youtube ? 100 : 1},setVolume:v=>{current().volume=v/${youtube ? 100 : 1}},isMuted:()=>current().muted,mute:()=>{current().muted=true},unMute:()=>{current().muted=false},setMuted:v=>{current().muted=v}};
+    let selectedVolume=.3;window.__volumeWrites=0;
+    const api={getVolume:()=>${mode === 'compensated' ? 'selectedVolume' : 'current().volume'}*${youtube ? 100 : 1},setVolume:v=>{
+      if(++window.__volumeWrites>80&&${mode === 'compensated'})throw new Error('Volume write feedback loop');
+      selectedVolume=v/${youtube ? 100 : 1};current().volume=selectedVolume*${compensation};
+    },isMuted:()=>current().muted,mute:()=>{current().muted=true},unMute:()=>{current().muted=false},setMuted:v=>{current().muted=v}};
     ${youtube ? 'Object.assign(player,api)' : 'player.__reactFiber$fixture={return:{memoizedProps:{mediaPlayerInstance:api},return:null}}'};
     localStorage.setItem('tm-${prefix}-volume','30');localStorage.setItem('tm-${prefix}-volume-slider-normalization','true');
     ${mode === 'activation' ? "const BaseContext=AudioContext;window.AudioContext=class extends BaseContext{constructor(options){super(options);this.suspend();this.resume=()=>new Promise(()=>{})}};" : ''}
@@ -53,7 +58,7 @@ try {
     window.__peak=()=>{if(!window.__taps)return 0;const data=new Float32Array(2048);let peak=0;for(const tap of window.__taps){tap.getFloatTimeDomainData(data);for(const x of data)peak=Math.max(peak,Math.abs(x))}return peak};
     window.__lateAttackMessages=0;
     ${mode === 'worklet' ? "const MeterNode=AudioWorkletNode;window.AudioWorkletNode=class extends MeterNode{constructor(...args){super(...args);let measured=false;this.port.addEventListener('message',({data})=>{if(data.attackPower!=null){if(measured)window.__lateAttackMessages++}else if(data.rawPower>=1e-9&&data.power>=1e-9)measured=true})}};" : ''}
-    ${mode === 'native' || mode === 'unavailable' ? 'window.AudioWorkletNode=undefined;' : ''}
+    ${mode === 'native' || mode === 'compensated' || mode === 'unavailable' ? 'window.AudioWorkletNode=undefined;' : ''}
     ${mode === 'worklet' ? 'window.MediaStreamTrackProcessor=undefined;' : ''}
     ${mode === 'unavailable' ? 'window.MediaStreamTrackProcessor=undefined;' : ''}
     </script></body></html>`;
@@ -65,6 +70,7 @@ try {
     await page.evaluate(() => document.querySelector('video').play());
     if (mode === 'unavailable' || mode === 'activation') {
       await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status?.startsWith('Audio unavailable'));
+      await page.waitForFunction(() => document.querySelector('video').volume === .3, null, { timeout: 1000 });
       assert.equal(await page.evaluate(() => document.querySelector('video').volume), .3);
       if (mode === 'activation') assert.equal(await page.evaluate(() => window.__elementSources), 0, 'blocked activation diverted native audio');
       else await page.waitForFunction(() => window.__peak() > .001);
@@ -78,7 +84,16 @@ try {
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').metrics?.gain > .001);
     const active = await page.evaluate(() => ({ ...JSON.parse(document.documentElement.dataset.tmAudioNormalization), nativeVolume: document.querySelector('video').volume,
       preferred: document.querySelector('#tm-volume-slider-value')?.textContent, peak: window.__peak() }));
-    assert.equal(active.selected, 30); assert.equal(active.nativeVolume, 1); assert.ok(active.peak > 0);
+    assert.equal(active.selected, 30); assert.equal(active.nativeVolume, compensation); assert.ok(active.peak > 0);
+    if (mode === 'compensated') {
+      assert.ok(await page.evaluate(() => window.__volumeWrites) <= 6, 'site compensation flooded volume writes');
+      const writes = await page.evaluate(() => window.__volumeWrites);
+      await page.evaluate(() => { document.querySelector('video').volume = .43; });
+      await page.waitForTimeout(500);
+      assert.equal(await page.evaluate(() => window.__volumeWrites), writes, 'compensation changes must not restart volume writes');
+      assert.equal(await page.evaluate(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization).status), 'Active');
+      assert.equal(await page.locator('#tm-volume-slider-value').textContent(), '30%');
+    }
     assert.equal(active.backend, 'native graph');
     assert.equal(active.metrics.meterBackend, native ? 'native frames' : 'audio worklet');
     let peak = 0;
@@ -116,7 +131,7 @@ try {
     }, !youtube);
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status?.startsWith('Active'));
     await page.waitForFunction(() => window.__peak() > .001);
-    assert.equal(await page.evaluate(() => document.querySelector('video').volume), 1);
+    assert.equal(await page.evaluate(() => document.querySelector('video').volume), compensation);
     assert.equal(await page.evaluate(() => document.querySelector('video').muted), false, 'source restart remained muted');
     assert.equal(await page.locator('#tm-volume-slider-value').textContent(), '40%', 'source restart left a stale mute indicator');
     assert.equal(await page.evaluate(key => localStorage.getItem(key), 'tm-' + prefix + '-volume'), '40');
@@ -150,6 +165,7 @@ try {
     if (mode === 'worklet') {
       await page.evaluate(() => Object.defineProperty(window.__captures.at(-1).getAudioTracks()[0], 'muted', { configurable:true, value:true }));
       await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status?.startsWith('Audio unavailable'));
+      await page.waitForFunction(() => document.querySelector('video').volume === .4, null, { timeout: 1000 });
       assert.equal(await page.evaluate(() => document.querySelector('video').volume), .4);
       await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status?.startsWith('Active'));
       await page.waitForFunction(() => window.__peak() > .001);
@@ -160,7 +176,7 @@ try {
     await page.waitForFunction(() => window.__peak() > .001);
     await page.evaluate(() => document.querySelector('#tm-volume-options-button').click());
     await page.locator('#tm-volume-options-normalization').uncheck();
-    await page.waitForFunction(() => !document.documentElement.dataset.tmAudioNormalization && document.querySelector('video').volume === .4);
+    await page.waitForFunction(factor => !document.documentElement.dataset.tmAudioNormalization && document.querySelector('video').volume === .4 * factor, compensation);
     await page.waitForFunction(() => window.__peak() > .001);
     await checkIdleResumeRace(page, '__graphContexts');
     await page.locator('#tm-volume-options-normalization').check();

@@ -20,3 +20,16 @@ test('native input is adopted after the site setter, including propagation-stopp
   control.dispatchEvent(new f.window.Event('input', { bubbles: true })); dispose();
   await Promise.resolve(); assert.equal(updates, 1, 'queued adoption cannot outlive its overlay');
 });
+
+test('a mute button inside native volume controls cannot adopt processed output', async t=>{
+  const f=createRuntime();t.after(f.close);
+  f.document.body.innerHTML='<div id="player"><video></video><div id="native"><button id="mute">Mute</button><input></div></div>';
+  let adopted=0;
+  const dispose=bindNativeVolumeInput({window:f.window,video:f.document.querySelector('video'),player:f.document.getElementById('player'),
+    selector:'#native',excludeSelector:'#mute',normalizer:{acceptNativeVolume(){adopted++;}},onChange(){}});
+  t.after(dispose);
+  f.document.getElementById('mute').dispatchEvent(new f.window.Event('pointerdown',{bubbles:true}));
+  await Promise.resolve();assert.equal(adopted,0);
+  f.document.querySelector('input').dispatchEvent(new f.window.Event('input',{bubbles:true}));
+  await Promise.resolve();assert.equal(adopted,1,'actual slider input still adopts native volume');
+});

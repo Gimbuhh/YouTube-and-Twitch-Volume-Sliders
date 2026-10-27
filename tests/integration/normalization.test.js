@@ -10,7 +10,7 @@ const platforms = [
   { file: 'twitch', prefix: 'twitch', url: 'https://www.twitch.tv/test', fixture: twitchFixture }
 ];
 
-async function prepare(config, t, { saved = false, blockedStorage = false, delayedControls = false, beforeBody = false, controlledTime = false } = {}) {
+async function prepare(config, t, { saved = false, blockedStorage = false, delayedControls = false, beforeBody = false, controlledTime = true } = {}) {
   const runtime = createRuntime(config.url, { runScripts: 'outside-only' });
   t.after(() => runtime.close());
   const { video, player, state } = config.fixture(runtime.document);
@@ -55,11 +55,13 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
       return id;
     };
     runtime.window.clearTimeout = runtime.window.clearInterval;
+    runtime.window.requestAnimationFrame = callback => runtime.window.setTimeout(() => callback(now), 16);
+    runtime.window.cancelAnimationFrame = runtime.window.clearTimeout;
   }
   const advance = async (seconds = 7) => {
     await new Promise(resolve => setImmediate(resolve));
-    for (let i = 0; i < seconds * 20; i++) {
-      now += 50;
+    for (let i = 0; i < seconds * 100; i++) {
+      now += 10;
       await new Promise(resolve => setImmediate(resolve));
       for (const [id, tick] of [...ticks]) {
         if (!ticks.has(id) || now < tick.next) continue;
@@ -68,6 +70,7 @@ async function prepare(config, t, { saved = false, blockedStorage = false, delay
         tick.callback();
       }
     }
+    await new Promise(resolve => setImmediate(resolve));
   };
   const artifact = await readFile(new URL(`../../dist/${config.file}-volume-slider.user.js`, import.meta.url), 'utf8');
   if (delayedControls) {
@@ -127,6 +130,44 @@ test('youtube: an asynchronous player API cannot defer zero-output protection', 
   video.dispatchEvent(new f.window.Event('volumechange'));
   await new Promise(resolve => setImmediate(resolve));
   assert.ok(JSON.parse(f.document.documentElement.dataset.tmAudioNormalization).output <= 10.5, 'late worker restoration cannot bypass the protected graph');
+});
+
+test('youtube: site loudness compensation cannot cause a volumechange feedback loop', async t => {
+  const f = await prepare(platforms[0], t);
+  let writes = 0;
+  const setVolume = f.api.setVolume;
+  f.api.setVolume = value => {
+    // Bound the broken implementation so this regression fails without hanging.
+    if (++writes > 40) throw new Error('Volume write feedback loop');
+    setVolume(value);
+    f.video.volume = value / 100 * .54;
+  };
+  f.toggle.click();
+  await f.advance(1);
+  assert.equal(f.document.getElementById('tm-volume-options-normalization-status').textContent, 'Active');
+  assert.equal(f.state.volume, 100);
+  assert.equal(f.video.volume, .54);
+  assert.ok(writes <= 3, `compensation caused ${writes} player writes`);
+
+  const before = writes;
+  f.video.volume = .43;
+  f.video.dispatchEvent(new f.window.Event('volumechange'));
+  await f.advance(1);
+  assert.equal(writes, before, 'a site compensation change is not a selected-volume change');
+  assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
+  assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
+
+  const native = f.document.createElement('input');
+  f.player.querySelector('.ytp-volume-area').append(native);
+  native.addEventListener('input', () => f.api.setVolume(40));
+  native.dispatchEvent(new f.window.Event('input', { bubbles: true }));
+  await f.advance(.2);
+  assert.equal(f.document.getElementById('tm-volume-slider-range').value, '40');
+  assert.equal(f.state.volume, 100);
+  f.toggle.click();
+  await f.advance(.15);
+  assert.equal(f.state.volume, 40);
+  assert.equal(f.video.volume, .4 * .54);
 });
 
 for (const config of platforms) {
@@ -265,7 +306,8 @@ for (const config of platforms) {
     button.dataset.aTarget = 'player-mute-unmute-button';
     button.addEventListener('click', () => f.api.setMuted(false));
     f.player.append(button);
-    button.click(); await new Promise(resolve => setImmediate(resolve));
+    // Native mute reporting waits until the site's event has completed.
+    button.click(); await f.advance(.01);
     assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), 'false');
     assert.equal(label.textContent, '55%', 'native unmute refreshes after the saved choice changes');
   });
@@ -278,12 +320,12 @@ for (const config of platforms) {
     button.dataset.aTarget = 'player-mute-unmute-button';
     button.addEventListener('click', () => f.api.setMuted(true));
     f.player.append(button);
-    button.click(); await new Promise(resolve => setImmediate(resolve));
+    button.click(); await f.advance(.01);
     assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), 'true');
     f.player.tabIndex = 0; f.player.focus();
     f.player.addEventListener('keydown', event => { if (event.key === 'm') f.api.setMuted(false); });
     f.player.dispatchEvent(new f.window.KeyboardEvent('keydown', {key:'m',bubbles:true}));
-    await new Promise(resolve => setImmediate(resolve));
+    await f.advance(.01);
     assert.equal(f.window.localStorage.getItem('tm-twitch-muted'), 'false');
     assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
   });
@@ -344,7 +386,7 @@ for (const config of platforms) {
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(f.outputVolume(), 0);
     await f.advance(.2); assert.equal(f.outputVolume(), 0);
-    f.toggle.click(); assert.equal(f.outputVolume(), 60, 'disable restores the new native selection');
+    f.toggle.click(); await f.advance(.15); assert.equal(f.outputVolume(), 60, 'disable restores the new native selection');
   });
 
   if (config.file === 'twitch') test('twitch: sustained startup volume keys supersede the delayed preference restore', async t => {
@@ -394,7 +436,7 @@ for (const config of platforms) {
         assert.equal(f.player.querySelector('[data-tm-volume-feedback]').textContent, `${expected}%`);
         assert.equal(f.player.querySelector('[data-tm-volume-feedback]').dataset.volumeIcon, 'low');
       }
-      f.toggle.click(); assert.equal(f.outputVolume(), 25);
+      f.toggle.click(); await f.advance(.15); assert.equal(f.outputVolume(), 25);
       f.video.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
       for (const [key, expected] of [['ArrowUp', '30'], ['ArrowDown', '25']]) {
         f.player.dispatchEvent(new f.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
@@ -419,7 +461,7 @@ for (const config of platforms) {
     assert.equal(status.textContent, 'Active');
     assert.equal(details.textContent, 'No volume adjustment\nOutput 100% · Selected 100%');
     assert.equal(f.document.querySelector('.tm-normalization-icon').hidden, false);
-    f.toggle.click(); assert.equal(f.outputVolume(), 100);
+    f.toggle.click(); await f.advance(.15); assert.equal(f.outputVolume(), 100);
   });
 
   test(`${config.file}: native controls set absolute selected volume without relearning the source`, async t => {
@@ -443,7 +485,7 @@ for (const config of platforms) {
       assert.equal(Number(slider.value), preferred);
       assert.equal(Math.round(f.video.volume * 100), 100, 'selected-volume input cannot bypass the processed graph');
       assert.equal(Number(f.window.localStorage.getItem(f.volumeKey)), preferred);
-      f.toggle.click(); assert.equal(f.outputVolume(), preferred);
+      f.toggle.click(); await f.advance(.15); assert.equal(f.outputVolume(), preferred);
     }
   });
 
@@ -457,7 +499,7 @@ for (const config of platforms) {
     assert.ok(Math.abs(f.outputVolume() - before) <= 1);
     assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
     assert.equal(f.window.localStorage.getItem(f.volumeKey), '50');
-    f.toggle.click(); assert.equal(f.outputVolume(), 50);
+    f.toggle.click(); await f.advance(.15); assert.equal(f.outputVolume(), 50);
   });
 
   test(`${config.file}: saved normalization starts before controls or document completion and keeps one capture on mount`, async t => {
@@ -465,7 +507,7 @@ for (const config of platforms) {
       const f = await prepare(config, t, { saved: true, delayedControls: true, beforeBody });
       if (beforeBody) {
         f.document.documentElement.append(f.body);
-        await new Promise(resolve => f.window.setTimeout(resolve, 50));
+        await new Promise(resolve => setImmediate(resolve));
       }
       assert.equal(f.outputVolume(), 0, 'startup is silent before the first audio measurement');
       await f.advance(.2);
@@ -477,13 +519,14 @@ for (const config of platforms) {
       f.player.append(...f.controls);
       Object.defineProperty(f.document, 'readyState', { configurable: true, value: 'interactive' });
       f.window.dispatchEvent(new f.window.Event('DOMContentLoaded'));
-      await new Promise(resolve => f.window.setTimeout(resolve, 100));
+      await f.advance(.1);
       await f.advance(.2);
       assert.ok(f.document.getElementById('tm-volume-slider-overlay'));
       assert.equal(f.audio.captures, 1, 'mounting controls retains the early analysis session');
       assert.equal(f.document.getElementById('tm-volume-slider-range').value, '50');
       f.document.getElementById('tm-volume-options-button').click();
       f.document.getElementById('tm-volume-options-normalization').click();
+      await f.advance(.15);
       assert.equal(f.outputVolume(), 50);
       assert.ok(f.audio.contexts.every(context => !context.closed));
     }
@@ -508,6 +551,7 @@ for (const config of platforms) {
     await f.advance();
     assert.ok(f.outputVolume() < 10, 'loud audio still receives full attenuation');
     f.toggle.click();
+    await f.advance(.15);
     assert.equal(f.outputVolume(), 20);
   });
 
@@ -533,6 +577,7 @@ for (const config of platforms) {
     const artwork = indicator.innerHTML;
     assert.equal(slider.value, '50');
     assert.match(icon.getAttribute('aria-describedby'), /normalization-description/);
+    assert.equal(f.document.querySelector('.tm-normalization-description').textContent, 'Auto-normalize volume is on');
     f.audio.amplitude = 0.02;
     // This follows an established loud source. Allow the cautious background
     // hold to release before checking the icon at the exact headroom limit.
@@ -590,6 +635,7 @@ for (const config of platforms) {
     assert.equal(indicator.hidden, true);
     assert.equal(icon.getAttribute('aria-describedby'), null);
     assert.equal(slider.getAttribute('aria-describedby'), 'tm-volume-slider-value');
+    await f.advance(.15);
     assert.equal(f.outputVolume(), 50);
   });
 
@@ -630,6 +676,7 @@ for (const config of platforms) {
     assert.ok(f.outputVolume() < 40);
     assert.equal(f.window.localStorage.getItem(f.volumeKey), '40');
     f.toggle.click();
+    await f.advance(.15);
     assert.equal(f.outputVolume(), 40);
     assert.equal(f.document.getElementById('tm-volume-options-normalization-details').hidden, true);
     assert.equal(f.audio.contexts[0].closed, false);
@@ -642,6 +689,7 @@ for (const config of platforms) {
     const offSelect = f.document.getElementById('tm-volume-options-mode');
     offSelect.value = 'off';
     offSelect.dispatchEvent(new f.window.Event('change', { bubbles: true }));
+    await f.advance(.15);
     assert.equal(f.outputVolume(), 50);
     assert.equal(f.audio.contexts[0].closed, false);
     assert.equal(f.document.getElementById('tm-volume-slider-overlay'), null);
@@ -657,7 +705,7 @@ for (const config of platforms) {
     const f = await prepare(config, t, { blockedStorage: true });
     f.toggle.click(); await f.advance();
     assert.equal(f.toggle.getAttribute('aria-checked'), 'true'); assert.ok(f.outputVolume() < 20);
-    f.toggle.click(); assert.equal(f.outputVolume(), 50);
+    f.toggle.click(); await f.advance(.15); assert.equal(f.outputVolume(), 50);
   });
 
   test(`${config.file}: inaccessible capture restores volume and mute remains user-controlled`, async t => {
@@ -694,7 +742,7 @@ for (const config of platforms) {
       f.window.dispatchEvent(new f.window.Event('yt-navigate-finish'));
     } else {
       // Twitch's attachment observer discovers a new video under the body.
-      await new Promise(resolve => f.window.setTimeout(resolve, 1100));
+      await f.advance(1.1);
     }
     await f.advance();
     assert.equal(f.audio.contexts[0].closed, false);

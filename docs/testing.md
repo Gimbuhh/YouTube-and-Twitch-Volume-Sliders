@@ -14,6 +14,8 @@ Release preflight tests exercise real temporary archives, checking both platform
 
 Options lifecycle regressions verify that popup replacement does not accumulate page-level release listeners and that previews end on release, cancellation, tab switches, close, and replacement. Browser checks also exercise releasing an options drag outside the slider and closing the popup with Escape during a drag. On both sites, scrolling regressions require the menu to retain its normal height and stay directly above its controls through document and nested-container scrolling. The menu stays inside its player and can scroll partly off-screen with it. Browser checks also cover tabs, fullscreen, short viewport height limits, Escape focus restoration, and removal with its player.
 
+Chrome and Firefox pill interaction checks use native pointer and keyboard input on both sites. They cover grace expiry while hovered or keyboard-focused, leaving with a remaining deadline, repeated wheel adjustments, dragging outside until release, pointer focus left on the range, and Always expanded. The 220 ms animation and 1.2-second hold remain unchanged. Range unit tests separately verify release, cancellation, window blur, and disposal.
+
 ## Real-browser smoke checks
 
 The default verification includes Chrome smoke coverage for input defaults, focus modality, rendered geometry, overflow and Twitch controls-visibility timing. To run only its UI suites:
@@ -40,7 +42,7 @@ Options-button motion checks verify all three slider handles move with the menu 
 
 Every smoke scenario rejects uncaught page errors before reporting success. This gate was verified by injecting an asynchronous exception into a temporary built artifact: the ordinary suite passed, while the altered artifact failed with the injected error.
 
-YouTube popup-positioning regressions cover a hidden duplicate progress bar, no rendered progress bar, and an unrelated progress bar outside the current player. At two viewport widths, the suite opens and closes Options and checks that the popup stays inside the player, uses the rendered bar or button fallback, and receives pointer input.
+YouTube popup-positioning regressions cover a hidden duplicate progress bar, no rendered progress bar, and an unrelated progress bar outside the current player. At two viewport widths, the suite opens and closes Options and checks that the popup stays inside the player, uses the rendered bar or button fallback, and receives pointer input. Native controls hold tests require waking YouTube's idle state when Options opens and after later autohide transitions, so the clock and scrubber keep updating after pointer exit.
 
 Twitch regressions distinguish narrow channel, video, and clip players from compact browsing previews. Browser checks cross the old 720-pixel boundary at zoom levels from 100% through 200% and back, with Options open and page mutations between resizes. They verify that replacement mode keeps native controls hidden, retains the custom slider and Options button, and leaves the popup visible and interactive.
 
@@ -56,7 +58,9 @@ Twitch cases verify hover timing, pop-in motion, reduced motion, controls hiding
 
 ## Audio normalization
 
-The default check includes the full normalization coverage. `npm run test:normalization-browser` isolates the Chrome audio suites: ten routed cases, four synthetic startup/refresh recordings with main-thread stalls, and 45 native gain-graph checks at 44.1/48/96 kHz. The startup waveform checks require FFmpeg on PATH or `VOLUME_SLIDER_FFMPEG` set to its executable. Set `VOLUME_SLIDER_NORMALIZATION_RESULTS` to an output directory outside the repository; results otherwise use the OS temporary directory. No live browser audio is recorded.
+The default check includes the full normalization coverage. `npm run test:normalization-browser` isolates the Chrome audio suites: twelve routed cases, four synthetic startup/refresh recordings with main-thread stalls, audible navigation/restart transitions, and 45 native gain-graph checks at 44.1/48/96 kHz. The startup waveform checks require FFmpeg on PATH or `VOLUME_SLIDER_FFMPEG` set to its executable. Set `VOLUME_SLIDER_NORMALIZATION_RESULTS` to an output directory outside the repository; results otherwise use the OS temporary directory. No live browser audio is recorded.
+
+Chrome and Firefox transition tests record a synthetic tone on the audio render thread through graph disposal, immediate replacement, and restoring ordinary playback. They include ordinary output connections, inspect the first affected render quantum, and reject discontinuities or unprotected bursts. Routing unit tests cover replacement cancellation during a fade. Lifecycle fixtures advance media, timeout and animation clocks together; disable assertions wait for the bounded fade rather than requiring an abrupt synchronous cut.
 
 The browser cases check native frames, worklet analysis, CSP-blocked worklets, unavailable input, blocked activation, stereo linking, mono input, sample ceilings, controls, selected-volume persistence, source restarts/replacement and enable/disable. A worklet message regression rejects startup-only notifications after meaningful programme measurement. The frozen packet-renderer waveform regression and earlier live results remain in the local analysis evidence, not in shipped code.
 
@@ -67,3 +71,7 @@ See [normalization](normalization.md) for current behavior, ownership, limits an
 ## Documentation screenshots
 
 Run `npm run docs:screenshots` to build the standard scripts, check indicator geometry/zoom and refresh the PNG previews in docs/images/. The fixtures enable normalization at a selected 30% with a controlled source producing 17% output. They use no live service and show the real production settings markup, without development labels. The existing browser smoke suite remains available through `npm run test:browser`.
+
+The release regressions also cover rapid Twitch video replacements without later DOM activity, native volume/mute read ownership after API failures and recovery, nonempty normalization descriptions, and zero settings/layout work for unrelated chat updates. Tick-alignment checks require one coalesced deferred frame while retaining immediate alignment. Firefox waveform verification repeats navigation, restart and ordinary-playback handoffs three times; any failed trial fails the suite. The unchanged waveform bound covers the first render quantum. Output-gate tests also model zero base latency with a pending renderer batch.
+
+Chrome and Firefox run mute-feedback checks on both platforms with normalization on and off. They require M-only Muted/Unmuted labels and artwork, no custom popup from native/custom mouse clicks or Space, retained selected volume, and isolation from automatic mute changes and text input. Both platforms must show M feedback after clicking outside the player and while the page body has focus. YouTube M presses must toggle mute exactly once without reaching the native bezel handler. Native mute controls are excluded from selected-volume adoption even when nested inside a volume-control wrapper.

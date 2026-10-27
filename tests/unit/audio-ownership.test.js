@@ -5,7 +5,7 @@ import { createVolumeNormalizer } from '../../src/shared/normalization.js';
 import { createRuntime } from '../helpers/runtime.js';
 import { mockAudioCapture } from '../helpers/audio.js';
 
-test('enabled normalization reserves audio before samples exist and keeps that player choice until reload', t => {
+test('enabled normalization reserves audio before samples exist and keeps that player choice until reload', async t => {
   const runtime = createRuntime();
   const video = runtime.document.createElement('video');
   runtime.document.body.append(video);
@@ -23,6 +23,7 @@ test('enabled normalization reserves audio before samples exist and keeps that p
   assert.throws(() => external.createMediaElementSource(video), { name: 'InvalidStateError' });
   assert.equal(external.sources.has(video), false);
   normalizer.setEnabled(false);
+  await Promise.resolve();
   assert.equal(video.volume, .2);
   assert.throws(() => external.createMediaElementSource(video), { name: 'InvalidStateError' }, 'switching the same player still requires a reload');
   const replacement = runtime.document.createElement('video');
@@ -35,13 +36,12 @@ test('enabled normalization reserves audio before samples exist and keeps that p
 
 test('an external source created during asynchronous readiness retains exclusive ownership', async t => {
   const runtime = createRuntime();
-  t.after(() => runtime.close());
   const video = runtime.document.createElement('video');
   runtime.document.body.append(video);
   const audio = mockAudioCapture(runtime.window, video), failures = [];
   const playback = createAudiblePlayback({ window: runtime.window, video, selected: .2,
     onMetrics() {}, onFailure: error => failures.push(error) });
-  t.after(() => playback.dispose());
+  t.after(async () => { await playback.dispose(); runtime.close(); });
   // The native resume promise yields after acquiring the output but before
   // connecting it. Firefox's separate contexts allow this competing source.
   const external = new runtime.window.AudioContext();

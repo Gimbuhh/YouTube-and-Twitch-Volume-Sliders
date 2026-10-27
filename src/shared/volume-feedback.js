@@ -18,54 +18,56 @@ export function createVolumeFeedback({ window, player }) {
   };
   player.addEventListener('pointerdown', clear, true);
   player.addEventListener('keydown', onKey, true);
+  function show(value, muted = false, label) {
+    const percent = Math.round(clampVolume(value));
+    if (!popup) {
+      popup = document.createElement('div');
+      popup.dataset.tmVolumeFeedback = 'true';
+      popup.setAttribute('role', 'status');
+      popup.setAttribute('aria-live', 'polite');
+      popup.setAttribute('aria-atomic', 'true');
+      Object.assign(popup.style, {
+        all: 'initial',
+        position: 'absolute',
+        top: '10%',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        boxSizing: 'border-box',
+        maxWidth: 'calc(100% - 24px)',
+        padding: '8px 12px',
+        borderRadius: '6px',
+        background: 'rgba(0,0,0,.7)',
+        color: '#fff',
+        font: '600 20px/1.2 Arial,Helvetica,sans-serif',
+        fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap',
+        pointerEvents: 'none',
+        zIndex: '20'
+      });
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      icon.setAttribute('viewBox', '0 0 24 24');
+      icon.setAttribute('aria-hidden', 'true');
+      icon.setAttribute('focusable', 'false');
+      Object.assign(icon.style, { display: 'block', flex: 'none', width: '24px', height: '24px', color: 'inherit' });
+      popup.append(icon, document.createTextNode(''));
+      player.appendChild(popup);
+    }
+    const mode = getSpeakerIconMode(percent, muted);
+    if (popup.dataset.volumeIcon !== mode) {
+      popup.firstElementChild.replaceChildren(createSpeakerIconGroup(document, mode));
+      popup.dataset.volumeIcon = mode;
+    }
+    popup.setAttribute('aria-label', label ? `${label}, volume ${percent}%` : `${muted ? 'Muted, volume' : 'Volume'} ${percent}%`);
+    popup.lastChild.nodeValue = label || `${percent}%`;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(clear, 500);
+  }
   return {
-    show(value, muted = false) {
-      const percent = Math.round(clampVolume(value));
-      if (!popup) {
-        popup = document.createElement('div');
-        popup.dataset.tmVolumeFeedback = 'true';
-        popup.setAttribute('role', 'status');
-        popup.setAttribute('aria-live', 'polite');
-        popup.setAttribute('aria-atomic', 'true');
-        Object.assign(popup.style, {
-          all: 'initial',
-          position: 'absolute',
-          top: '10%',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          boxSizing: 'border-box',
-          maxWidth: 'calc(100% - 24px)',
-          padding: '8px 12px',
-          borderRadius: '6px',
-          background: 'rgba(0,0,0,.7)',
-          color: '#fff',
-          font: '600 20px/1.2 Arial,Helvetica,sans-serif',
-          fontVariantNumeric: 'tabular-nums',
-          whiteSpace: 'nowrap',
-          pointerEvents: 'none',
-          zIndex: '20'
-        });
-        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        icon.setAttribute('viewBox', '0 0 24 24');
-        icon.setAttribute('aria-hidden', 'true');
-        icon.setAttribute('focusable', 'false');
-        Object.assign(icon.style, { display: 'block', flex: 'none', width: '24px', height: '24px', color: 'inherit' });
-        popup.append(icon, document.createTextNode(''));
-        player.appendChild(popup);
-      }
-      const mode = getSpeakerIconMode(percent, muted);
-      if (popup.dataset.volumeIcon !== mode) {
-        popup.firstElementChild.replaceChildren(createSpeakerIconGroup(document, mode));
-        popup.dataset.volumeIcon = mode;
-      }
-      popup.setAttribute('aria-label', `${muted ? 'Muted, volume' : 'Volume'} ${percent}%`);
-      popup.lastChild.nodeValue = `${percent}%`;
-      window.clearTimeout(timer);
-      timer = window.setTimeout(clear, 500);
-    },
+    show,
+    showMute(value, muted) { show(value, muted, muted ? 'Muted' : 'Unmuted'); },
     clear,
     dispose() {
       clear();

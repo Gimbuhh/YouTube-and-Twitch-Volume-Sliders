@@ -49,3 +49,22 @@ test('feedback owns its artwork and reflects the selected percentage and mute st
   player.dispatchEvent(new f.window.Event('pointerdown'));
   assert.equal(player.querySelector('[data-tm-volume-feedback]'), null);
 });
+
+test('mute feedback reuses the popup, announces the action and retains the selected level', t => {
+  const f=createRuntime();t.after(f.close);
+  const player=f.document.createElement('div');f.document.body.append(player);
+  const feedback=createVolumeFeedback({window:f.window,player});t.after(()=>feedback.dispose());
+  feedback.show(30);
+  const popup=player.querySelector('[data-tm-volume-feedback]');
+  feedback.showMute(30,true);
+  assert.equal(popup.textContent,'Muted');
+  assert.equal(popup.dataset.volumeIcon,'muted');
+  assert.equal(popup.getAttribute('aria-label'),'Muted, volume 30%');
+  feedback.showMute(30,false);
+  assert.equal(player.querySelector('[data-tm-volume-feedback]'),popup);
+  assert.equal(popup.textContent,'Unmuted');
+  assert.equal(popup.dataset.volumeIcon,'low');
+  assert.equal(popup.getAttribute('aria-label'),'Unmuted, volume 30%');
+  feedback.show(35);
+  assert.equal(popup.textContent,'35%');
+});

@@ -41,7 +41,7 @@ export function createVolumeOverlay({ document, overlayId }) {
 export function createOverlayUi(dependencies) {
   const {
     document, window, isAlwaysExpandedEnabled, isSliderOnVideo,
-    updateOverlayOpacity, finishExpandedHoldIfDue, getVolumeStep,
+    updateOverlayOpacity, getVolumeStep,
     accentLight: VOLUME_ACCENT_LIGHT, accentDark: VOLUME_ACCENT_DARK, accentMid: VOLUME_ACCENT_MID,
     arcTrack: VOLUME_ARC_TRACK, expandedHoldMs: VOLUME_CHANGE_EXPANDED_HOLD_MS
   } = dependencies;
@@ -180,9 +180,11 @@ export function createOverlayUi(dependencies) {
     }
 
     function shouldKeepOverlayExpanded(overlay) {
+        // A range can retain pointer focus after release. Only keyboard focus
+        // should keep the pill open once the pointer and drag have left it.
         return isAlwaysExpandedEnabled() ||
             overlay.matches(':hover') ||
-            overlay.contains(document.activeElement) ||
+            (overlay.contains(document.activeElement) && document.activeElement.matches(':focus-visible')) ||
             overlay.dataset.tmDragging === 'true';
     }
 
@@ -191,6 +193,26 @@ export function createOverlayUi(dependencies) {
             clearTimeout(overlay._expandedHoldTimer);
             overlay._expandedHoldTimer = 0;
         }
+    }
+
+    function finishExpandedHoldIfDue(overlay) {
+        if (!overlay) return;
+        if (!overlay.isConnected) {
+            clearExpandedHold(overlay);
+            return;
+        }
+        if (shouldKeepOverlayExpanded(overlay)) return;
+        if (Date.now() < (overlay._expandedHoldUntil || 0)) {
+            scheduleExpandedHoldRelease(overlay);
+            return;
+        }
+        clearExpandedHold(overlay);
+        setOverlayExpanded(overlay, false);
+    }
+
+    function collapseOverlayIfIdle(overlay) {
+        // Focus may move elsewhere in this event. Keep the original deadline.
+        window.setTimeout(() => finishExpandedHoldIfDue(overlay), 0);
     }
 
     function clearExpandedHold(overlay) {
@@ -393,5 +415,5 @@ export function createOverlayUi(dependencies) {
         return svg;
     }
 
-  return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks };
+  return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, collapseOverlayIfIdle, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks };
 }

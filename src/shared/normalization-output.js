@@ -3,6 +3,37 @@
 // route. Normalization owns only the temporary graph connected to that source.
 const documents = new WeakMap();
 
+// Commands can reach the renderer a batch after currentTime was read. Firefox
+// reports zero baseLatency on some devices; outputLatency covers that batch.
+// This lead is for output gates only, never the sample-clocked limiter.
+export function mediaTransitionTime(context) {
+  return context.currentTime + Math.max(context.baseLatency || 0, context.outputLatency || 0, 128 / context.sampleRate);
+}
+
+export function waitForMediaRender(window, context, time) {
+  return new Promise(resolve => {
+    const check = () => {
+      if (context.state !== 'running' || context.currentTime >= time) resolve();
+      else window.setTimeout(check, 2);
+    };
+    check();
+  });
+}
+
+// The native volume command must reach the renderer before ordinary audio
+// fades back in. A new normalizer invalidates this gate before connecting.
+export function fadeInMediaOutput(window, video) {
+  const document = documents.get(window), route = document?.routes.get(video), gate = route?.ordinary;
+  if (!gate || route.pending) return Promise.resolve();
+  const context = document.context;
+  return waitForMediaRender(window, context, context.currentTime + (context.baseLatency || 0) + 256 / context.sampleRate).then(() => {
+    if (route.ordinary !== gate || route.pending) return;
+    const at = mediaTransitionTime(context);
+    gate.gain.setValueAtTime(0, at);
+    gate.gain.linearRampToValueAtTime(1, at + .005);
+  });
+}
+
 function registry(window) {
   let state = documents.get(window);
   if (!state) {
@@ -77,6 +108,7 @@ function reconcile(document) {
   for (const route of document.active) {
     if (!route.video.isConnected) {
       document.sources.get(route.video)?.disconnect();
+      route.ordinary?.disconnect(); route.ordinary = null;
       document.active.delete(route);
     }
   }
@@ -135,10 +167,27 @@ export function acquireMediaOutput(window, video) {
   }
   route.pending = true;
   let source = document.sources.get(video);
+  function restoreRoute() {
+    route.pending = false;
+    route.ordinary?.disconnect(); route.ordinary = null;
+    if (source) {
+      source.disconnect();
+      if (video.isConnected) {
+        const gate = route.ordinary = document.context.createGain();
+        gate.gain.value = 0; gate.connect(document.context.destination); source.connect(gate);
+      }
+    }
+    activity(document, route, video.paused || video.ended).catch(() => {});
+  }
   return { context: document.context,
     get source() { return source; },
     setPaused(paused) { activity(document, route, paused).catch(() => {}); },
-    resume() { return activity(document, route, video.paused || video.ended); },
+    resume() {
+      // A replacement graph must not cut short the outgoing graph's fade or
+      // be disconnected by its deferred restoration of ordinary playback.
+      return route.restoring ? route.restoring.then(() => activity(document, route, video.paused || video.ended))
+        : activity(document, route, video.paused || video.ended);
+    },
     connect(input) {
       // Do not divert ordinary audio into a context still awaiting activation.
       const context = document.context;
@@ -159,12 +208,23 @@ export function acquireMediaOutput(window, video) {
         }
         document.sources.set(video, source);
       }
+      route.ordinary?.disconnect(); route.ordinary = null;
       source.disconnect(); source.connect(input);
     },
-    restore() {
-      route.pending = false;
-      if (source) { source.disconnect(); if (video.isConnected) source.connect(document.context.destination); }
-      activity(document, route, video.paused || video.ended).catch(() => {});
+    restore(after) {
+      if (after) {
+        route.pending = false;
+        route.restoring = after.then(() => {
+          route.restoring = null;
+          // An incoming normalizer has reserved this element during the fade.
+          // Never insert an ordinary, unprotected route between the two graphs.
+          if (route.pending) { source?.disconnect(); }
+          else { restoreRoute(); }
+        });
+        return route.restoring;
+      }
+      if (route.restoring) { route.pending = false; return route.restoring; }
+      restoreRoute();
     }
   };
 }

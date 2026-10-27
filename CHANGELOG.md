@@ -11,7 +11,7 @@ All notable changes to the maintained userscripts are documented here. Historica
   - Audio settings show adjusted output separately from the selected level. Stream restarts preserve the selection and mute choice, including after blocked Twitch ads. Player volume arrows adjust the selection in five-point steps. Native volume controls still work.
   - Normalization keeps speech steady between words, remembers the usual listening level through quiet passages and silent gaps, and recovers smoothly after brief peaks and sustained loud passages.
   - Normalization reduces background work during playback and suspends audio processing while paused.
-  - Audio stays quiet until protection is ready on page loads, video changes, and stream restarts.
+  - Audio stays quiet until protection is ready on page loads, video changes, and stream restarts, with a smooth fade when the source changes.
   - Temporary audio access failures retry automatically.
   - A waveform icon shows normalization is on, including during pause and mute, and hides if analysis is blocked or unavailable.
   - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.
@@ -21,20 +21,23 @@ All notable changes to the maintained userscripts are documented here. Historica
 
 - **Both:** Volume numbers use clearer type, more consistent centering, and a natural-width “100”.
 - **Both:** Control tooltips match the site's styling and behavior, and the Options button is labeled **Volume Slider Options**.
-- **Both:** Volume arrows show a compact on-video percentage and matching speaker icon with normalization on or off.
+- **Both:** Volume arrows show a compact on-video percentage and matching speaker icon with normalization on or off. The M shortcut shows matching Muted/Unmuted icons and labels even when the player is not focused, without changing the selected volume or duplicating native YouTube feedback.
 - **Both:** Volume Slider Options groups listening and behavior settings in **General**, with visual controls in **Appearance**, clearer toggles, and compact audio feedback. The options icon animates with the menu state. The borderless Mode dropdown stays above both tabs, keeps choices readable across browser themes, and points its arrow up while open and down when closed.
 - **Both:** Replace native always uses the original volume position; the redundant Placement choices are removed.
 
 ### Fixed
 
+- **Both:** Normalization fades smoothly through audio restarts and navigation in Firefox, and the waveform indicator has a readable screen-reader description.
+- **Both:** The volume pill collapses reliably after interaction, stays expanded while dragging or its controls have keyboard focus, and preserves the remaining grace period after each wheel adjustment.
 - **Both:** Firefox normalization keeps playing reliably, and wheel changes keep the volume label and colored track in sync.
 - **Both:** Slider drags finish once, without reacting to unrelated page releases.
 - **Both:** Volume Slider Options keeps its normal height on scrolled pages and stays attached above the player controls.
 - **YouTube:** Volume and mute controls keep working when the player API is temporarily unavailable.
-- **YouTube:** The playback time keeps updating while Volume Slider Options is open.
+- **YouTube:** The time display and scrubber keep updating with Volume Slider Options open, even when the pointer leaves the video.
 - **YouTube:** Volume Slider Options stays visible when YouTube retains a hidden progress bar before the active controls. The popup anchors to a rendered progress bar in the current player, falling back to its own button when none is available.
 - **Twitch:** Space and volume arrows work through extension overlays once per keypress, without scrolling the page or taking input from extension controls.
 - **Twitch:** Volume changes made during startup take priority over the saved-level restore.
+- **Twitch:** Volume controls follow rapid player replacements, keep the displayed volume and mute state accurate while the player API recovers, and avoid unnecessary updates from chat activity.
 - **Twitch:** Narrow channel, video, and clip players keep the custom slider and Options button when zooming or resizing. Compact preview detection applies only on browsing pages, preventing native volume controls from appearing beside or replacing the custom slider.
 
 ### Known limitations

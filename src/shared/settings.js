@@ -63,6 +63,7 @@ export function createVolumeSettings({
   ensureOverlay
 }) {
   const sessionValues = new Map();
+  const pendingSizeFrames = new WeakSet();
   const read = (key) => {
     const cached = sessionValues.get(key);
     // Unsaved choices own this session; stale storage must not revert them.
@@ -225,7 +226,7 @@ export function createVolumeSettings({
     if (!overlay) return;
     clearExpandedHold(overlay);
     if (enabled) setOverlayExpanded(overlay, true);
-    else collapseOverlayIfIdle(overlay, true);
+    else collapseOverlayIfIdle(overlay);
   }
 
   function getSavedOverlayOpacityPercent(focused) {
@@ -266,9 +267,14 @@ export function createVolumeSettings({
     const scale = isSliderOnVideo() ? getSavedOverlaySizePercent() / 100 : 1;
     overlay.style.setProperty('--tm-overlay-scale', String(scale));
     syncOverlayTicks(overlay);
-    overlay.ownerDocument?.defaultView?.requestAnimationFrame?.(() => {
-      syncOverlayTicks(overlay);
-    });
+    const view = overlay.ownerDocument?.defaultView;
+    if (view?.requestAnimationFrame && !pendingSizeFrames.has(overlay)) {
+      pendingSizeFrames.add(overlay);
+      view.requestAnimationFrame(() => {
+        pendingSizeFrames.delete(overlay);
+        if (overlay.isConnected) syncOverlayTicks(overlay);
+      });
+    }
   }
 
   function syncOverlayTicks(overlay) {
@@ -313,7 +319,7 @@ export function createVolumeSettings({
     if (!overlay) return;
     delete overlay.dataset.tmOptionsPreview;
     if (isAlwaysExpandedEnabled()) setOverlayExpanded(overlay, true, true);
-    else collapseOverlayIfIdle(overlay, true);
+    else collapseOverlayIfIdle(overlay);
     updateOverlayOpacity(overlay);
   }
 
@@ -363,7 +369,7 @@ export function createVolumeSettings({
       overlay?.dataset.tmDragging === 'true' ||
       overlay?.dataset.tmHovering === 'true' ||
       overlay?.matches?.(':hover') ||
-      overlay?.contains?.(document.activeElement);
+      (overlay?.contains?.(document.activeElement) && document.activeElement.matches(':focus-visible'));
   }
 
   function setVolumeSliderMode(mode) {

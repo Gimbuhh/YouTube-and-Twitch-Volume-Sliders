@@ -15,10 +15,11 @@ export function mockAudioCapture(window, video) {
   }
   class AudioContext {
     constructor() {
-      this.state = 'running'; this.closed = false; this.sampleRate = 48000; this.currentTime = 0;
+      this.state = 'running'; this.closed = false; this.sampleRate = 48000;
       this.destination = this.node(); this.sources = new Map(); state.contexts.push(this);
       this.audioWorklet = { addModule: async () => { if (state.loadError) throw new Error('Module blocked'); } };
     }
+    get currentTime() { return window.performance.now() / 1000; }
     parameter(value = 0) {
       // Keep the shared browser API subset; optional methods must not mask compatibility failures.
       return { value, cancelScheduledValues() {},

@@ -26,7 +26,10 @@ try {
     const controls = youtube
       ? '<div class="ytp-left-controls"><div class="ytp-volume-area"></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">Settings</button></div>'
       : '<div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button" aria-label="Settings">Settings</button></div></div>';
-    const html = `<!doctype html><style>body{margin:0;background:#111;color:white}#movie_player,.video-player{position:relative;width:900px;height:500px}video{width:900px;height:450px}.ytp-left-controls,.ytp-right-controls,[data-a-target="player-controls"],.player-controls__left-control-group,.player-controls__right-control-group{display:flex;align-items:center;height:40px}</style>
+    const html = `<!doctype html><style>body{margin:0;background:#111;color:white}#movie_player,.video-player{position:relative;width:900px;height:500px}video{width:900px;height:450px}.ytp-left-controls,.ytp-right-controls,[data-a-target="player-controls"],.player-controls__left-control-group,.player-controls__right-control-group{display:flex;align-items:center;height:40px}
+      /* Match the native right-anchored controls: collapsing the volume pill
+         must not move Settings between pointerdown and pointerup. */
+      [data-a-target="player-controls"]{justify-content:space-between}</style>
       <div ${youtube ? 'id="movie_player"' : 'class="video-player" data-a-target="player-overlay-click-handler"'}><video src="/audio.wav" loop></video>${controls}</div><script>
       const video=document.querySelector('video'),player=video.parentElement;video.volume=.2;
       const api={getVolume:()=>video.volume*${youtube ? 100 : 1},setVolume:v=>{video.volume=v/${youtube ? 100 : 1}},isMuted:()=>video.muted,mute:()=>{video.muted=true},unMute:()=>{video.muted=false},setMuted:v=>{video.muted=v}};

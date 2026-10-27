@@ -13,12 +13,14 @@ function fixture(t) {
   Object.defineProperty(window.performance, 'now', { value: () => now });
   window.setInterval = (callback, delay) => { timers.set(++timerId, { callback, delay, next: now + delay }); return timerId; };
   window.clearInterval = id => timers.delete(id);
+  window.setTimeout = (callback, delay) => { timers.set(++timerId, { callback, delay, next: now + delay, once: true }); return timerId; };
+  window.clearTimeout = id => timers.delete(id);
   const normalizer = createVolumeNormalizer({window,
     getVolume: () => { reads++; return raw; }, isMuted: () => video.muted,
     setVolume: (_video, value) => { if(errors.write) throw errors.write; raw=value; }
   });
   const flush = () => new Promise(resolve => setImmediate(resolve));
-  const advance = async (seconds=.2) => { await flush(); for(let i=0;i<Math.ceil(seconds*20);i++){now+=50;await flush();for(const [id,timer] of [...timers])if(timers.has(id)&&now>=timer.next){timer.next+=timer.delay;timer.callback();}} };
+  const advance = async (seconds=.2) => { await flush(); for(let i=0;i<Math.ceil(seconds*100);i++){now+=10;await flush();for(const [id,timer] of [...timers])if(timers.has(id)&&now>=timer.next){if(timer.once)timers.delete(id);else timer.next+=timer.delay;timer.callback();}}await flush(); };
   t.after(() => { errors.write=null;normalizer.setEnabled(false);runtime.close(); });
   return {window,document,video,audio,normalizer,timers,errors,advance,
     async start(){normalizer.setEnabled(true);normalizer.bind(video,50);await advance();},
@@ -37,10 +39,12 @@ test('default off allocates nothing; enabled output keeps selected volume distin
 
 test('disable releases analysis and restores ordinary output through the retained source',async t=>{
   const f=fixture(t);await f.start();const context=f.audio.contexts[0],source=context.sources.get(f.video);
-  f.normalizer.setEnabled(false);assert.equal(f.raw,50);assert.equal(f.video.volume,.5);assert.equal(f.normalizer.getStatus(),'Off');
+  f.normalizer.setEnabled(false);await f.advance(.15);assert.equal(f.raw,50);assert.equal(f.video.volume,.5);assert.equal(f.normalizer.getStatus(),'Off');
   assert.ok(f.audio.streams.every(s=>s.getTracks().every(track=>track.readyState==='ended')));
   assert.ok(f.audio.nodes.every(node=>node.port.closed));assert.equal(f.timers.size,0);
-  assert.equal(context.closed,false);assert.ok(source.connections.has(context.destination));
+  assert.equal(context.closed,false);
+  const [ordinary]=source.connections;
+  assert.equal(ordinary.gain.value,1);assert.ok(ordinary.connections.has(context.destination));
 });
 
 test('custom and native controls set absolute intent; passive restoration never adopts it',async t=>{
@@ -48,7 +52,7 @@ test('custom and native controls set absolute intent; passive restoration never 
   assert.equal(f.normalizer.getPreferredVolume(f.video,f.raw),30);assert.equal(f.raw,100);
   f.native(45);await f.advance();assert.equal(f.normalizer.getPreferredVolume(f.video,f.raw),45);assert.equal(f.raw,100);
   f.passive(17);await f.advance();assert.equal(f.normalizer.getPreferredVolume(f.video,f.raw),45);assert.equal(f.video.volume,1);
-  f.normalizer.setEnabled(false);assert.equal(f.raw,45);
+  f.normalizer.setEnabled(false);await f.advance(.15);assert.equal(f.raw,45);
 });
 
 test('same-element resets and enable cycles reuse one document context and source',async t=>{
@@ -56,6 +60,30 @@ test('same-element resets and enable cycles reuse one document context and sourc
   for(let i=0;i<3;i++){f.video.dispatchEvent(new f.window.Event('loadstart'));await f.advance();assert.equal(f.normalizer.getStatus(),'Active');}
   f.normalizer.setEnabled(false);f.normalizer.setEnabled(true);f.normalizer.bind(f.video,50);await f.advance();
   assert.equal(f.audio.contexts.length,1);assert.equal(f.audio.contexts[0].sources.size,1);assert.equal(f.normalizer.getStatus(),'Active');
+});
+
+test('rapid disable and re-enable cannot restore an outgoing selection over the new session',async t=>{
+  const f=fixture(t);await f.start();
+  f.normalizer.setEnabled(false);
+  f.normalizer.setEnabled(true);f.normalizer.bind(f.video,30);
+  await f.advance(.3);
+  assert.equal(f.normalizer.getStatus(),'Active');
+  assert.equal(f.normalizer.getPreferredVolume(f.video,f.raw),30);
+  assert.equal(f.raw,100);
+  assert.equal(f.audio.contexts[0].sources.size,1);
+  f.normalizer.setEnabled(false);await f.advance(.15);
+  assert.equal(f.raw,30);
+  assert.equal(f.video.volume,.3);
+});
+
+test('volume input during a disable fade uses and restores the selected level',async t=>{
+  const f=fixture(t);await f.start();f.normalizer.setPreferredVolume(f.video,30);
+  f.normalizer.setEnabled(false);
+  assert.equal(f.normalizer.getPreferredVolume(f.video,f.raw),30);
+  f.normalizer.setPreferredVolume(f.video,35);
+  assert.equal(f.normalizer.getPreferredVolume(f.video,f.raw),35);
+  await f.advance(.15);
+  assert.equal(f.raw,35);assert.equal(f.video.volume,.35);
 });
 
 test('pause, mute, zero volume and healthy silence retain the current session',async t=>{
@@ -109,14 +137,14 @@ test('repeated failures back off to thirty seconds and pause prevents retries',a
 test('processor and stalled-frame errors restore volume, dispose analysis and retry',async t=>{
   for(const kind of ['processorError','stalled']){
     const f=fixture(t);await f.start();f.audio[kind]=true;await f.advance(kind==='stalled'?1.7:.1);
-    assert.match(f.normalizer.getStatus(),/unavailable/);assert.equal(f.raw,50);assert.ok(f.audio.nodes[0].port.closed);
+    assert.match(f.normalizer.getStatus(),/unavailable/);await f.advance(.15);assert.equal(f.raw,50);assert.ok(f.audio.nodes[0].port.closed);
     f.audio[kind]=false;await f.advance(1.3);assert.equal(f.normalizer.getStatus(),'Active');
   }
 });
 
 test('inaccessible captured tracks restore ordinary volume and recover when accessible',async t=>{
   const f=fixture(t);await f.start();f.audio.captureMuted=true;f.audio.streams[0].getAudioTracks()[0].muted=true;
-  await f.advance(1.7);assert.match(f.normalizer.getStatus(),/unavailable/);assert.equal(f.raw,50);
+  await f.advance(1.7);assert.match(f.normalizer.getStatus(),/unavailable/);await f.advance(.15);assert.equal(f.raw,50);
   f.audio.captureMuted=false;await f.advance(1.3);assert.equal(f.normalizer.getStatus(),'Active');
 });
 
@@ -124,12 +152,14 @@ test('blocked activation never diverts the media element and startup timeout res
   const f=fixture(t),Context=f.window.AudioContext;
   f.window.AudioContext=class extends Context{constructor(){super();this.state='suspended';}resume(){return new Promise(()=>{});}};
   await f.start();assert.equal(f.raw,0);assert.equal(f.audio.contexts[0].sources.size,0);
+  f.video.volume=.3;f.video.dispatchEvent(new f.window.Event('volumechange'));await f.advance(.1);
+  assert.equal(f.video.volume,0,'startup protection reaches the element even when the site API already reports zero');
   await f.advance(3.1);assert.match(f.normalizer.getStatus(),/unavailable/);assert.equal(f.raw,50);assert.equal(f.audio.contexts[0].sources.size,0);
 });
 
 test('source-change hold rejects outgoing measurements and remains bounded',async t=>{
   const f=fixture(t);await f.start();const receive=f.audio.nodes[0].port.onmessage;
-  f.normalizer.setSourceChanging(true);assert.equal(f.raw,0);
+  f.normalizer.setSourceChanging(true);await f.advance(.15);assert.equal(f.raw,0);
   receive({data:{power:.001,rawPower:.001,duration:.05}});assert.equal(f.output,0);
   await f.advance(3.1);assert.match(f.normalizer.getStatus(),/unavailable/);assert.equal(f.raw,50);
   f.normalizer.setSourceChanging(false);await f.advance(1.3);assert.equal(f.normalizer.getStatus(),'Active');
@@ -143,7 +173,7 @@ test('unsupported capture, protected media and blocked analysis leave selected p
 });
 
 test('write failures and detachment still release analysis resources',async t=>{
-  const f=fixture(t);await f.start();f.errors.write=Error('Site API failed');f.video.volume=.2;await f.advance();
+  const f=fixture(t);await f.start();f.errors.write=Error('Site API failed');f.passive(20);await f.advance();
   assert.match(f.normalizer.getStatus(),/unavailable/);assert.ok(f.audio.nodes[0].port.closed);
   f.errors.write=null;await f.advance(1.3);assert.equal(f.normalizer.getStatus(),'Active');
   f.video.remove();await f.advance();assert.equal(f.normalizer.isBoundTo(f.video),false);assert.equal(f.timers.size,0);

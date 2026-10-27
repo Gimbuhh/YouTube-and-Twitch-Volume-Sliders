@@ -77,6 +77,7 @@ Install version **3.0**: [YouTube userscript](https://github.com/Gimbuhh/YouTube
 - Configurable 1%, 2%, 5%, or 10% adjustment steps for dragging and scrolling
 - Adaptive slider marks with easy-to-press 10% targets at fine adjustment steps
 - Consistent 5% Arrow Up and Arrow Down volume changes
+- On-video volume percentages and Muted/Unmuted feedback for the M shortcut
 - Adjustable on-video slider size for larger remote-control displays
 - Mute-safe restoration across reloads and single-page navigation
 - Keyboard and screen-reader accessible mute and options controls

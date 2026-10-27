@@ -7,7 +7,6 @@ import { mockAudioCapture } from '../helpers/audio.js';
 
 test('generated worklet stops startup messages within the first measured block at every sample rate', async t => {
   const runtime = createRuntime();
-  t.after(() => runtime.close());
   const video = runtime.document.createElement('video');
   runtime.document.body.append(video);
   mockAudioCapture(runtime.window, video);
@@ -16,7 +15,7 @@ test('generated worklet stops startup messages within the first measured block a
   runtime.window.URL.createObjectURL = blob => { module = blob; return 'blob:meter-test'; };
   const playback = createAudiblePlayback({ window: runtime.window, video, selected: .3,
     onMetrics() {}, onFailure: error => assert.fail(error) });
-  t.after(() => playback.dispose());
+  t.after(async () => { await playback.dispose(); runtime.close(); });
   await playback.ready;
   const code = await module.text();
 
@@ -38,7 +37,7 @@ test('generated worklet stops startup messages within the first measured block a
 });
 
 test('pausing during initial activation retains protected output and resumes the same source', async t => {
-  const runtime = createRuntime(); t.after(() => runtime.close());
+  const runtime = createRuntime();
   const video = runtime.document.createElement('video'); runtime.document.body.append(video);
   const audio = mockAudioCapture(runtime.window, video), BaseContext = runtime.window.AudioContext, failures = [];
   let finish;
@@ -47,7 +46,7 @@ test('pausing during initial activation retains protected output and resumes the
     resume() { return new Promise(resolve => { finish = () => { this.state = 'running'; resolve(); }; }); }
   };
   const playback = createAudiblePlayback({ window: runtime.window, video, selected: .3, onMetrics() {}, onFailure: error => failures.push(error) });
-  t.after(() => playback.dispose());
+  t.after(async () => { await playback.dispose(); runtime.close(); });
   audio.paused = true;
   playback.setState({ selected: .3, muted: false, paused: true });
   finish(); await playback.ready;
@@ -61,4 +60,28 @@ test('pausing during initial activation retains protected output and resumes the
   await playback.resume();
   assert.equal(playback.running, true);
   assert.equal(playback.context.sources.size, 1);
+});
+
+test('opening and retiring output survive a renderer batch when baseLatency is zero', async t => {
+  const runtime=createRuntime(), video=runtime.document.createElement('video');runtime.document.body.append(video);
+  mockAudioCapture(runtime.window,video);
+  const BaseContext=runtime.window.AudioContext, gains=[];
+  runtime.window.AudioContext=class extends BaseContext {
+    constructor(){super();this.baseLatency=0;this.outputLatency=.04;}
+    createGain(){const node=super.createGain();gains.push(node);return node;}
+  };
+  const playback=createAudiblePlayback({window:runtime.window,video,selected:.3,onMetrics(){},onFailure:error=>assert.fail(error)});
+  t.after(async()=>{await playback.dispose();runtime.close();});
+  await playback.ready;
+  const gate=gains[0], ramps=[], ramp=gate.gain.linearRampToValueAtTime.bind(gate.gain);
+  gate.gain.linearRampToValueAtTime=(value,time)=>{ramps.push({value,time});ramp(value,time);};
+  let requested=playback.context.currentTime;
+  playback.setState({selected:.3,muted:false,paused:false});
+  assert.ok(ramps[0].time>=requested+.045,'opening fade must reach a future render batch');
+  requested=playback.context.currentTime;
+  const disposed=playback.dispose();
+  assert.equal(ramps[1].value,0);
+  assert.ok(ramps[1].time>=requested+.045,'retiring fade must reach a future render batch');
+  assert.ok(playback.context.sources.get(video).connections.size>0,'routing must survive until the fade renders');
+  await disposed;
 });

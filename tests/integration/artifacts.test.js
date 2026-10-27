@@ -53,7 +53,10 @@ test('twitch document-start bootstrap restores saved mute before controls mount'
 
   const {player,state}=addTwitchPlayer(runtime,{controls:false});
 
-  await waitForTimers(runtime);
+  const muteDeadline=performance.now()+2000;
+  while (!state.muted && performance.now()<muteDeadline) {
+    await waitForTimers(runtime,20);
+  }
   assert.equal(state.muted,true);
   assert.equal(state.volume,.35);
   assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'),null);

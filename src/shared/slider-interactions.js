@@ -23,7 +23,7 @@ export function createVolumeControlElements({
   const normalizationDescription = document.createElement('span');
   normalizationDescription.className = 'tm-normalization-description';
   normalizationDescription.id = `${overlay.id}-normalization-description`;
-  normalizationDescription.textContent = normalizationIcon.title;
+  normalizationDescription.textContent = normalizationIcon.dataset.tmTooltip;
   iconCell.append(normalizationIcon, normalizationDescription);
 
   const panelBg = document.createElement('div');
@@ -226,11 +226,11 @@ export function bindRangePointerInteraction({
     pointerActive = false;
     onFinish?.(event, wasDragging);
     if (finishLayout) {
-      finishLayout(!overlay.matches(':hover'));
+      finishLayout();
       return;
     }
     updateOpacity();
-    collapseIfIdle(!overlay.matches(':hover'));
+    collapseIfIdle();
   };
 
   const start = (event) => {

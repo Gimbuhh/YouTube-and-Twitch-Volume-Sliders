@@ -1,25 +1,18 @@
 import { createLufsMeter } from './lufs-meter.js';
 import { createProgrammeState } from './normalization-gain.js';
 import { createNativeGainGraph } from './normalization-graph.js';
-import { acquireMediaOutput } from './normalization-output.js';
+import { acquireMediaOutput, mediaTransitionTime, waitForMediaRender } from './normalization-output.js';
 
 // Native nodes process the player's own audio. Captured AudioData and worklets
 // are interchangeable analysis inputs, never playback renderers.
 export function createAudiblePlayback({ window, video, track, selected, onMetrics, onFailure }) {
   const output = acquireMediaOutput(window, video), { context } = output;
-  const gate = context.createGain(); gate.gain.value = 0; gate.connect(context.destination);
-  let graph;
-  try {
-    graph = createNativeGainGraph(context, { selected });
-    graph.output.connect(gate);
-  } catch (error) {
-    graph?.dispose(); gate.disconnect(); output.restore(); throw error;
-  }
+  let gate, graph, disposal;
   const programme = createProgrammeState(selected);
   let stopped = false, connected = false, node = null, reader = null, muted = true, paused = video.paused;
   let meterBackend = 'starting', rate = 0, samples = 0, hasFrame = false, lastReport = -Infinity;
 
-  function updateGain() { graph.setGain(programme.getProgrammeGain()); }
+  function updateGain() { graph?.setGain(programme.getProgrammeGain()); }
   function short(power) {
     if (stopped || hasFrame) return;
     programme.short(power); updateGain();
@@ -42,28 +35,43 @@ export function createAudiblePlayback({ window, video, track, selected, onMetric
     setState(next) {
       if (stopped) return;
       if (selected !== next.selected) {
-        selected = next.selected; programme.setSelected(selected); graph.setSelected(selected); updateGain();
+        selected = next.selected; programme.setSelected(selected); graph?.setSelected(selected); updateGain();
       }
       paused = next.paused;
       const silent = next.muted || paused || selected === 0;
-      if (muted !== silent) {
+      if (gate && muted !== silent) {
         muted = silent;
-        gate.gain.cancelScheduledValues(context.currentTime); gate.gain.setValueAtTime(0, context.currentTime);
-        if (!silent) gate.gain.linearRampToValueAtTime(1, context.currentTime + .005);
+        const at = silent ? context.currentTime : mediaTransitionTime(context);
+        gate.gain.cancelScheduledValues(context.currentTime); gate.gain.setValueAtTime(0, at);
+        if (!silent) gate.gain.linearRampToValueAtTime(1, at + .005);
       }
       output.setPaused(paused);
     },
     resume() { return output.resume(); },
     dispose() {
-      if (stopped) return;
-      stopped = true; gate.gain.value = 0; video.volume = 0;
+      if (stopped) return disposal;
+      stopped = true;
+      if (!gate) { return disposal = Promise.resolve(output.restore()); }
+      const at = mediaTransitionTime(context);
+      gate.gain.cancelScheduledValues(at);
+      gate.gain.setValueAtTime(gate.gain.value, at);
+      gate.gain.linearRampToValueAtTime(0, at + .005);
       reader?.cancel().catch(() => {});
-      output.restore();
       if (node) {
         node.port.onmessage = null; node.onprocessorerror = null;
         node.port.postMessage('stop'); node.disconnect(); node.port.close();
       }
-      graph.dispose(); gate.disconnect();
+      // The lookahead buffer retains the outgoing samples while this short
+      // fade renders. Disconnecting now would truncate that waveform and click.
+      const silenced = waitForMediaRender(window, context, at + .005 + 128 / context.sampleRate).then(() => {
+        video.volume = 0;
+        // Native element volume is delivered to the renderer asynchronously.
+        // Use the audio clock, which can advance in batches on Chromium.
+        return waitForMediaRender(window, context, context.currentTime + (context.baseLatency || 0) + 256 / context.sampleRate);
+      });
+      return disposal = output.restore(silenced).then(() => {
+        graph?.dispose(); gate.disconnect();
+      });
     }
   };
   function fail(error) { if (!stopped) { owned.dispose(); onFailure(error); } }
@@ -134,6 +142,9 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
   owned.ready = (async () => {
     await owned.resume();
     if (stopped) return;
+    gate = context.createGain(); gate.gain.value = 0; gate.connect(context.destination);
+    graph = createNativeGainGraph(context, { selected });
+    graph.output.connect(gate);
     output.connect(graph.input); connected = true;
     let native = false;
     if (window.MediaStreamTrackProcessor) {

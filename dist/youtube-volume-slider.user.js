@@ -653,6 +653,29 @@
 
   // src/shared/normalization-output.js
   var documents = /* @__PURE__ */ new WeakMap();
+  function mediaTransitionTime(context) {
+    return context.currentTime + Math.max(context.baseLatency || 0, context.outputLatency || 0, 128 / context.sampleRate);
+  }
+  function waitForMediaRender(window2, context, time) {
+    return new Promise((resolve) => {
+      const check = () => {
+        if (context.state !== "running" || context.currentTime >= time) resolve();
+        else window2.setTimeout(check, 2);
+      };
+      check();
+    });
+  }
+  function fadeInMediaOutput(window2, video) {
+    const document2 = documents.get(window2), route = document2?.routes.get(video), gate = route?.ordinary;
+    if (!gate || route.pending) return Promise.resolve();
+    const context = document2.context;
+    return waitForMediaRender(window2, context, context.currentTime + (context.baseLatency || 0) + 256 / context.sampleRate).then(() => {
+      if (route.ordinary !== gate || route.pending) return;
+      const at = mediaTransitionTime(context);
+      gate.gain.setValueAtTime(0, at);
+      gate.gain.linearRampToValueAtTime(1, at + 5e-3);
+    });
+  }
   function registry(window2) {
     let state = documents.get(window2);
     if (!state) {
@@ -705,6 +728,8 @@
     for (const route of document2.active) {
       if (!route.video.isConnected) {
         document2.sources.get(route.video)?.disconnect();
+        route.ordinary?.disconnect();
+        route.ordinary = null;
         document2.active.delete(route);
       }
     }
@@ -768,6 +793,22 @@
     }
     route.pending = true;
     let source = document2.sources.get(video);
+    function restoreRoute() {
+      route.pending = false;
+      route.ordinary?.disconnect();
+      route.ordinary = null;
+      if (source) {
+        source.disconnect();
+        if (video.isConnected) {
+          const gate = route.ordinary = document2.context.createGain();
+          gate.gain.value = 0;
+          gate.connect(document2.context.destination);
+          source.connect(gate);
+        }
+      }
+      activity(document2, route, video.paused || video.ended).catch(() => {
+      });
+    }
     return {
       context: document2.context,
       get source() {
@@ -778,7 +819,7 @@
         });
       },
       resume() {
-        return activity(document2, route, video.paused || video.ended);
+        return route.restoring ? route.restoring.then(() => activity(document2, route, video.paused || video.ended)) : activity(document2, route, video.paused || video.ended);
       },
       connect(input) {
         const context = document2.context;
@@ -796,17 +837,29 @@
           }
           document2.sources.set(video, source);
         }
+        route.ordinary?.disconnect();
+        route.ordinary = null;
         source.disconnect();
         source.connect(input);
       },
-      restore() {
-        route.pending = false;
-        if (source) {
-          source.disconnect();
-          if (video.isConnected) source.connect(document2.context.destination);
+      restore(after) {
+        if (after) {
+          route.pending = false;
+          route.restoring = after.then(() => {
+            route.restoring = null;
+            if (route.pending) {
+              source?.disconnect();
+            } else {
+              restoreRoute();
+            }
+          });
+          return route.restoring;
         }
-        activity(document2, route, video.paused || video.ended).catch(() => {
-        });
+        if (route.restoring) {
+          route.pending = false;
+          return route.restoring;
+        }
+        restoreRoute();
       }
     };
   }
@@ -814,24 +867,12 @@
   // src/shared/normalization-playback.js
   function createAudiblePlayback({ window: window2, video, track, selected, onMetrics, onFailure }) {
     const output = acquireMediaOutput(window2, video), { context } = output;
-    const gate = context.createGain();
-    gate.gain.value = 0;
-    gate.connect(context.destination);
-    let graph;
-    try {
-      graph = createNativeGainGraph(context, { selected });
-      graph.output.connect(gate);
-    } catch (error) {
-      graph?.dispose();
-      gate.disconnect();
-      output.restore();
-      throw error;
-    }
+    let gate, graph, disposal;
     const programme = createProgrammeState(selected);
     let stopped = false, connected = false, node = null, reader = null, muted = true, paused = video.paused;
     let meterBackend = "starting", rate = 0, samples = 0, hasFrame = false, lastReport = -Infinity;
     function updateGain() {
-      graph.setGain(programme.getProgrammeGain());
+      graph?.setGain(programme.getProgrammeGain());
     }
     function short(power) {
       if (stopped || hasFrame) return;
@@ -870,16 +911,17 @@
         if (selected !== next.selected) {
           selected = next.selected;
           programme.setSelected(selected);
-          graph.setSelected(selected);
+          graph?.setSelected(selected);
           updateGain();
         }
         paused = next.paused;
         const silent = next.muted || paused || selected === 0;
-        if (muted !== silent) {
+        if (gate && muted !== silent) {
           muted = silent;
+          const at = silent ? context.currentTime : mediaTransitionTime(context);
           gate.gain.cancelScheduledValues(context.currentTime);
-          gate.gain.setValueAtTime(0, context.currentTime);
-          if (!silent) gate.gain.linearRampToValueAtTime(1, context.currentTime + 5e-3);
+          gate.gain.setValueAtTime(0, at);
+          if (!silent) gate.gain.linearRampToValueAtTime(1, at + 5e-3);
         }
         output.setPaused(paused);
       },
@@ -887,13 +929,17 @@
         return output.resume();
       },
       dispose() {
-        if (stopped) return;
+        if (stopped) return disposal;
         stopped = true;
-        gate.gain.value = 0;
-        video.volume = 0;
+        if (!gate) {
+          return disposal = Promise.resolve(output.restore());
+        }
+        const at = mediaTransitionTime(context);
+        gate.gain.cancelScheduledValues(at);
+        gate.gain.setValueAtTime(gate.gain.value, at);
+        gate.gain.linearRampToValueAtTime(0, at + 5e-3);
         reader?.cancel().catch(() => {
         });
-        output.restore();
         if (node) {
           node.port.onmessage = null;
           node.onprocessorerror = null;
@@ -901,8 +947,14 @@
           node.disconnect();
           node.port.close();
         }
-        graph.dispose();
-        gate.disconnect();
+        const silenced = waitForMediaRender(window2, context, at + 5e-3 + 128 / context.sampleRate).then(() => {
+          video.volume = 0;
+          return waitForMediaRender(window2, context, context.currentTime + (context.baseLatency || 0) + 256 / context.sampleRate);
+        });
+        return disposal = output.restore(silenced).then(() => {
+          graph?.dispose();
+          gate.disconnect();
+        });
       }
     };
     function fail(error) {
@@ -991,6 +1043,11 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
     owned.ready = (async () => {
       await owned.resume();
       if (stopped) return;
+      gate = context.createGain();
+      gate.gain.value = 0;
+      gate.connect(context.destination);
+      graph = createNativeGainGraph(context, { selected });
+      graph.output.connect(gate);
       output.connect(graph.input);
       connected = true;
       let native = false;
@@ -1010,6 +1067,7 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
   function createVolumeNormalizer({ window: window2, getVolume, setVolume, isMuted, onStatusChanged = () => {
   } }) {
     installMediaOutputGuard(window2);
+    const retiring = /* @__PURE__ */ new WeakMap();
     let enabled = false, sourceChanging = false, session = null, status = "Off", lastUiAt = -Infinity, lastDiagnostic = null;
     const now = () => window2.performance.now();
     function report(next, immediate = false) {
@@ -1054,8 +1112,9 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
       }
     }
     function silence(owned) {
+      if (owned.releasing) return;
       const volume = owned.playback?.connected ? 100 : 0;
-      if (owned.video.volume !== volume / 100 || getVolume(owned.video) !== volume) nativeWrite(owned, volume);
+      if (getVolume(owned.video) !== volume || volume === 0 && owned.video.volume !== 0) nativeWrite(owned, volume);
     }
     function sync(owned) {
       if (!owned.playback) return;
@@ -1063,16 +1122,32 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
     }
     function release(owned) {
       owned.generation++;
-      owned.playback?.dispose();
+      const finishing = owned.playback?.dispose() || owned.releasing;
       owned.playback = null;
-      if (owned.stream) {
-        for (const track of owned.stream.getTracks()) track.stop();
-        owned.stream = null;
+      const stream = owned.stream;
+      owned.stream = null;
+      const stopTracks = () => {
+        if (stream) {
+          for (const track of stream.getTracks()) track.stop();
+        }
+      };
+      if (finishing) {
+        const releasing = Promise.resolve(finishing).then(() => {
+          stopTracks();
+          if (owned.releasing === releasing) {
+            owned.releasing = null;
+            if (session === owned) tick();
+          }
+        });
+        owned.releasing = releasing;
+      } else {
+        stopTracks();
       }
       owned.track = null;
       owned.connecting = false;
       owned.metrics = null;
       owned.trackMutedAt = 0;
+      return owned.releasing || Promise.resolve();
     }
     function reset(owned) {
       release(owned);
@@ -1085,16 +1160,20 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
     }
     function unavailable(owned, error) {
       if (session !== owned) return;
-      release(owned);
+      const released = release(owned);
       owned.blocked = true;
       owned.error = String(error?.message || error || "Audio unavailable");
       owned.sourceConflict = error?.name === "AudioSourceConflict";
       owned.retryAt = now() + (owned.retryDelay || 1e3);
       owned.retryDelay = Math.min(3e4, (owned.retryDelay || 1e3) * 2);
-      try {
-        nativeWrite(owned, owned.preferred);
-      } catch {
-      }
+      released.then(() => {
+        if (session !== owned || !owned.blocked) return;
+        try {
+          nativeWrite(owned, owned.preferred);
+        } catch {
+        }
+        fadeInMediaOutput(window2, owned.video);
+      });
       report(owned.sourceConflict ? "Another audio processor is active \u2014 normal volume" : "Audio unavailable \u2014 normal volume");
     }
     async function connect(owned) {
@@ -1212,13 +1291,18 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
         for (const type of ["play", "playing", "loadedmetadata", "seeked", "pause", "ended", "volumechange"]) owned2.video.removeEventListener(type, owned2.update);
         window2.document.removeEventListener("pointerdown", owned2.gesture, true);
         window2.document.removeEventListener("keydown", owned2.gesture, true);
-        release(owned2);
-        if (owned2.video.isConnected) {
-          try {
-            nativeWrite(owned2, owned2.preferred);
-          } catch {
+        retiring.set(owned2.video, owned2);
+        release(owned2).then(() => {
+          if (retiring.get(owned2.video) !== owned2) return;
+          if (owned2.video.isConnected && session?.video !== owned2.video) {
+            try {
+              nativeWrite(owned2, owned2.preferred, owned2.restoreOptions);
+            } catch {
+            }
+            fadeInMediaOutput(window2, owned2.video);
           }
-        }
+          retiring.delete(owned2.video);
+        });
         delete window2.document.documentElement.dataset.tmAudioNormalization;
         lastDiagnostic = null;
       }
@@ -1226,6 +1310,7 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
         report(enabled ? "Waiting for playback" : "Off");
         return;
       }
+      retiring.delete(video);
       const owned = session = { video, preferred: clampVolume(preferredVolume ?? getVolume(video)), generation: 0, started: now(), changingAt: now(), lastFrame: 0 };
       owned.reset = (event) => {
         if (event?.type !== "seeking") sourceChanging = false;
@@ -1298,12 +1383,13 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
 Output ${output}% \xB7 Selected ${session.preferred}%`;
       },
       getPreferredVolume(video, raw) {
-        return session?.video === video ? session.preferred : raw;
+        return (session?.video === video ? session : retiring.get(video))?.preferred ?? raw;
       },
       acceptNativeVolume(video) {
-        const owned = session?.video === video ? session : null;
+        const owned = session?.video === video ? session : retiring.get(video);
         if (!owned || owned.writing) return;
         owned.preferred = clampVolume(getVolume(video));
+        if (retiring.get(video) === owned) return;
         if (!owned.blocked) {
           silence(owned);
           sync(owned);
@@ -1311,12 +1397,16 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
         report(status, true);
       },
       setPreferredVolume(video, value, options) {
-        const owned = session?.video === video ? session : null;
+        const owned = session?.video === video ? session : retiring.get(video);
         if (!owned) {
           setVolume(video, value, options);
           return;
         }
         owned.preferred = clampVolume(value);
+        if (retiring.get(video) === owned) {
+          owned.restoreOptions = options;
+          return;
+        }
         if (owned.blocked) nativeWrite(owned, owned.preferred, options);
         else {
           nativeWrite(owned, owned.playback?.connected ? 100 : 0, options);
@@ -1328,11 +1418,12 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
   }
 
   // src/shared/native-volume-input.js
-  function bindNativeVolumeInput({ window: window2, video, player, selector: selector2, normalizer, onChange }) {
+  function bindNativeVolumeInput({ window: window2, video, player, selector: selector2, excludeSelector, normalizer, onChange }) {
     let active = true;
     const types = ["pointerdown", "pointermove", "input", "change", "wheel", "keydown"];
     const onInput = (event) => {
       if (!event.target?.closest?.(selector2) || !player.contains(event.target)) return;
+      if (excludeSelector && event.target.closest(excludeSelector)) return;
       if (event.type === "pointermove" && !event.buttons) return;
       if (event.type === "keydown" && !["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) return;
       window2.queueMicrotask(() => {
@@ -1392,53 +1483,57 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     };
     player.addEventListener("pointerdown", clear, true);
     player.addEventListener("keydown", onKey, true);
+    function show(value, muted = false, label) {
+      const percent = Math.round(clampVolume(value));
+      if (!popup) {
+        popup = document2.createElement("div");
+        popup.dataset.tmVolumeFeedback = "true";
+        popup.setAttribute("role", "status");
+        popup.setAttribute("aria-live", "polite");
+        popup.setAttribute("aria-atomic", "true");
+        Object.assign(popup.style, {
+          all: "initial",
+          position: "absolute",
+          top: "10%",
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          boxSizing: "border-box",
+          maxWidth: "calc(100% - 24px)",
+          padding: "8px 12px",
+          borderRadius: "6px",
+          background: "rgba(0,0,0,.7)",
+          color: "#fff",
+          font: "600 20px/1.2 Arial,Helvetica,sans-serif",
+          fontVariantNumeric: "tabular-nums",
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          zIndex: "20"
+        });
+        const icon = document2.createElementNS("http://www.w3.org/2000/svg", "svg");
+        icon.setAttribute("viewBox", "0 0 24 24");
+        icon.setAttribute("aria-hidden", "true");
+        icon.setAttribute("focusable", "false");
+        Object.assign(icon.style, { display: "block", flex: "none", width: "24px", height: "24px", color: "inherit" });
+        popup.append(icon, document2.createTextNode(""));
+        player.appendChild(popup);
+      }
+      const mode = getSpeakerIconMode(percent, muted);
+      if (popup.dataset.volumeIcon !== mode) {
+        popup.firstElementChild.replaceChildren(createSpeakerIconGroup(document2, mode));
+        popup.dataset.volumeIcon = mode;
+      }
+      popup.setAttribute("aria-label", label ? `${label}, volume ${percent}%` : `${muted ? "Muted, volume" : "Volume"} ${percent}%`);
+      popup.lastChild.nodeValue = label || `${percent}%`;
+      window2.clearTimeout(timer);
+      timer = window2.setTimeout(clear, 500);
+    }
     return {
-      show(value, muted = false) {
-        const percent = Math.round(clampVolume(value));
-        if (!popup) {
-          popup = document2.createElement("div");
-          popup.dataset.tmVolumeFeedback = "true";
-          popup.setAttribute("role", "status");
-          popup.setAttribute("aria-live", "polite");
-          popup.setAttribute("aria-atomic", "true");
-          Object.assign(popup.style, {
-            all: "initial",
-            position: "absolute",
-            top: "10%",
-            left: "50%",
-            transform: "translateX(-50%)",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            boxSizing: "border-box",
-            maxWidth: "calc(100% - 24px)",
-            padding: "8px 12px",
-            borderRadius: "6px",
-            background: "rgba(0,0,0,.7)",
-            color: "#fff",
-            font: "600 20px/1.2 Arial,Helvetica,sans-serif",
-            fontVariantNumeric: "tabular-nums",
-            whiteSpace: "nowrap",
-            pointerEvents: "none",
-            zIndex: "20"
-          });
-          const icon = document2.createElementNS("http://www.w3.org/2000/svg", "svg");
-          icon.setAttribute("viewBox", "0 0 24 24");
-          icon.setAttribute("aria-hidden", "true");
-          icon.setAttribute("focusable", "false");
-          Object.assign(icon.style, { display: "block", flex: "none", width: "24px", height: "24px", color: "inherit" });
-          popup.append(icon, document2.createTextNode(""));
-          player.appendChild(popup);
-        }
-        const mode = getSpeakerIconMode(percent, muted);
-        if (popup.dataset.volumeIcon !== mode) {
-          popup.firstElementChild.replaceChildren(createSpeakerIconGroup(document2, mode));
-          popup.dataset.volumeIcon = mode;
-        }
-        popup.setAttribute("aria-label", `${muted ? "Muted, volume" : "Volume"} ${percent}%`);
-        popup.lastChild.nodeValue = `${percent}%`;
-        window2.clearTimeout(timer);
-        timer = window2.setTimeout(clear, 500);
+      show,
+      showMute(value, muted) {
+        show(value, muted, muted ? "Muted" : "Unmuted");
       },
       clear,
       dispose() {
@@ -1595,7 +1690,6 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       isAlwaysExpandedEnabled,
       isSliderOnVideo,
       updateOverlayOpacity,
-      finishExpandedHoldIfDue,
       getVolumeStep,
       accentLight: VOLUME_ACCENT_LIGHT,
       accentDark: VOLUME_ACCENT_DARK,
@@ -1726,13 +1820,30 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       updateOverlayOpacity(overlay);
     }
     function shouldKeepOverlayExpanded(overlay) {
-      return isAlwaysExpandedEnabled() || overlay.matches(":hover") || overlay.contains(document2.activeElement) || overlay.dataset.tmDragging === "true";
+      return isAlwaysExpandedEnabled() || overlay.matches(":hover") || overlay.contains(document2.activeElement) && document2.activeElement.matches(":focus-visible") || overlay.dataset.tmDragging === "true";
     }
     function clearExpandedHoldTimer(overlay) {
       if (overlay._expandedHoldTimer) {
         clearTimeout(overlay._expandedHoldTimer);
         overlay._expandedHoldTimer = 0;
       }
+    }
+    function finishExpandedHoldIfDue(overlay) {
+      if (!overlay) return;
+      if (!overlay.isConnected) {
+        clearExpandedHold(overlay);
+        return;
+      }
+      if (shouldKeepOverlayExpanded(overlay)) return;
+      if (Date.now() < (overlay._expandedHoldUntil || 0)) {
+        scheduleExpandedHoldRelease(overlay);
+        return;
+      }
+      clearExpandedHold(overlay);
+      setOverlayExpanded(overlay, false);
+    }
+    function collapseOverlayIfIdle(overlay) {
+      window2.setTimeout(() => finishExpandedHoldIfDue(overlay), 0);
     }
     function clearExpandedHold(overlay) {
       overlay.dataset.tmKeepExpanded = "false";
@@ -1916,7 +2027,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       appendSpeakerIcon("tm-volume-speaker-high", "high", "translate(8 8)");
       return svg;
     }
-    return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks };
+    return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, collapseOverlayIfIdle, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks };
   }
 
   // src/shared/options-ui.js
@@ -2529,6 +2640,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     ensureOverlay
   }) {
     const sessionValues = /* @__PURE__ */ new Map();
+    const pendingSizeFrames = /* @__PURE__ */ new WeakSet();
     const read = (key) => {
       const cached = sessionValues.get(key);
       if (cached?.unsaved) {
@@ -2669,7 +2781,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       if (!overlay) return;
       clearExpandedHold(overlay);
       if (enabled) setOverlayExpanded(overlay, true);
-      else collapseOverlayIfIdle(overlay, true);
+      else collapseOverlayIfIdle(overlay);
     }
     function getSavedOverlayOpacityPercent(focused) {
       const fallback = focused ? defaults.activeOpacity : defaults.idleOpacity;
@@ -2702,9 +2814,14 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       const scale = isSliderOnVideo() ? getSavedOverlaySizePercent() / 100 : 1;
       overlay.style.setProperty("--tm-overlay-scale", String(scale));
       syncOverlayTicks(overlay);
-      overlay.ownerDocument?.defaultView?.requestAnimationFrame?.(() => {
-        syncOverlayTicks(overlay);
-      });
+      const view = overlay.ownerDocument?.defaultView;
+      if (view?.requestAnimationFrame && !pendingSizeFrames.has(overlay)) {
+        pendingSizeFrames.add(overlay);
+        view.requestAnimationFrame(() => {
+          pendingSizeFrames.delete(overlay);
+          if (overlay.isConnected) syncOverlayTicks(overlay);
+        });
+      }
     }
     function syncOverlayTicks(overlay) {
       overlay?.querySelector?.(".tm-slider-ticks")?._tmSliderTicksSync?.();
@@ -2742,7 +2859,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       if (!overlay) return;
       delete overlay.dataset.tmOptionsPreview;
       if (isAlwaysExpandedEnabled()) setOverlayExpanded(overlay, true, true);
-      else collapseOverlayIfIdle(overlay, true);
+      else collapseOverlayIfIdle(overlay);
       updateOverlayOpacity(overlay);
     }
     function setSavedSliderThicknessPercent(value) {
@@ -2780,7 +2897,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       restoreOverlayPreview(overlay);
     }
     function isOverlayInteractionFocused(overlay) {
-      return overlay?.dataset.tmOptionsPreview === "thickness" || overlay?.dataset.tmOptionsPreview === "opacity-active" || overlay?.dataset.tmDragging === "true" || overlay?.dataset.tmHovering === "true" || overlay?.matches?.(":hover") || overlay?.contains?.(document2.activeElement);
+      return overlay?.dataset.tmOptionsPreview === "thickness" || overlay?.dataset.tmOptionsPreview === "opacity-active" || overlay?.dataset.tmDragging === "true" || overlay?.dataset.tmHovering === "true" || overlay?.matches?.(":hover") || overlay?.contains?.(document2.activeElement) && document2.activeElement.matches(":focus-visible");
     }
     function setVolumeSliderMode(mode) {
       const normalizedMode = normalizeVolumeSliderMode(mode) || "on";
@@ -3998,7 +4115,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
     const normalizationDescription = document2.createElement("span");
     normalizationDescription.className = "tm-normalization-description";
     normalizationDescription.id = `${overlay.id}-normalization-description`;
-    normalizationDescription.textContent = normalizationIcon.title;
+    normalizationDescription.textContent = normalizationIcon.dataset.tmTooltip;
     iconCell.append(normalizationIcon, normalizationDescription);
     const panelBg = document2.createElement("div");
     panelBg.className = "tm-volume-panel-bg";
@@ -4176,11 +4293,11 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       pointerActive = false;
       onFinish?.(event, wasDragging);
       if (finishLayout) {
-        finishLayout(!overlay.matches(":hover"));
+        finishLayout();
         return;
       }
       updateOpacity();
-      collapseIfIdle(!overlay.matches(":hover"));
+      collapseIfIdle();
     };
     const start = (event) => {
       pointerStartX = event.clientX;
@@ -4328,7 +4445,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
       },
       clearExpandedHold: (overlay) => clearExpandedHold(overlay),
       setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
-      collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force),
+      collapseOverlayIfIdle: (overlay) => collapseOverlayIfIdle(overlay),
       ensureOverlay: () => {
         attachSliderIfPossible();
         return document.getElementById(OVERLAY_ID);
@@ -4467,13 +4584,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         panelDropShadow: VOLUME_PANEL_DROP_SHADOW
       });
     }
-    const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
+    const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, collapseOverlayIfIdle, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
       document,
       window,
       isAlwaysExpandedEnabled,
       isSliderOnVideo,
       updateOverlayOpacity,
-      finishExpandedHoldIfDue,
       getVolumeStep,
       accentLight: VOLUME_ACCENT_LIGHT,
       accentDark: VOLUME_ACCENT_DARK,
@@ -4484,42 +4600,6 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
     function areYouTubeControlsHidden() {
       const player = getPlayerContainer();
       return !!player?.classList?.contains("ytp-autohide") || !!player?.classList?.contains("ytp-hide-controls");
-    }
-    function finishExpandedHoldIfDue(overlay) {
-      if (!overlay?.isConnected) {
-        clearExpandedHold(overlay);
-        return;
-      }
-      if (isAlwaysExpandedEnabled() || shouldKeepOverlayExpanded(overlay)) {
-        return;
-      }
-      if (Date.now() < (overlay._expandedHoldUntil || 0)) {
-        scheduleExpandedHoldRelease(overlay);
-        return;
-      }
-      clearExpandedHold(overlay);
-      if (areYouTubeControlsHidden()) {
-        setOverlayExpanded(overlay, false);
-        return;
-      }
-      collapseOverlayIfIdle(overlay, true);
-    }
-    function collapseOverlayIfIdle(overlay, force = false) {
-      window.setTimeout(() => {
-        if (isAlwaysExpandedEnabled()) {
-          setOverlayExpanded(overlay, true);
-          return;
-        }
-        if (overlay.dataset.tmKeepExpanded === "true" && !areYouTubeControlsHidden()) {
-          return;
-        }
-        if (overlay.dataset.tmKeepExpanded === "true") {
-          clearExpandedHold(overlay);
-        }
-        if (force || !shouldKeepOverlayExpanded(overlay)) {
-          setOverlayExpanded(overlay, false);
-        }
-      }, 0);
     }
     function getYouTubePlayer() {
       if (cachedYtPlayer && cachedYtPlayer.isConnected && typeof cachedYtPlayer.getVolume === "function" && typeof cachedYtPlayer.setVolume === "function") {
@@ -4792,6 +4872,12 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       if (!player) return;
       clearOptionsCloseControlsHide();
       player.classList.add("tm-volume-options-controls-hold");
+      if (typeof player.wakeUpControls === "function") {
+        try {
+          player.wakeUpControls();
+        } catch (e) {
+        }
+      }
       if (typeof player.showControls === "function") {
         try {
           player.showControls();
@@ -4918,7 +5004,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         keepYouTubeControlsVisible();
       }
       const overlay = document.getElementById(OVERLAY_ID);
-      if (overlay?.dataset?.tmKeepExpanded === "true" && areYouTubeControlsHidden()) {
+      if (overlay?.dataset?.tmKeepExpanded === "true" && areYouTubeControlsHidden() && !shouldKeepOverlayExpanded(overlay)) {
         clearExpandedHold(overlay);
         setOverlayExpanded(overlay, false);
       }
@@ -4963,9 +5049,8 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
       });
       overlay.addEventListener("mouseleave", () => {
         overlay.dataset.tmHovering = "false";
-        overlay.dataset.tmDragging = "false";
         updateOverlayOpacity(overlay);
-        collapseOverlayIfIdle(overlay, true);
+        collapseOverlayIfIdle(overlay);
       });
       overlay.addEventListener("focusin", () => {
         setOverlayExpanded(overlay, true);
@@ -5037,7 +5122,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         applyValue: applySliderValue,
         setExpanded: () => setOverlayExpanded(overlay, true),
         updateOpacity: () => updateOverlayOpacity(overlay),
-        collapseIfIdle: (force) => collapseOverlayIfIdle(overlay, force)
+        collapseIfIdle: () => collapseOverlayIfIdle(overlay)
       });
       cleanupRegistry.add(() => rangePointer.dispose());
       slider.addEventListener("input", () => {
@@ -5061,18 +5146,28 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         applySliderValue(nextValue, { markInteraction });
       };
       slider.addEventListener("keydown", applyKeyboardVolumeStep);
-      const applyPlayerKeyboardVolumeStep = (event) => {
+      const applyPlayerKeyboardVolumeInput = (event) => {
         if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        const muteKey = event.key.toLowerCase() === "m";
+        if (!muteKey && event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
         if (isOptionsPopupOpen()) return;
-        if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+        if (event.target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+        if (muteKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleMute(video);
+          saveMute(isMuted(video));
+          setSliderFromPlayer(slider, label, video);
+          keyboardFeedback.showMute(getUnderlyingVolume(video), isMuted(video));
+          return;
+        }
         if (!player.contains(event.target) && !player.contains(document.activeElement)) return;
         slider.value = String(getUnderlyingVolume(video));
         applyKeyboardVolumeStep(event, { markInteraction: false });
         keyboardFeedback.show(Number(slider.value), isMuted(video));
       };
-      document.addEventListener("keydown", applyPlayerKeyboardVolumeStep, true);
-      cleanupRegistry.add(() => document.removeEventListener("keydown", applyPlayerKeyboardVolumeStep, true));
+      document.addEventListener("keydown", applyPlayerKeyboardVolumeInput, true);
+      cleanupRegistry.add(() => document.removeEventListener("keydown", applyPlayerKeyboardVolumeInput, true));
       const onVideoVolumeChange = () => {
         if (!document.getElementById(OVERLAY_ID)) return;
         const muted = isMuted(video);
@@ -5092,7 +5187,7 @@ html.tm-yt-volume-native-replacement-active .ytp-volume-area {
         if (!muted) scheduleSaveVolume(playerVolume);
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
-      cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: ".ytp-volume-area", normalizer, onChange: onVideoVolumeChange }));
+      cleanupRegistry.add(bindNativeVolumeInput({ window, video, player, selector: ".ytp-volume-area", excludeSelector: ".ytp-mute-button", normalizer, onChange: onVideoVolumeChange }));
       updateOverlayAppearance(overlay);
       if (isAlwaysExpandedEnabled()) {
         setOverlayExpanded(overlay, true, true);

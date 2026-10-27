@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
+import { mockAudioCapture } from '../helpers/audio.js';
 
 const platforms = [
   { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', muteKey:'tm-yt-muted', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', stepKey:'tm-yt-volume-slider-step', appearanceKey:'tm-yt-volume-slider-appearance' },
@@ -817,9 +818,91 @@ test('Twitch: active player video switch rebinds the custom slider',async()=>{
   runtime.close();
 });
 
-test('YouTube: Options lets the native player resume hidden controls before changing their classes',async()=>{
+for (const normalize of [false, true]) test(`Twitch: rapid replacements converge without later mutations (normalization ${normalize})`, async t => {
+  const {runtime, fixture}=await loadPlatform(platforms[1], (current, fixture) => {
+    current.window.localStorage.setItem('tm-twitch-volume','40');
+    if (normalize) {
+      mockAudioCapture(current.window, fixture.video);
+      current.window.localStorage.setItem('tm-twitch-volume-slider-normalization','true');
+    }
+  });
+  t.after(()=>runtime.close());
+  let current=fixture.video;
+  for (let index=0;index<2;index++) {
+    const next=runtime.document.createElement('video');
+    if (normalize) mockAudioCapture(runtime.window,next);
+    current.replaceWith(next); current=next;
+    await waitForTimers(runtime,100);
+  }
+  await waitForTimers(runtime,1150);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay')._tmVolumeVideo,current);
+  assert.equal(runtime.document.querySelectorAll('#tm-volume-slider-overlay').length,1);
+});
+
+test('Twitch: unrelated chat changes do not read settings or schedule slider layout', async t => {
+  const {runtime}=await loadPlatform(platforms[1], current=>{
+    current.window.localStorage.setItem('tm-twitch-volume-slider-mode','replace-native');
+  });
+  t.after(()=>runtime.close());
+  const chat=runtime.document.createElement('div'); runtime.document.body.append(chat);
+  await waitForTimers(runtime,60);
+  let reads=0,frames=0;
+  const storagePrototype=runtime.window.Storage.prototype, get=storagePrototype.getItem;
+  const frame=runtime.window.requestAnimationFrame.bind(runtime.window);
+  storagePrototype.getItem=function(...args){reads++;return get.apply(this,args);};
+  runtime.window.requestAnimationFrame=(...args)=>{frames++;return frame(...args);};
+  for(let index=0;index<12;index++) {
+    const message=runtime.document.createElement('span');message.textContent=String(index);chat.append(message);
+    await waitForTimers(runtime,5);
+  }
+  assert.equal(reads,0);
+  assert.equal(frames,0);
+});
+
+for (const normalize of [false,true]) test(`Twitch: failed setter keeps native read ownership and recovers (normalization ${normalize})`, async t=>{
+  const {runtime,fixture}=await loadPlatform(platforms[1], (current, fixture)=>{
+    current.window.localStorage.setItem('tm-twitch-volume','50');
+    if(normalize){mockAudioCapture(current.window,fixture.video);current.window.localStorage.setItem('tm-twitch-volume-slider-normalization','true');}
+  });
+  t.after(()=>runtime.close());
+  await waitForTimers(runtime,100);
+  const api=fixture.player._tmPlayerApi, setter=api.setVolume;
+  api.setVolume=()=>{throw new Error('temporary API failure');};
+  let slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.value='60';slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  if(normalize){
+    runtime.document.getElementById('tm-volume-options-button').click();
+    runtime.document.getElementById('tm-volume-options-normalization').click();
+  }
+  await waitForTimers(runtime,150);
+  assert.equal(fixture.video.volume,.6);
+  assert.equal(slider.value,'60');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'60%');
+  api.setVolume=value=>{setter(value);fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));};
+  slider.value='70';slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+  assert.equal(fixture.state.volume,.7);
+  assert.equal(slider.value,'70');
+});
+
+test('Twitch: failed mute setter reads native state until a successful API write', async t=>{
+  const {runtime,fixture}=await loadPlatform(platforms[1]);t.after(()=>runtime.close());
+  const api=fixture.player._tmPlayerApi, setter=api.setMuted;
+  api.setMuted=()=>{throw new Error('temporary mute failure');};
+  const icon=runtime.document.querySelector('.tm-volume-icon-cell');icon.click();
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+  assert.equal(fixture.video.muted,true);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'Muted');
+  api.setMuted=setter;icon.click();
+  assert.equal(fixture.video.muted,false);
+  assert.equal(fixture.state.muted,false);
+});
+
+test('YouTube: Options wakes native idle updates before changing hidden controls',async()=>{
   const {runtime,fixture}=await loadPlatform(platforms[0]);
   let resumes=0;
+  let wakes=0;
+  fixture.player.wakeUpControls=()=>{ wakes++; };
   fixture.player.showControls=()=>{
     if (fixture.player.classList.contains('ytp-autohide') || fixture.player.classList.contains('ytp-hide-controls')) resumes++;
     fixture.player.classList.remove('ytp-autohide','ytp-hide-controls');
@@ -827,9 +910,11 @@ test('YouTube: Options lets the native player resume hidden controls before chan
   fixture.player.classList.add('ytp-autohide');
   runtime.document.getElementById('tm-volume-options-button').click();
   assert.equal(resumes,1,'native visibility and time updates resume when Options opens');
+  assert.equal(wakes,1,'native idle state wakes with the menu');
   fixture.player.classList.add('ytp-hide-controls');
   await waitForTimers(runtime,20);
   assert.equal(resumes,2,'a later native autohide goes through the same player API');
+  assert.equal(wakes,2,'later native idle transitions wake progress updates too');
   assert.ok(fixture.player.classList.contains('tm-volume-options-controls-hold'));
   runtime.close();
 });

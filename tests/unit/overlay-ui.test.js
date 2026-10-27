@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { createOverlayUi } from '../../src/shared/overlay-ui.js';
 import { createVolumeSettings } from '../../src/shared/settings.js';
 
-test('expansion preserves size and opacity with one immediate and one deferred tick alignment', () => {
+test('expansion preserves immediate alignment and coalesces deferred alignment to the latest layout', () => {
   const dom = new JSDOM('<div id="overlay"><div class="tm-slider-ticks"></div></div>');
   try {
     const { window } = dom;
@@ -33,11 +33,11 @@ test('expansion preserves size and opacity with one immediate and one deferred t
     assert.equal(overlay.style.opacity, '0.45');
     assert.equal(overlay.style.getPropertyValue('--tm-overlay-scale'), '1.5');
     assert.equal(syncs, 100);
-    assert.equal(frames.length, 100);
+    assert.equal(frames.length, 1, 'one pending frame serves the latest layout');
     frames.forEach(callback => callback());
-    assert.equal(syncs, 200);
+    assert.equal(syncs, 101);
     ui.setOverlayExpanded(overlay, false);
-    assert.equal(syncs, 200, 'unchanged expansion does no layout work');
+    assert.equal(syncs, 101, 'unchanged expansion does no layout work');
   } finally {
     dom.window.close();
   }

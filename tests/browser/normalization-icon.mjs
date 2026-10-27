@@ -255,6 +255,9 @@ try {
       await page.locator('#movie_player, .video-player').press('ArrowUp');
       assert.equal(await page.locator('[data-tm-volume-feedback]').textContent(), '35%', `${platform}: shared feedback also works with normalization off`);
       assert.equal(await slider.inputValue(), '35');
+      // Selection changes immediately; retiring audio restores native volume
+      // only after its renderer-clock fade has completed.
+      await page.waitForFunction(() => Math.round(document.querySelector('video').volume * 100) === 35, null, { timeout: 1000 });
       assert.equal(await page.locator('video').evaluate(video => Math.round(video.volume * 100)), 35);
       await page.locator('#movie_player, .video-player').press('ArrowDown');
       assert.equal(await page.locator('[data-tm-volume-feedback]').textContent(), '30%');
