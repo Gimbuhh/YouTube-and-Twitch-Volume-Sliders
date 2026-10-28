@@ -17,6 +17,22 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 height: 24px;
                 width: 24px;
             }
+            #{{optionsButtonId}} .tm-options-handle {
+                transform: translateX(0);
+                transition: transform 180ms cubic-bezier(0.2, 0, 0.2, 1);
+            }
+            #{{optionsButtonId}}[aria-expanded="true"] .tm-options-handle-top {
+                transform: translateX(-8px);
+            }
+            #{{optionsButtonId}}[aria-expanded="true"] .tm-options-handle-middle {
+                transform: translateX(8px);
+            }
+            #{{optionsButtonId}}[aria-expanded="true"] .tm-options-handle-bottom {
+                transform: translateX(-6px);
+            }
+            @media (prefers-reduced-motion: reduce) {
+                #{{optionsButtonId}} .tm-options-handle { transition: none; }
+            }
             #{{optionsPopupId}} {
                 background: rgba(18, 18, 18, 0.97);
                 border: 1px solid rgba(255, 255, 255, 0.12);
@@ -29,12 +45,13 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 font-size: 14px;
                 line-height: 1;
                 max-height: 70vh;
-                max-width: 320px;
+                max-width: calc(100vw - 16px);
                 min-width: 288px;
+                outline: none;
                 overflow: hidden;
                 position: absolute;
                 user-select: none;
-                width: 288px;
+                width: 320px;
                 z-index: 10001;
             }
             #{{optionsPopupId}},
@@ -58,18 +75,124 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
             #{{optionsPopupId}}[hidden] {
                 display: none;
             }
+            #{{optionsPopupId}} [hidden] {
+                display: none !important;
+            }
+            #{{optionsPopupId}} .tm-volume-options-mode {
+                align-items: center;
+                display: flex;
+                flex-shrink: 0;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 8px 16px 10px;
+                line-height: 20px;
+            }
+            #{{optionsPopupId}} select {
+                -webkit-appearance: none;
+                appearance: none;
+                background-color: rgba(255, 255, 255, 0.08);
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+                background-position: right 12px center;
+                background-repeat: no-repeat;
+                background-size: 12px 12px;
+                border: 0;
+                border-radius: 6px;
+                color: #fff;
+                color-scheme: dark;
+                cursor: pointer;
+                font: inherit;
+                line-height: 20px;
+                outline: none;
+                padding: 7px 32px 7px 10px;
+                width: 176px;
+            }
+            #{{optionsPopupId}} select:open {
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 7.5 3-3 3 3' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            }
+            #{{optionsPopupId}} select:focus-visible {
+                background-color: rgba(255, 255, 255, 0.16);
+            }
+            #{{optionsPopupId}} select option {
+                background-color: #242424;
+                color: #fff;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tabs {
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                display: grid;
+                flex-shrink: 0;
+                grid-template-columns: 1fr 1fr;
+                padding: 0 16px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab {
+                background: transparent;
+                border: 0;
+                color: rgba(255, 255, 255, 0.65);
+                cursor: pointer;
+                display: grid;
+                padding: 11px 0;
+                place-items: center;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab[aria-selected="true"] {
+                box-shadow: inset 0 -2px {{accentDark}};
+                color: #fff;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab:hover {
+                color: #fff;
+            }
+            #{{optionsPopupId}} :is(button, input):focus-visible {
+                outline: 2px solid {{accentDark}};
+                outline-offset: -2px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-normalization-feedback {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.09);
+                border-radius: 6px;
+                margin-top: 6px;
+                padding: 8px 10px;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status {
+                color: rgba(255, 255, 255, 0.9);
+                margin: 0;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status::before {
+                background: rgba(255, 255, 255, 0.45);
+                border-radius: 50%;
+                content: '';
+                display: inline-block;
+                height: 6px;
+                margin-right: 7px;
+                vertical-align: 1px;
+                width: 6px;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status[data-state="active"]::before {
+                background: #60cf83;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-details {
+                white-space: pre-line;
+            }
+            #{{optionsPopupId}} .tm-volume-options-step-setting {
+                margin-top: 14px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-step-setting .tm-volume-options-section-label {
+                color: rgba(255, 255, 255, 0.75);
+                font-size: 12px;
+                font-weight: 400;
+                margin-bottom: 8px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-appearance-hint {
+                padding: 8px 16px 0;
+            }
 {{platformOptionsCss}}
             .tm-volume-options-header {
                 align-items: center;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
                 display: flex;
                 flex-shrink: 0;
-                padding: 12px 16px;
+                padding: 10px 16px 4px;
             }
             .tm-volume-options-title {
                 color: #fff;
-                font-size: 14px;
-                font-weight: 500;
+                font-size: 15px;
+                font-weight: 600;
                 line-height: 20px;
             }
             .tm-volume-options-body {
@@ -113,26 +236,31 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 padding-top: 12px;
             }
             .tm-volume-options-section-label {
-                color: rgba(255, 255, 255, 0.55);
-                font-size: 11px;
-                font-weight: 500;
-                letter-spacing: 0.04em;
-                line-height: 14px;
+                color: #fff;
+                font-size: 14px;
+                font-weight: 600;
+                line-height: 20px;
                 margin: 0 0 10px;
-                text-transform: uppercase;
             }
             .tm-volume-options-checklist {
                 display: flex;
                 flex-direction: column;
             }
+            #{{optionsPopupId}} .tm-volume-options-help {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                line-height: 1.4;
+                margin: 6px 0 0;
+                white-space: normal;
+            }
             #{{optionsPopupId}} .tm-volume-options-checklist .tm-volume-options-row {
                 align-items: center;
                 column-gap: 12px;
                 display: grid;
-                grid-template-columns: 1fr 18px;
+                grid-template-columns: 1fr 32px;
                 justify-content: stretch;
                 margin: 0 -8px;
-                min-height: 32px;
+                min-height: 36px;
                 padding: 5px 8px;
                 width: calc(100% + 16px);
             }
@@ -173,33 +301,30 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 opacity: 0.45;
             }
             .tm-volume-options-checkbox {
-                background: transparent;
-                border: 1.5px solid rgba(255, 255, 255, 0.45);
-                border-radius: 3px;
-                display: grid;
+                background: rgba(255, 255, 255, 0.22);
+                border: 0;
+                border-radius: 10px;
+                display: block;
                 flex-shrink: 0;
                 height: 18px;
-                place-items: center;
-                transition: all 0.12s ease;
-                width: 18px;
+                position: relative;
+                width: 32px;
+            }
+            .tm-volume-options-checkbox::after {
+                background: #fff;
+                border-radius: 50%;
+                content: '';
+                height: 14px;
+                left: 2px;
+                position: absolute;
+                top: 2px;
+                width: 14px;
             }
             .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox {
                 background: {{accentDark}};
-                border-color: {{accentDark}};
             }
             .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox::after {
-                border: solid #fff;
-                border-width: 0 0 3px 3px;
-                box-sizing: border-box;
-                content: '';
-                height: 6px;
-                transform: translateY(-1px) rotate(-45deg);
-                width: 10px;
-            }
-            .tm-volume-options-segment-stack {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
+                left: 16px;
             }
             .tm-volume-options-section-label + * {
                 padding-top: 2px;
@@ -254,16 +379,6 @@ const OPTIONS_STYLE_TEMPLATE = String.raw`
                 box-shadow: none;
                 color: #fff;
                 text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio {
-                cursor: not-allowed;
-                opacity: 0.4;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio:hover {
-                background: transparent;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio[aria-checked="true"] {
-                background: {{accentDisabled}};
             }
             .tm-volume-options-opacity-row {
                 display: flex;
@@ -409,7 +524,6 @@ export function installOptionsStyles({
   optionsButtonId,
   optionsPopupId,
   accentDark,
-  accentDisabled,
   closeHideControlsClass = ''
 }) {
   const style = createStyleElement(document, styleId);
@@ -418,7 +532,6 @@ export function installOptionsStyles({
     optionsButtonId,
     optionsPopupId,
     accentDark,
-    accentDisabled,
     platformOptionsCss: getPlatformOptionsCss(platform, closeHideControlsClass)
   });
 }

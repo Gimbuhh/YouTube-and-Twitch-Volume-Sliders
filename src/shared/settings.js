@@ -18,10 +18,6 @@ export function normalizeVolumeSliderMode(mode) {
   return normalizeChoice(mode, MODES);
 }
 
-export function normalizeReplaceNativePlacement(placement) {
-  return normalizeChoice(placement, ['native', 'custom']);
-}
-
 export function normalizeSliderLocation(location) {
   return normalizeChoice(location, LOCATIONS);
 }
@@ -60,12 +56,14 @@ export function createVolumeSettings({
   overlayId,
   onPlacementChanged,
   onModeChanged,
+  onNormalizationChanged = () => {},
   clearExpandedHold,
   setOverlayExpanded,
   collapseOverlayIfIdle,
   ensureOverlay
 }) {
   const sessionValues = new Map();
+  const pendingSizeFrames = new WeakSet();
   const read = (key) => {
     const cached = sessionValues.get(key);
     // Unsaved choices own this session; stale storage must not revert them.
@@ -101,11 +99,6 @@ export function createVolumeSettings({
 
   function getVolumeSliderMode() {
     return normalizeVolumeSliderMode(userSettings.volumeSliderMode) || getSavedVolumeSliderMode();
-  }
-
-  function getReplaceNativePlacement() {
-    return normalizeReplaceNativePlacement(userSettings.replaceNativePlacement) ||
-      normalizeReplaceNativePlacement(read(keys.replacePlacement)) || 'native';
   }
 
   function getSliderLocation() {
@@ -183,11 +176,6 @@ export function createVolumeSettings({
     onPlacementChanged();
   }
 
-  function setReplaceNativePlacement(placement) {
-    write(keys.replacePlacement, normalizeReplaceNativePlacement(placement) || 'native');
-    onPlacementChanged();
-  }
-
   function getSavedVolumeStep() {
     const savedStep = normalizeVolumeStep(read(keys.step));
     if (savedStep) return savedStep;
@@ -218,6 +206,15 @@ export function createVolumeSettings({
     updateVolumeStepUi(getOverlay());
   }
 
+  function isNormalizationEnabled() {
+    return normalizeBooleanSetting(userSettings.normalizeVolume) ?? (read(keys.normalization) === 'true');
+  }
+
+  function setNormalizationEnabled(enabled) {
+    write(keys.normalization, enabled ? 'true' : 'false');
+    onNormalizationChanged();
+  }
+
   function isAlwaysExpandedEnabled() {
     const override = normalizeBooleanSetting(userSettings.alwaysExpanded);
     return override ?? (read(keys.expanded) === 'true');
@@ -229,7 +226,7 @@ export function createVolumeSettings({
     if (!overlay) return;
     clearExpandedHold(overlay);
     if (enabled) setOverlayExpanded(overlay, true);
-    else collapseOverlayIfIdle(overlay, true);
+    else collapseOverlayIfIdle(overlay);
   }
 
   function getSavedOverlayOpacityPercent(focused) {
@@ -270,9 +267,14 @@ export function createVolumeSettings({
     const scale = isSliderOnVideo() ? getSavedOverlaySizePercent() / 100 : 1;
     overlay.style.setProperty('--tm-overlay-scale', String(scale));
     syncOverlayTicks(overlay);
-    overlay.ownerDocument?.defaultView?.requestAnimationFrame?.(() => {
-      syncOverlayTicks(overlay);
-    });
+    const view = overlay.ownerDocument?.defaultView;
+    if (view?.requestAnimationFrame && !pendingSizeFrames.has(overlay)) {
+      pendingSizeFrames.add(overlay);
+      view.requestAnimationFrame(() => {
+        pendingSizeFrames.delete(overlay);
+        if (overlay.isConnected) syncOverlayTicks(overlay);
+      });
+    }
   }
 
   function syncOverlayTicks(overlay) {
@@ -317,7 +319,7 @@ export function createVolumeSettings({
     if (!overlay) return;
     delete overlay.dataset.tmOptionsPreview;
     if (isAlwaysExpandedEnabled()) setOverlayExpanded(overlay, true, true);
-    else collapseOverlayIfIdle(overlay, true);
+    else collapseOverlayIfIdle(overlay);
     updateOverlayOpacity(overlay);
   }
 
@@ -367,7 +369,7 @@ export function createVolumeSettings({
       overlay?.dataset.tmDragging === 'true' ||
       overlay?.dataset.tmHovering === 'true' ||
       overlay?.matches?.(':hover') ||
-      overlay?.contains?.(document.activeElement);
+      (overlay?.contains?.(document.activeElement) && document.activeElement.matches(':focus-visible'));
   }
 
   function setVolumeSliderMode(mode) {
@@ -378,11 +380,11 @@ export function createVolumeSettings({
 
   const isOverlayEnabled = () => getVolumeSliderMode() !== 'off';
   const isNativeVolumeReplacementEnabled = () => getVolumeSliderMode() === 'replace-native';
-  const shouldUseNativeReplacementSlot = () => isNativeVolumeReplacementEnabled() && getReplaceNativePlacement() === 'native';
 
   return {
-    getVolumeSliderMode, getReplaceNativePlacement,
-    isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance,
+    isNormalizationEnabled, setNormalizationEnabled,
+    getVolumeSliderMode,
+    isSliderOnVideo, setSliderLocation, getVolumeAppearance, setVolumeAppearance,
     updateOverlayAppearance, getVolumeStep, setVolumeStep,
     isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
@@ -390,6 +392,6 @@ export function createVolumeSettings({
     getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent,
     beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview,
     updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode,
-    isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot
+    isOverlayEnabled, isNativeVolumeReplacementEnabled
   };
 }

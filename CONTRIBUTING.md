@@ -15,10 +15,13 @@ Use npm for dependency installation and repository scripts; other package manage
 
 ```sh
 npm ci
+npm run browsers:install
 npm run check
 ```
 
 Include focused tests for changed behavior. When source changes, include the deterministically regenerated `dist/*.user.js` files. Release archives are created only by the maintainer release workflow.
+
+Full verification includes Chrome and Firefox and also requires installed Google Chrome and FFmpeg. See [testing](docs/testing.md) for setup, executable overrides, and focused commands. `npm run check:core` is available for a quick browser-independent pass; run the full check before submitting a change.
 
 ## Pull requests
 

@@ -5,6 +5,16 @@ import { runInContext } from 'node:vm';
 import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
 
+function selectMode(popup, value) {
+  const select = popup.querySelector('#tm-volume-options-mode');
+  select.value = value;
+  select.dispatchEvent(new popup.ownerDocument.defaultView.Event('change', { bubbles: true }));
+}
+
+function showAppearance(popup) {
+  popup.querySelector('#tm-volume-options-tab-appearance').click();
+}
+
 const platforms = [
   { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', stepKey:'tm-yt-volume-slider-step', legacySnapKey:'tm-yt-volume-slider-snap-to-5', sizeKey:'tm-yt-volume-slider-size', thicknessKey:'tm-yt-volume-slider-thickness', appearanceKey:'tm-yt-volume-slider-appearance' },
   { name:'Twitch', file:'twitch', url:'https://www.twitch.tv/test', fixture:twitchFixture, modeKey:'tm-twitch-volume-slider-mode', locationKey:'tm-twitch-volume-slider-location', expandedKey:'tm-twitch-volume-slider-always-expanded', stepKey:'tm-twitch-volume-slider-step', legacySnapKey:'tm-twitch-volume-slider-snap-to-5', sizeKey:'tm-twitch-volume-slider-size', thicknessKey:'tm-twitch-volume-slider-thickness', appearanceKey:'tm-twitch-volume-slider-appearance' }
@@ -31,15 +41,16 @@ for (const config of platforms) {
       runtime.document.getElementById('tm-volume-options-button').click();
       const popup = runtime.document.getElementById('tm-volume-options-popup');
       popup.querySelector('#tm-volume-options-step-10').click();
+      showAppearance(popup);
       popup.querySelector('#tm-volume-options-appearance-classic').click();
       assert.equal(popup.querySelector('#tm-volume-options-step-10').getAttribute('aria-checked'), 'true');
       assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').dataset.tmAppearance, 'classic');
       popup.querySelector('#tm-volume-options-thickness-section button').click();
       assert.equal(popup.querySelector('#tm-volume-options-thickness-section input').value, '75');
 
-      popup.querySelector('#tm-volume-options-mode-off').click();
+      selectMode(popup, 'off');
       assert.equal(runtime.document.getElementById('tm-volume-slider-overlay'), null);
-      popup.querySelector('#tm-volume-options-mode-on').click();
+      selectMode(popup, 'on');
       const slider = runtime.document.getElementById('tm-volume-slider-range');
       assert.equal(slider.dataset.tmVolumeStep, '10');
       assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').dataset.tmAppearance, 'classic');
@@ -108,6 +119,7 @@ for (const config of platforms) test(`${config.name}: replacing idle options pop
   for (let index = 0; index < 3; index++) {
     const popup = open();
     assert.equal(listenerCount(), 0, 'idle options need no page-level release listeners');
+    showAppearance(popup);
     const size = popup.querySelector('#tm-volume-options-size-section input');
     size.dispatchEvent(new runtime.window.Event('pointerdown', { bubbles: true }));
     assert.equal(listenerCount(), 0, 'size has no preview to finish');
@@ -121,6 +133,7 @@ for (const config of platforms) test(`${config.name}: active preview listeners a
   let popup = open();
   const overlay = runtime.document.getElementById('tm-volume-slider-overlay');
   const start = () => {
+    showAppearance(popup);
     const slider = popup.querySelector('#tm-volume-options-thickness-section input');
     slider.dispatchEvent(new runtime.window.Event('pointerdown', { bubbles: true }));
     assert.equal(overlay.dataset.tmOptionsPreview, 'thickness');
@@ -171,6 +184,9 @@ function hideAndRevealControls(runtime, config) {
 for (const config of platforms) test(`${config.name}: options dialog contains focus and restores it on Escape`,async()=>{
   const {runtime,button,popup}=await openOptions(config);
   assert.equal(popup.hidden,false); assert.equal(popup.contains(runtime.document.activeElement),true);
+  assert.equal(runtime.document.activeElement,popup,'opening focuses the dialog without selecting a setting');
+  runtime.document.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));
+  assert.equal(runtime.document.activeElement.id,'tm-volume-options-mode','Tab enters the first setting');
 
   const hiddenOpacity=popup.querySelector('#tm-volume-options-opacity-section');
   assert.equal(hiddenOpacity.style.display,'none');
@@ -179,16 +195,16 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
   const thicknessSection=popup.querySelector('#tm-volume-options-thickness-section');
   assert.equal(thicknessSection.style.display,'');
   assert.equal(popup.querySelectorAll('button').length,popup.querySelectorAll('button > .tm-volume-options-button-label').length);
-  assert.equal(popup.querySelector('#tm-volume-options-mode-replace-native .tm-volume-options-button-label')?.textContent,'Replace native');
+  assert.equal(popup.querySelector('#tm-volume-options-mode option[value="replace-native"]')?.textContent,'Replace native');
   assert.equal(popup.querySelector('#tm-volume-options-thickness-section .tm-volume-options-opacity-reset .tm-volume-options-button-label')?.textContent,'Reset');
   assert.equal(popup.querySelector('#tm-volume-options-appearance-new')?.getAttribute('aria-checked'),'true');
   assert.equal(popup.querySelector('#tm-volume-options-appearance-classic')?.getAttribute('aria-checked'),'false');
-  const lastVisible=popup.querySelector('#tm-volume-options-thickness-section button');
+  const lastVisible=popup.querySelector('#tm-volume-options-always-expanded');
   lastVisible.focus();
   const forward=new runtime.window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true});
   runtime.document.dispatchEvent(forward);
   assert.equal(forward.defaultPrevented,true);
-  assert.equal(runtime.document.activeElement.id,'tm-volume-options-mode-on');
+  assert.equal(runtime.document.activeElement.id,'tm-volume-options-mode');
 
   const backward=new runtime.window.KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true});
   runtime.document.dispatchEvent(backward);
@@ -202,6 +218,7 @@ for (const config of platforms) test(`${config.name}: options dialog contains fo
 
 for (const config of platforms) test(`${config.name}: icon style option switches between new and classic`,async()=>{
   const {runtime,popup}=await openOptions(config);
+  showAppearance(popup);
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
   const classic=popup.querySelector('#tm-volume-options-appearance-classic');
   const modern=popup.querySelector('#tm-volume-options-appearance-new');
@@ -328,6 +345,7 @@ test('Twitch: native settings click is not swallowed while volume options are op
 
 for (const config of platforms) test(`${config.name}: bar thickness option updates only the visual track`,async()=>{
   const {runtime,popup}=await openOptions(config);
+  showAppearance(popup);
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
   assert.equal(slider.value,'75');
   slider.value='125';
@@ -347,6 +365,7 @@ for (const config of platforms) test(`${config.name}: bar thickness option updat
 for (const config of platforms) test(`${config.name}: thickness drag previews expansion only when not always expanded`,async()=>{
   const {runtime,popup}=await openOptions(config);
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  showAppearance(popup);
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
 
@@ -361,6 +380,7 @@ for (const config of platforms) test(`${config.name}: thickness drag previews ex
 for (const config of platforms) test(`${config.name}: thickness hold ignores transient blur after controls reveal`,async()=>{
   const {runtime,popup}=await openOptions(config,'on','video');
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  showAppearance(popup);
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
   const reset=popup.querySelector('#tm-volume-options-thickness-section button');
   await hideAndRevealControls(runtime, config);
@@ -382,6 +402,7 @@ for (const config of platforms) test(`${config.name}: thickness hold ignores tra
 for (const config of platforms) test(`${config.name}: thickness blur ends preview when focus leaves options`,async()=>{
   const {runtime,popup}=await openOptions(config,'on','video');
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  showAppearance(popup);
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
   const outside=runtime.document.createElement('button');
   runtime.document.body.appendChild(outside);
@@ -397,6 +418,7 @@ for (const config of platforms) test(`${config.name}: thickness blur ends previe
 for (const config of platforms) test(`${config.name}: thickness drag preview works on the first hold when overlay is recreated`,async()=>{
   const {runtime,popup}=await openOptions(config);
   const originalOverlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  showAppearance(popup);
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
   originalOverlay.remove();
 
@@ -413,6 +435,7 @@ for (const config of platforms) test(`${config.name}: thickness drag preview wor
 for (const config of platforms) test(`${config.name}: thickness drag does not collapse always-expanded slider`,async()=>{
   const {runtime,popup}=await openOptions(config,'on','controls',(storage)=>storage.setItem(config.expandedKey,'true'));
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  showAppearance(popup);
   const slider=popup.querySelector('#tm-volume-options-thickness-section input[type="range"]');
   assert.equal(overlay.classList.contains('tm-expanded'),true);
 
@@ -427,6 +450,7 @@ for (const config of platforms) test(`${config.name}: thickness drag does not co
 for (const config of platforms) test(`${config.name}: on-video opacity drags preview idle and active states`,async()=>{
   const {runtime,popup}=await openOptions(config,'on','video',(storage)=>storage.setItem(config.expandedKey,'true'));
   const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  showAppearance(popup);
   const [idleSlider, activeSlider]=popup.querySelectorAll('#tm-volume-options-opacity-section input[type="range"]');
   assert.equal(overlay.classList.contains('tm-expanded'),true);
 
@@ -435,7 +459,9 @@ for (const config of platforms) test(`${config.name}: on-video opacity drags pre
   runtime.window.dispatchEvent(new runtime.window.Event('pointerup'));
   assert.equal(overlay.classList.contains('tm-expanded'),true);
 
+  popup.querySelector('#tm-volume-options-tab-general').click();
   runtime.document.getElementById('tm-volume-options-always-expanded').click();
+  showAppearance(popup);
   await waitForTimers(runtime);
   assert.equal(overlay.classList.contains('tm-collapsed'),true);
 
@@ -449,6 +475,7 @@ for (const config of platforms) test(`${config.name}: on-video opacity drags pre
 
 for (const config of platforms) test(`${config.name}: on-video size option is active only for video placement`,async()=>{
   const {runtime,popup}=await openOptions(config,'on','video');
+  showAppearance(popup);
   const opacitySection=popup.querySelector('#tm-volume-options-opacity-section');
   const sizeSection=popup.querySelector('#tm-volume-options-size-section');
   assert.equal(opacitySection.style.display,'');
@@ -461,6 +488,7 @@ for (const config of platforms) test(`${config.name}: on-video size option is ac
   assert.equal(runtime.window.localStorage.getItem(config.sizeKey),'150');
   assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').style.getPropertyValue('--tm-overlay-scale'),'1.5');
 
+  popup.querySelector('#tm-volume-options-tab-general').click();
   const location=popup.querySelector('#tm-volume-options-location-video');
   location.click();
   assert.equal(sizeSection.style.display,'none');
@@ -468,22 +496,40 @@ for (const config of platforms) test(`${config.name}: on-video size option is ac
   runtime.close();
 });
 
-for (const config of platforms) test(`${config.name}: selected radio receives focus and arrow keys select within its group`,async()=>{
+for (const config of platforms) test(`${config.name}: tabs hide inactive controls and wrap keyboard selection`, async (t) => {
   const {runtime,popup}=await openOptions(config,'off');
-  const off=popup.querySelector('#tm-volume-options-mode-off');
-  const replace=popup.querySelector('#tm-volume-options-mode-replace-native');
-  const on=popup.querySelector('#tm-volume-options-mode-on');
-  assert.equal(runtime.document.activeElement,off);
-  assert.deepEqual([on.tabIndex,off.tabIndex,replace.tabIndex],[-1,0,-1]);
+  t.after(()=>runtime.close());
+  assert.equal(runtime.document.activeElement.id,'tm-volume-options-popup');
+  const tabs=[...popup.querySelectorAll('[role="tab"]')];
+  const panels=[...popup.querySelectorAll('[role="tabpanel"]')];
+  assert.deepEqual(tabs.map(tab=>tab.tabIndex),[0,-1]);
+  assert.deepEqual(panels.map(panel=>panel.hidden),[false,true]);
+  for (const [index,key,next] of [[0,'ArrowLeft',1],[1,'ArrowRight',0],[0,'End',1],[1,'Home',0]]) {
+    const event=new runtime.window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true});
+    tabs[index].dispatchEvent(event);
+    assert.equal(event.defaultPrevented,true);
+    assert.equal(runtime.document.activeElement,tabs[next]);
+    assert.deepEqual(panels.map(panel=>panel.hidden),[next!==0,next!==1]);
+    assert.equal(tabs[next].getAttribute('aria-selected'),'true');
+    assert.equal(tabs[next].getAttribute('aria-controls'),panels[next].id);
+  }
+  const one=popup.querySelector('#tm-volume-options-step-1');
+  const two=popup.querySelector('#tm-volume-options-step-2');
+  one.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+  assert.equal(runtime.document.activeElement,two);
+  assert.equal(two.getAttribute('aria-checked'),'true');
+  assert.deepEqual([one.tabIndex,two.tabIndex],[-1,0]);
+});
 
-  off.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
-  assert.equal(runtime.document.activeElement,replace);
-  assert.equal(replace.getAttribute('aria-checked'),'true');
-  assert.deepEqual([on.tabIndex,off.tabIndex,replace.tabIndex],[-1,-1,0]);
-
-  replace.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
-  assert.equal(runtime.document.activeElement,on);
-  assert.equal(on.getAttribute('aria-checked'),'true');
-  assert.deepEqual([on.tabIndex,off.tabIndex,replace.tabIndex],[0,-1,-1]);
-  runtime.close();
+for (const config of platforms) test(`${config.name}: changing tabs ends a held preview and resets scroll`, async (t) => {
+  const {runtime,listenerCount,open}=await trackedOptions(config,t);
+  const popup=open();
+  showAppearance(popup);
+  popup.querySelector('#tm-volume-options-thickness-section input').dispatchEvent(new runtime.window.Event('pointerdown',{bubbles:true}));
+  assert.ok(listenerCount()>0);
+  popup.querySelector('.tm-volume-options-body').scrollTop=100;
+  popup.querySelector('#tm-volume-options-tab-general').click();
+  assert.equal(listenerCount(),0);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay').dataset.tmOptionsPreview,undefined);
+  assert.equal(popup.querySelector('.tm-volume-options-body').scrollTop,0);
 });

@@ -3,8 +3,9 @@ import { VOLUME_STEPS } from './volume.js';
 export function createOptionsUi(dependencies) {
   const {
     document, optionsPopupId: OPTIONS_POPUP_ID, refreshOptionsPopupState,
-    getVolumeSliderMode, setVolumeSliderMode, getReplaceNativePlacement, setReplaceNativePlacement,
+    getVolumeSliderMode, setVolumeSliderMode,
     getVolumeAppearance, setVolumeAppearance,
+    isNormalizationEnabled, setNormalizationEnabled, getNormalizationStatus, getNormalizationDetails,
     getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled,
     isSliderOnVideo, setSliderLocation, getSavedOverlayOpacityPercent,
     setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent,
@@ -47,31 +48,36 @@ export function createOptionsUi(dependencies) {
         });
     }
 
+    function syncNormalizationStatus(popup) {
+        if (!popup) return;
+        const normalizationStatus = popup.querySelector('#tm-volume-options-normalization-status');
+        const status = getNormalizationStatus();
+        if (normalizationStatus && normalizationStatus.textContent !== status) normalizationStatus.textContent = status;
+        if (normalizationStatus) normalizationStatus.dataset.state = status.startsWith('Active') ? 'active' : 'idle';
+        const feedback = popup.querySelector('.tm-volume-options-normalization-feedback');
+        if (feedback) feedback.hidden = !isNormalizationEnabled();
+        const normalizationDetails = popup.querySelector('#tm-volume-options-normalization-details');
+        const details = getNormalizationDetails();
+        if (normalizationDetails) {
+            if (normalizationDetails.textContent !== details) normalizationDetails.textContent = details;
+            normalizationDetails.hidden = !details;
+        }
+    }
+
     function syncOptionsPopupState(popup) {
         if (!popup) return;
 
         const selectedMode = getVolumeSliderMode();
-        const selectedPlacement = getReplaceNativePlacement();
         const selectedAppearance = getVolumeAppearance();
         const selectedStep = getVolumeStep();
         const onVideo = isSliderOnVideo();
 
-        ['on', 'off', 'replace-native'].forEach((mode) => {
-            popup.querySelector(`#tm-volume-options-mode-${mode}`)
-                ?.setAttribute('aria-checked', selectedMode === mode ? 'true' : 'false');
-        });
+        popup.querySelector('#tm-volume-options-normalization')
+            ?.setAttribute('aria-checked', isNormalizationEnabled() ? 'true' : 'false');
+        syncNormalizationStatus(popup);
 
-        const placementSection = popup.querySelector('#tm-volume-options-placement-section');
-        const placementEnabled = selectedMode === 'replace-native';
-        if (placementSection) {
-            placementSection.dataset.disabled = placementEnabled ? 'false' : 'true';
-        }
-        ['native', 'custom'].forEach((placement) => {
-            const radio = popup.querySelector(`#tm-volume-options-placement-${placement}`);
-            if (!radio) return;
-            radio.setAttribute('aria-checked', selectedPlacement === placement ? 'true' : 'false');
-            radio.disabled = !placementEnabled;
-        });
+        const modeSelect = popup.querySelector('#tm-volume-options-mode');
+        if (modeSelect) modeSelect.value = selectedMode;
 
         ['new', 'classic'].forEach((appearance) => {
             popup.querySelector(`#tm-volume-options-appearance-${appearance}`)
@@ -92,6 +98,8 @@ export function createOptionsUi(dependencies) {
         if (opacitySection) opacitySection.style.display = onVideoDisplay;
         const sizeSection = popup.querySelector('#tm-volume-options-size-section');
         if (sizeSection) sizeSection.style.display = onVideoDisplay;
+        const appearanceHint = popup.querySelector('.tm-volume-options-appearance-hint');
+        if (appearanceHint) appearanceHint.hidden = onVideo;
 
         syncOptionsRadioGroups(popup);
     }
@@ -194,86 +202,45 @@ export function createOptionsUi(dependencies) {
 
     function createModeSection() {
         const section = document.createElement('div');
-        section.className = 'tm-volume-options-section';
-        section.appendChild(createOptionsSectionLabel('Mode'));
-
-        const stack = document.createElement('div');
-        stack.className = 'tm-volume-options-segment-stack';
-        stack.setAttribute('role', 'radiogroup');
-        stack.setAttribute('aria-label', 'Mode');
-
-        stack.appendChild(createOptionsSegment([
-            createOptionsRadio(
-                'tm-volume-options-mode-on',
-                'On',
-                getVolumeSliderMode() === 'on',
-                () => setVolumeSliderMode('on')
-            ),
-            createOptionsRadio(
-                'tm-volume-options-mode-off',
-                'Off',
-                getVolumeSliderMode() === 'off',
-                () => setVolumeSliderMode('off')
-            )
-        ]));
-
-        stack.appendChild(createOptionsSegment([
-            createOptionsRadio(
-                'tm-volume-options-mode-replace-native',
-                'Replace native',
-                getVolumeSliderMode() === 'replace-native',
-                () => setVolumeSliderMode('replace-native')
-            )
-        ]));
-
-        section.appendChild(stack);
-        return section;
-    }
-
-    function createPlacementSection() {
-        const section = document.createElement('div');
-        section.className = 'tm-volume-options-section';
-        section.id = 'tm-volume-options-placement-section';
-        section.appendChild(createOptionsSectionLabel('Position when replacing native'));
-
-        const segment = createOptionsSegment([
-            createOptionsRadio(
-                'tm-volume-options-placement-native',
-                'Native spot',
-                getReplaceNativePlacement() === 'native',
-                () => setReplaceNativePlacement('native')
-            ),
-            createOptionsRadio(
-                'tm-volume-options-placement-custom',
-                'Custom spot',
-                getReplaceNativePlacement() === 'custom',
-                () => setReplaceNativePlacement('custom')
-            )
-        ]);
-        segment.setAttribute('role', 'radiogroup');
-        segment.setAttribute('aria-label', 'Position when replacing native');
-        section.appendChild(segment);
+        section.className = 'tm-volume-options-mode';
+        const label = document.createElement('label');
+        label.htmlFor = 'tm-volume-options-mode';
+        label.textContent = 'Mode';
+        const select = document.createElement('select');
+        select.id = label.htmlFor;
+        for (const [value, text] of [['on', 'On'], ['off', 'Off'], ['replace-native', 'Replace native']]) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = text;
+            select.appendChild(option);
+        }
+        select.value = getVolumeSliderMode();
+        select.addEventListener('change', () => {
+            setVolumeSliderMode(select.value);
+            refreshOptionsPopupState();
+        });
+        select.addEventListener('keydown', (event) => event.stopPropagation());
+        section.append(label, select);
         return section;
     }
 
     function createBehaviorSection() {
         const section = document.createElement('div');
         section.className = 'tm-volume-options-section';
-        section.appendChild(createOptionsSectionLabel('Slider behavior'));
-
+        section.appendChild(createOptionsSectionLabel('Behavior'));
         const list = document.createElement('div');
         list.className = 'tm-volume-options-checklist';
-        list.appendChild(createOptionsCheckboxRow(
-            'tm-volume-options-always-expanded',
-            'Always expanded',
-            isAlwaysExpandedEnabled(),
-            (next) => setAlwaysExpandedEnabled(next)
-        ));
         list.appendChild(createOptionsCheckboxRow(
             'tm-volume-options-location-video',
             'Show on video',
             isSliderOnVideo(),
             (next) => setSliderLocation(next ? 'video' : 'controls')
+        ));
+        list.appendChild(createOptionsCheckboxRow(
+            'tm-volume-options-always-expanded',
+            'Always expanded',
+            isAlwaysExpandedEnabled(),
+            (next) => setAlwaysExpandedEnabled(next)
         ));
         section.appendChild(list);
         return section;
@@ -281,7 +248,7 @@ export function createOptionsUi(dependencies) {
 
     function createVolumeStepSection() {
         const section = document.createElement('div');
-        section.className = 'tm-volume-options-section';
+        section.className = 'tm-volume-options-step-setting';
         section.id = 'tm-volume-options-step-section';
         section.appendChild(createOptionsSectionLabel('Adjustment step'));
 
@@ -296,6 +263,45 @@ export function createOptionsUi(dependencies) {
         segment.setAttribute('role', 'radiogroup');
         segment.setAttribute('aria-label', 'Volume adjustment step');
         section.appendChild(segment);
+        return section;
+    }
+
+    function createNormalizationSection() {
+        const section = document.createElement('div');
+        section.className = 'tm-volume-options-section';
+        section.appendChild(createOptionsSectionLabel('Audio'));
+        const list = document.createElement('div');
+        list.className = 'tm-volume-options-checklist';
+        const toggle = createOptionsCheckboxRow(
+            'tm-volume-options-normalization', 'Auto-normalize volume',
+            isNormalizationEnabled(), setNormalizationEnabled
+        );
+        toggle.setAttribute('aria-describedby', 'tm-volume-options-normalization-help tm-volume-options-normalization-status');
+        list.appendChild(toggle);
+        section.appendChild(list);
+        const help = document.createElement('p');
+        help.id = 'tm-volume-options-normalization-help';
+        help.className = 'tm-volume-options-help';
+        help.textContent = 'Keeps sources closer in loudness. Your slider sets the listening level. Increases are limited to normal player volume.';
+        help.hidden = true;
+        section.appendChild(help);
+        const feedback = document.createElement('div');
+        feedback.className = 'tm-volume-options-normalization-feedback';
+        const status = document.createElement('p');
+        status.id = 'tm-volume-options-normalization-status';
+        status.className = 'tm-volume-options-help';
+        status.setAttribute('role', 'status');
+        status.textContent = getNormalizationStatus();
+        feedback.appendChild(status);
+        const details = document.createElement('p');
+        details.id = 'tm-volume-options-normalization-details';
+        details.className = 'tm-volume-options-help';
+        details.setAttribute('aria-live', 'off');
+        details.textContent = getNormalizationDetails();
+        details.hidden = !details.textContent;
+        feedback.appendChild(details);
+        section.appendChild(feedback);
+        section.appendChild(createVolumeStepSection());
         return section;
     }
 
@@ -510,6 +516,7 @@ export function createOptionsUi(dependencies) {
         popup.id = OPTIONS_POPUP_ID;
         popup.setAttribute('role', 'dialog');
         popup.setAttribute('aria-label', 'Volume Slider Options');
+        popup.tabIndex = -1;
         popup.toggleAttribute('hidden', true);
 
         const header = document.createElement('div');
@@ -521,20 +528,66 @@ export function createOptionsUi(dependencies) {
 
         const body = document.createElement('div');
         body.className = 'tm-volume-options-body';
-        body.appendChild(createModeSection());
-        body.appendChild(createPlacementSection());
-        body.appendChild(createAppearanceSection());
-        body.appendChild(createVolumeStepSection());
-        body.appendChild(createBehaviorSection());
-        body.appendChild(createThicknessSection());
-        body.appendChild(createOpacitySection());
-        body.appendChild(createSizeSection());
+        const tabList = document.createElement('div');
+        tabList.className = 'tm-volume-options-tabs';
+        tabList.setAttribute('role', 'tablist');
+        tabList.setAttribute('aria-label', 'Volume settings');
+        const panels = ['general', 'appearance'].map((name) => {
+            const panel = document.createElement('div');
+            panel.id = `tm-volume-options-panel-${name}`;
+            panel.setAttribute('role', 'tabpanel');
+            panel.setAttribute('aria-labelledby', `tm-volume-options-tab-${name}`);
+            body.appendChild(panel);
+            return panel;
+        });
+        const tabs = panels.map((panel, index) => {
+            const tab = document.createElement('button');
+            tab.type = 'button';
+            tab.id = panel.getAttribute('aria-labelledby');
+            tab.className = 'tm-volume-options-tab';
+            tab.setAttribute('role', 'tab');
+            tab.setAttribute('aria-controls', panel.id);
+            tab.appendChild(createOptionsButtonLabel(index ? 'Appearance' : 'General'));
+            tab.addEventListener('click', () => selectTab(index));
+            tab.addEventListener('keydown', (event) => {
+                let next;
+                if (event.key === 'ArrowLeft') next = (index + panels.length - 1) % panels.length;
+                else if (event.key === 'ArrowRight') next = (index + 1) % panels.length;
+                else if (event.key === 'Home') next = 0;
+                else if (event.key === 'End') next = panels.length - 1;
+                else return;
+                event.preventDefault();
+                event.stopPropagation();
+                selectTab(next);
+                tabs[next].focus();
+            });
+            tabList.appendChild(tab);
+            return tab;
+        });
+        function selectTab(index) {
+            stopOptionsPreview();
+            tabs.forEach((tab, i) => {
+                tab.setAttribute('aria-selected', i === index ? 'true' : 'false');
+                tab.tabIndex = i === index ? 0 : -1;
+                panels[i].hidden = i !== index;
+            });
+            body.scrollTop = 0;
+        }
+        panels[0].append(createNormalizationSection(), createBehaviorSection());
+        panels[1].append(createAppearanceSection(), createThicknessSection(), createSizeSection(), createOpacitySection());
+        const hint = document.createElement('p');
+        hint.className = 'tm-volume-options-help tm-volume-options-appearance-hint';
+        hint.append('To adjust size and opacity,', document.createElement('br'), 'enable “Show on video” in General.');
+        panels[1].appendChild(hint);
+        selectTab(0);
 
         popup.appendChild(header);
+        popup.appendChild(createModeSection());
+        popup.appendChild(tabList);
         popup.appendChild(body);
         popup.addEventListener('click', (event) => event.stopPropagation());
         return popup;
     }
 
-  return { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview };
+  return { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview };
 }

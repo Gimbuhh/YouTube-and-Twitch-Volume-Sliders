@@ -1,4 +1,5 @@
 import { createStyleElement, fillStyleTemplate } from './styles.js';
+import { VOLUME_NUMBER_FONT_FAMILY, VOLUME_NUMBER_FONT_SIZE, VOLUME_NUMBER_FONT_WEIGHT, VOLUME_NUMBER_COMPACT_SIZE, VOLUME_NUMBER_COMPACT_SPACING } from './volume-number.js';
 
 const SLIDER_STYLE_TEMPLATE = String.raw`
 #{{overlayId}} {
@@ -9,6 +10,7 @@ const SLIDER_STYLE_TEMPLATE = String.raw`
   --tm-pill-expanded-width: clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width));
   --tm-label-row-width: 50px;
   --tm-slider-row-offset: 62px;
+  --tm-normalization-accent: {{normalizationAccent}};
   filter: {{panelDropShadow}};
 }
 {{platformFootprintCss}}
@@ -166,6 +168,55 @@ const SLIDER_STYLE_TEMPLATE = String.raw`
   border-radius: 50%;
 }
 
+#{{overlayId}}.tm-normalization-enabled {
+  /* Keep the inset waveform visible at the pill's rounded edge. */
+  overflow: clip !important;
+  overflow-clip-margin: 8px;
+}
+
+#{{overlayId}} .tm-normalization-icon {
+  position: absolute;
+  left: 28px;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  display: block;
+  pointer-events: auto;
+}
+
+#{{overlayId}} .tm-normalization-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#{{overlayId}} .tm-normalization-icon circle {
+  fill: #17171b;
+  stroke: var(--tm-normalization-accent);
+  stroke-width: 1;
+}
+
+#{{overlayId}} .tm-normalization-icon path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+#{{overlayId}} .tm-normalization-icon[hidden] {
+  display: none;
+}
+
+#{{overlayId}} .tm-normalization-description {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 #{{overlayId}} .tm-volume-indicator {
   position: relative;
   width: 40px;
@@ -211,14 +262,20 @@ const SLIDER_STYLE_TEMPLATE = String.raw`
 
 #{{overlayId}} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
-  font: 700 15px/1 Arial, Helvetica, sans-serif;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
+  font: {{numberFont}};
+  font-variant-numeric: normal;
+  font-feature-settings: normal;
   font-synthesis: none;
   letter-spacing: 0;
-  text-shadow: 0 0 3px rgba(0, 0, 0, 0.75);
+  text-shadow: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.95));
   text-rendering: geometricPrecision;
   user-select: none;
+}
+
+#{{overlayId}} .tm-volume-percent[data-compact] {
+  font-size: {{numberCompactSize}}px;
+  letter-spacing: {{numberCompactSpacing}}px;
 }
 
 #{{overlayId}} .tm-volume-indicator.muted {
@@ -406,6 +463,10 @@ export function installVolumeSliderStyles({ document, platform, overlayId, value
     overlayId,
     valueLabelId,
     panelDropShadow,
+    normalizationAccent: platform === 'twitch' ? '#a970ff' : '#cc4444',
+    numberFont: `${VOLUME_NUMBER_FONT_WEIGHT} ${VOLUME_NUMBER_FONT_SIZE}px/1 ${VOLUME_NUMBER_FONT_FAMILY}`,
+    numberCompactSize: VOLUME_NUMBER_COMPACT_SIZE,
+    numberCompactSpacing: VOLUME_NUMBER_COMPACT_SPACING,
     ...getSliderPlatformStyles(platform, overlayId)
   });
 }

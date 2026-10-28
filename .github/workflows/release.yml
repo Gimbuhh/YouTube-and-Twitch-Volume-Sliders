@@ -19,7 +19,8 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -32,6 +33,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node node_modules/playwright-core/cli.js install --with-deps firefox
+      - name: Install decoder and start virtual audio output
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg pulseaudio
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=ci_audio rate=48000 channels=2
+          pactl set-default-sink ci_audio
       - run: npm run check
       - name: Verify tag and archive
         shell: bash
@@ -58,7 +67,7 @@ jobs:
 
   publish:
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

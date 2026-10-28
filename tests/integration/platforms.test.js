@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRuntime } from '../helpers/runtime.js';
 import { twitchFixture, youtubeFixture } from '../helpers/fixtures.js';
+import { mockAudioCapture } from '../helpers/audio.js';
 
 const platforms = [
   { name:'YouTube', file:'youtube', url:'https://www.youtube.com/watch?v=test', fixture:youtubeFixture, volumeKey:'tm-yt-volume', muteKey:'tm-yt-muted', modeKey:'tm-yt-volume-slider-mode', locationKey:'tm-yt-volume-slider-location', expandedKey:'tm-yt-volume-slider-always-expanded', stepKey:'tm-yt-volume-slider-step', appearanceKey:'tm-yt-volume-slider-appearance' },
@@ -36,6 +37,31 @@ function addYouTubeVideoToEarlyControls(runtime) {
   Object.assign(player,{getVolume:()=>volume,setVolume:v=>{volume=v;},isMuted:()=>muted,mute:()=>{muted=true;},unMute:()=>{muted=false;}});
   player.insertBefore(video,player.firstChild);
 }
+
+for (const config of platforms) test(`${config.name}: replacement uses the native slot despite a retired custom placement preference`, async t => {
+  const {runtime}=await loadPlatform(config,(current,fixture)=>{
+    current.window.localStorage.setItem(config.modeKey,'replace-native');
+    current.window.localStorage.setItem(config.modeKey.replace('-mode','-replace-placement'),'custom');
+    if (config.file==='twitch') {
+      const mute=current.document.createElement('button');
+      mute.dataset.aTarget='player-mute-unmute-button';
+      fixture.player.querySelector('[data-a-target="player-volume-slider"]').appendChild(mute);
+    }
+  });
+  t.after(()=>runtime.close());
+  const overlay=runtime.document.getElementById('tm-volume-slider-overlay');
+  const native=runtime.document.querySelector(config.file==='youtube'?'.ytp-volume-area':'[data-a-target="player-volume-slider"]');
+  assert.equal(overlay.nextElementSibling,native,'replacement occupies the original volume slot');
+  assert.equal(runtime.window.getComputedStyle(native).display,'none');
+  runtime.document.getElementById('tm-volume-options-button').click();
+  const popup=runtime.document.getElementById('tm-volume-options-popup');
+  assert.equal(popup.querySelector('[id^="tm-volume-options-placement"]'),null);
+  const onVideo=popup.querySelector('#tm-volume-options-location-video');
+  onVideo.click();
+  assert.equal(overlay.parentElement,overlay._tmVolumeVideo.parentElement,'Show on video still works');
+  onVideo.click();
+  assert.equal(overlay.nextElementSibling,native,'returning to controls uses the native position');
+});
 
 function addTwitchVideoToEarlyControls(runtime) {
   const player=runtime.document.querySelector('.video-player');
@@ -354,12 +380,30 @@ test('Twitch: arrow keys use fixed five-percent steps while preserving mute and 
     assert.equal(slider.value,'50');
     assert.equal(fixture.state.volume,.5);
   }
-  slider.value='100';
+  for(let step=0;step<10;step++){
+    slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+  }
   slider.dispatchEvent(new runtime.window.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
   assert.equal(slider.value,'100');
   await waitForTimers(runtime,180);
-  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'50');
+  assert.equal(runtime.window.localStorage.getItem(config.volumeKey),'100');
   runtime.close();
+});
+
+test('Twitch: startup correction displays the restored volume immediately',async t=>{
+  const source=await readFile(new URL('../../dist/twitch-volume-slider.user.js',import.meta.url),'utf8');
+  const runtime=createRuntime(platforms[1].url,{runScripts:'outside-only'});
+  t.after(()=>runtime.close());
+  const fixture=twitchFixture(runtime.document);
+  runtime.window.localStorage.setItem(platforms[1].volumeKey,'40');
+  runtime.window.eval(source);
+
+  fixture.player._tmPlayerApi.setVolume(.15);
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+
+  assert.equal(fixture.state.volume,.4);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-range').value,'40');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'40%');
 });
 
 test('Twitch: replace-native mode restores unmarked player volume resets',async()=>{
@@ -485,6 +529,129 @@ test('Twitch: volume API remains usable when optional mute methods are missing',
   runtime.close();
 });
 
+test('YouTube: incomplete player API retains volume controls and native mute fallback',async()=>{
+  const errors=[];
+  const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+    current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+    for(const method of ['isMuted','mute','unMute']) delete playerFixture.player[method];
+    playerFixture.video.muted=true;
+  });
+  try {
+    assert.deepEqual(errors,[]);
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    assert.ok(slider);
+    slider.value='60';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(fixture.state.volume,60);
+    assert.equal(fixture.video.muted,false);
+    const muteButton=runtime.document.querySelector('.tm-volume-icon-cell');
+    muteButton.click();
+    assert.equal(fixture.video.muted,true);
+    muteButton.click();
+    assert.equal(fixture.video.muted,false);
+    assert.deepEqual(errors,[]);
+  } finally {
+    runtime.close();
+  }
+});
+
+test('YouTube: throwing player API restores and changes volume through native video',async()=>{
+  const errors=[];
+  const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+    current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+    for(const method of ['getVolume','setVolume','isMuted','mute','unMute']) {
+      playerFixture.player[method]=()=>{throw new Error('player API is unavailable during replacement');};
+    }
+    current.window.localStorage.setItem(platforms[0].volumeKey,'35');
+    current.window.localStorage.setItem(platforms[0].muteKey,'true');
+  });
+  try {
+    assert.deepEqual(errors,[]);
+    assert.equal(fixture.video.volume,.35);
+    assert.equal(fixture.video.muted,true);
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    assert.ok(slider);
+    assert.equal(slider.value,'35');
+    slider.value='60';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(fixture.video.volume,.6);
+    assert.equal(fixture.video.muted,false);
+    runtime.document.querySelector('.tm-volume-icon-cell').click();
+    assert.equal(fixture.video.muted,true);
+    assert.deepEqual(errors,[]);
+  } finally {
+    runtime.close();
+  }
+});
+
+for(const setter of ['missing','throwing']) test(`YouTube: ${setter} volume setter keeps native fallback as the readback source`,async()=>{
+  const errors=[];
+  let healthySetter;
+  const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+    current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+    playerFixture.video.volume=.5;
+    healthySetter=playerFixture.player.setVolume;
+    if(setter==='missing') delete playerFixture.player.setVolume;
+    else playerFixture.player.setVolume=()=>{throw new Error('volume setter is unavailable');};
+  });
+  try {
+    const slider=runtime.document.getElementById('tm-volume-slider-range');
+    slider.value='60';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    const now=runtime.window.Date.now();
+    runtime.window.Date.now=()=>now+6000;
+    fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+    assert.equal(fixture.video.volume,.6);
+    assert.equal(slider.value,'60');
+    assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'60%');
+    assert.deepEqual(errors,[]);
+
+    fixture.player.setVolume=healthySetter;
+    slider.value='70';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(fixture.state.volume,70,'a later adjustment retries a recovered player API');
+    runtime.window.Date.now=()=>now+12000;
+    fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+    assert.equal(slider.value,'70','successful API writes restore API readback');
+    assert.deepEqual(errors,[]);
+  } finally {
+    runtime.close();
+  }
+});
+
+for(const method of ['mute','unMute']) for(const failure of ['missing','throwing']) {
+  test(`YouTube: ${failure} ${method} keeps native mute state until an API write succeeds`,async()=>{
+    const errors=[];
+    const initiallyMuted=method==='unMute';
+    let healthyMethod;
+    const {runtime,fixture}=await loadPlatform(platforms[0],(current,playerFixture)=>{
+      current.window.addEventListener('error',event=>{errors.push(event.error); event.preventDefault();});
+      playerFixture.video.muted=initiallyMuted;
+      if(initiallyMuted) playerFixture.player.mute();
+      healthyMethod=playerFixture.player[method];
+      if(failure==='missing') delete playerFixture.player[method];
+      else playerFixture.player[method]=()=>{throw new Error(`${method} is unavailable`);};
+    });
+    try {
+      const muteButton=runtime.document.querySelector('.tm-volume-icon-cell');
+      muteButton.click();
+      assert.equal(fixture.video.muted,!initiallyMuted);
+      assert.equal(muteButton.getAttribute('aria-label'),initiallyMuted?'Mute':'Unmute');
+      assert.equal(runtime.window.localStorage.getItem(platforms[0].muteKey),String(!initiallyMuted));
+
+      fixture.player[method]=healthyMethod;
+      muteButton.click();
+      assert.equal(fixture.state.muted,initiallyMuted,'the opposite API action recovers after a native toggle');
+      muteButton.click();
+      assert.equal(fixture.state.muted,!initiallyMuted,'a recovered API method is retried on the same player');
+      assert.equal(muteButton.getAttribute('aria-label'),initiallyMuted?'Mute':'Unmute');
+      assert.deepEqual(errors,[]);
+    } finally {
+      runtime.close();
+    }
+  });
+}
+
 test('Twitch: options button mounts when native controls appear before video',async()=>{
   const config=platforms[1];
   const runtime=await startBuiltArtifact(config);
@@ -505,7 +672,7 @@ test('Twitch: options button mounts when native controls appear before video',as
 
 test('Twitch: compact preview remains native and attaches after expanding to a main player',async()=>{
   const config=platforms[1];
-  const runtime=await startBuiltArtifact(config);
+  const runtime=await startBuiltArtifact({...config,url:'https://www.twitch.tv/directory'});
   runtime.window.localStorage.setItem(config.volumeKey,'40');
   runtime.window.localStorage.setItem(config.modeKey,'replace-native');
   runtime.window.localStorage.setItem(config.locationKey,'video');
@@ -544,6 +711,27 @@ test('Twitch: compact preview remains native and attaches after expanding to a m
   assert.equal(volume,.4);
   runtime.close();
 });
+
+for (const path of ['/test', '/videos/12345', '/test/clip/example']) {
+  test(`Twitch: a narrow watch player keeps custom controls on ${path}`, async () => {
+    const config = {...platforms[1], url: `https://www.twitch.tv${path}`};
+    const {runtime, fixture} = await loadPlatform(config, (current, {player}) => {
+      current.window.localStorage.setItem(config.modeKey, 'replace-native');
+      player.getBoundingClientRect = () => ({left:0, top:0, right:533, bottom:300, width:533, height:300});
+    });
+    try {
+      assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+      assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+      runtime.window.dispatchEvent(new runtime.window.Event('resize'));
+      fixture.player.appendChild(runtime.document.createElement('span'));
+      await waitForTimers(runtime, 60);
+      assert.ok(runtime.document.getElementById('tm-volume-slider-overlay'));
+      assert.ok(runtime.document.getElementById('tm-volume-options-button'));
+    } finally {
+      runtime.close();
+    }
+  });
+}
 
 test('Twitch: volume mouse interactions do not keep keyboard focus',async()=>{
   const config=platforms[1];
@@ -627,6 +815,107 @@ test('Twitch: active player video switch rebinds the custom slider',async()=>{
   slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
   assert.equal(secondVolume,.25);
   assert.equal(fixture.state.volume,firstVolumeBeforeInput);
+  runtime.close();
+});
+
+for (const normalize of [false, true]) test(`Twitch: rapid replacements converge without later mutations (normalization ${normalize})`, async t => {
+  const {runtime, fixture}=await loadPlatform(platforms[1], (current, fixture) => {
+    current.window.localStorage.setItem('tm-twitch-volume','40');
+    if (normalize) {
+      mockAudioCapture(current.window, fixture.video);
+      current.window.localStorage.setItem('tm-twitch-volume-slider-normalization','true');
+    }
+  });
+  t.after(()=>runtime.close());
+  let current=fixture.video;
+  for (let index=0;index<2;index++) {
+    const next=runtime.document.createElement('video');
+    if (normalize) mockAudioCapture(runtime.window,next);
+    current.replaceWith(next); current=next;
+    await waitForTimers(runtime,100);
+  }
+  await waitForTimers(runtime,1150);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-overlay')._tmVolumeVideo,current);
+  assert.equal(runtime.document.querySelectorAll('#tm-volume-slider-overlay').length,1);
+});
+
+test('Twitch: unrelated chat changes do not read settings or schedule slider layout', async t => {
+  const {runtime}=await loadPlatform(platforms[1], current=>{
+    current.window.localStorage.setItem('tm-twitch-volume-slider-mode','replace-native');
+  });
+  t.after(()=>runtime.close());
+  const chat=runtime.document.createElement('div'); runtime.document.body.append(chat);
+  await waitForTimers(runtime,60);
+  let reads=0,frames=0;
+  const storagePrototype=runtime.window.Storage.prototype, get=storagePrototype.getItem;
+  const frame=runtime.window.requestAnimationFrame.bind(runtime.window);
+  storagePrototype.getItem=function(...args){reads++;return get.apply(this,args);};
+  runtime.window.requestAnimationFrame=(...args)=>{frames++;return frame(...args);};
+  for(let index=0;index<12;index++) {
+    const message=runtime.document.createElement('span');message.textContent=String(index);chat.append(message);
+    await waitForTimers(runtime,5);
+  }
+  assert.equal(reads,0);
+  assert.equal(frames,0);
+});
+
+for (const normalize of [false,true]) test(`Twitch: failed setter keeps native read ownership and recovers (normalization ${normalize})`, async t=>{
+  const {runtime,fixture}=await loadPlatform(platforms[1], (current, fixture)=>{
+    current.window.localStorage.setItem('tm-twitch-volume','50');
+    if(normalize){mockAudioCapture(current.window,fixture.video);current.window.localStorage.setItem('tm-twitch-volume-slider-normalization','true');}
+  });
+  t.after(()=>runtime.close());
+  await waitForTimers(runtime,100);
+  const api=fixture.player._tmPlayerApi, setter=api.setVolume;
+  api.setVolume=()=>{throw new Error('temporary API failure');};
+  let slider=runtime.document.getElementById('tm-volume-slider-range');
+  slider.value='60';slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  if(normalize){
+    runtime.document.getElementById('tm-volume-options-button').click();
+    runtime.document.getElementById('tm-volume-options-normalization').click();
+  }
+  await waitForTimers(runtime,150);
+  assert.equal(fixture.video.volume,.6);
+  assert.equal(slider.value,'60');
+  assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'60%');
+  api.setVolume=value=>{setter(value);fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));};
+  slider.value='70';slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+  assert.equal(fixture.state.volume,.7);
+  assert.equal(slider.value,'70');
+});
+
+test('Twitch: failed mute setter reads native state until a successful API write', async t=>{
+  const {runtime,fixture}=await loadPlatform(platforms[1]);t.after(()=>runtime.close());
+  const api=fixture.player._tmPlayerApi, setter=api.setMuted;
+  api.setMuted=()=>{throw new Error('temporary mute failure');};
+  const icon=runtime.document.querySelector('.tm-volume-icon-cell');icon.click();
+  fixture.video.dispatchEvent(new runtime.window.Event('volumechange'));
+  assert.equal(fixture.video.muted,true);
+  assert.equal(runtime.document.getElementById('tm-volume-slider-value').textContent,'Muted');
+  api.setMuted=setter;icon.click();
+  assert.equal(fixture.video.muted,false);
+  assert.equal(fixture.state.muted,false);
+});
+
+test('YouTube: Options wakes native idle updates before changing hidden controls',async()=>{
+  const {runtime,fixture}=await loadPlatform(platforms[0]);
+  let resumes=0;
+  let wakes=0;
+  fixture.player.wakeUpControls=()=>{ wakes++; };
+  fixture.player.showControls=()=>{
+    if (fixture.player.classList.contains('ytp-autohide') || fixture.player.classList.contains('ytp-hide-controls')) resumes++;
+    fixture.player.classList.remove('ytp-autohide','ytp-hide-controls');
+  };
+  fixture.player.classList.add('ytp-autohide');
+  runtime.document.getElementById('tm-volume-options-button').click();
+  assert.equal(resumes,1,'native visibility and time updates resume when Options opens');
+  assert.equal(wakes,1,'native idle state wakes with the menu');
+  fixture.player.classList.add('ytp-hide-controls');
+  await waitForTimers(runtime,20);
+  assert.equal(resumes,2,'a later native autohide goes through the same player API');
+  assert.equal(wakes,2,'later native idle transitions wake progress updates too');
+  assert.ok(fixture.player.classList.contains('tm-volume-options-controls-hold'));
   runtime.close();
 });
 
@@ -797,13 +1086,13 @@ for(const config of platforms){
     assert.equal(arcTrack.getAttribute('r'),'14.5');
     assert.equal(arcTrack.getAttribute('stroke-width'),'3');
     assert.notEqual(runtime.window.getComputedStyle(arcTrack).vectorEffect,'non-scaling-stroke');
-    assert.equal(percent.getAttribute('font-family'),'Arial, Helvetica, sans-serif');
-    assert.equal(percent.getAttribute('font-size'),'15');
-    assert.equal(percent.getAttribute('font-weight'),'700');
-    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'15px');
-    assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'700');
+    assert.equal(percent.getAttribute('font-family'),'"Segoe UI", system-ui, sans-serif');
+    assert.equal(percent.getAttribute('font-size'),'16');
+    assert.equal(percent.getAttribute('font-weight'),'600');
+    assert.equal(runtime.window.getComputedStyle(percent).fontSize,'16px');
+    assert.equal(runtime.window.getComputedStyle(percent).fontWeight,'600');
     assert.doesNotMatch(runtime.window.getComputedStyle(percent).fontFamily,/YouTube Noto/);
-    assert.equal(runtime.window.getComputedStyle(percent).fontVariantNumeric,'tabular-nums');
+    assert.equal(runtime.window.getComputedStyle(percent).fontVariantNumeric,'normal');
     runtime.close();
   });
 
@@ -847,40 +1136,54 @@ for(const config of platforms){
     runtime.close();
   });
 
-  test(`${config.name}: max volume number uses fitted compact text`,async()=>{
+  test(`${config.name}: max volume number keeps natural glyph proportions`,async()=>{
     const {runtime}=await loadPlatform(config,current=>{
       current.window.localStorage.setItem(config.volumeKey,'100');
     });
     const percent=runtime.document.querySelector('.tm-volume-percent');
     assert.equal(percent.textContent,'100');
-    assert.equal(percent.getAttribute('textLength'),'22.5');
-    assert.equal(percent.getAttribute('lengthAdjust'),'spacingAndGlyphs');
+    assert.equal(percent.hasAttribute('textLength'),false);
+    assert.equal(percent.hasAttribute('lengthAdjust'),false);
+    assert.equal(percent.hasAttribute('data-compact'),true);
     assert.equal(percent.getAttribute('x'),'20');
     assert.equal(percent.getAttribute('y'),'20');
     assert.equal(runtime.window.getComputedStyle(percent).fontSize,'15px');
     runtime.close();
   });
 
-  test(`${config.name}: volume number uses rendered bounds for optical centering`,async()=>{
+  test(`${config.name}: volume numbers center visible glyphs in both axes and reuse measurements`,async()=>{
+    const measurements=[];
     const {runtime}=await loadPlatform(config,current=>{
       current.window.localStorage.setItem(config.volumeKey,'14');
-      current.window.SVGElement.prototype.getBBox=function(){
-        if(this.classList?.contains('tm-volume-percent')&&this.textContent==='14'){
-          return {x:14.8,y:10,width:12,height:14};
+      current.window.CanvasRenderingContext2D=function(){};
+      current.window.HTMLCanvasElement.prototype.getContext=()=>({
+        measureText(text){
+          measurements.push(text);
+          return text==='14'
+            ? {actualBoundingBoxLeft:1,actualBoundingBoxRight:13,actualBoundingBoxAscent:12,actualBoundingBoxDescent:0}
+            : {actualBoundingBoxLeft:0,actualBoundingBoxRight:16,actualBoundingBoxAscent:11,actualBoundingBoxDescent:1};
         }
-        return {x:14,y:10,width:12,height:14};
-      };
+      });
     });
     const percent=runtime.document.querySelector('.tm-volume-percent');
     const slider=runtime.document.getElementById('tm-volume-slider-range');
     assert.equal(percent.textContent,'14');
-    assert.equal(percent.getAttribute('x'),'20');
-    assert.equal(percent.getAttribute('transform'),'translate(-0.80 0)');
+    assert.equal(percent.getAttribute('x'),'14');
+    assert.equal(percent.getAttribute('y'),'26');
+    assert.equal(percent.getAttribute('text-anchor'),'start');
+    assert.equal(percent.hasAttribute('transform'),false);
 
     slider.value='50';
     slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
     assert.equal(percent.textContent,'50');
+    assert.equal(percent.getAttribute('x'),'12');
+    assert.equal(percent.getAttribute('y'),'25');
     assert.equal(percent.hasAttribute('transform'),false);
+    slider.value='14';
+    slider.dispatchEvent(new runtime.window.Event('input',{bubbles:true}));
+    assert.equal(percent.getAttribute('x'),'14');
+    assert.equal(percent.getAttribute('y'),'26');
+    assert.equal(measurements.filter(text=>text==='14').length,1);
     runtime.close();
   });
 

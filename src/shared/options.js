@@ -39,10 +39,10 @@ export function bindOptionsPopupKeyboard({ document, popup, closePopup }) {
     }
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === popup)) {
       event.preventDefault();
       last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
+    } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === popup)) {
       event.preventDefault();
       first.focus();
     }
@@ -60,9 +60,17 @@ export function createOptionsButtonIconSvg(document) {
   svg.setAttribute('width', '24');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('focusable', 'false');
-  const path = document.createElementNS(namespace, 'path');
-  path.setAttribute('fill', '#fff');
-  path.setAttribute('d', 'M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6h2z');
-  svg.appendChild(path);
+  for (const [row, x, y] of [['top', 15, 5], ['middle', 7, 11], ['bottom', 11, 17]]) {
+    const track = document.createElementNS(namespace, 'rect');
+    track.setAttribute('x', '3'); track.setAttribute('y', String(y));
+    track.setAttribute('width', '18'); track.setAttribute('height', '2');
+    track.setAttribute('fill', '#fff');
+    const handle = document.createElementNS(namespace, 'rect');
+    handle.setAttribute('class', `tm-options-handle tm-options-handle-${row}`);
+    handle.setAttribute('x', String(x)); handle.setAttribute('y', String(y - 2));
+    handle.setAttribute('width', '2'); handle.setAttribute('height', '6');
+    handle.setAttribute('fill', '#fff');
+    svg.append(track, handle);
+  }
   return svg;
 }

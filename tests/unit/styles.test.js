@@ -21,9 +21,6 @@ function installStyles(platform) {
     optionsButtonId: 'tm-volume-options-button',
     optionsPopupId: 'tm-volume-options-popup',
     accentDark: platform === 'twitch' ? '#9146ff' : '#bb3333',
-    accentDisabled: platform === 'twitch'
-      ? 'rgba(145, 70, 255, 0.55)'
-      : 'rgba(187, 51, 51, 0.55)',
     closeHideControlsClass: 'tm-volume-options-close-hide-controls'
   });
   return { dom, document };
@@ -93,7 +90,7 @@ test('options button labels use zoom-stable centering rules', () => {
     const options = document.getElementById('tm-volume-options-style').textContent;
 
     assert.match(options, /#tm-volume-options-popup button\s*{[\s\S]*font-family:\s*inherit;[\s\S]*margin:\s*0;/);
-    assert.doesNotMatch(options, /#tm-volume-options-popup button\s*{[\s\S]*font:\s*inherit;/);
+    assert.doesNotMatch(options, /#tm-volume-options-popup button\s*{[^}]*font:\s*inherit;/);
     assert.match(options, /\.tm-volume-options-button-label\s*{[^}]*font-size:\s*14px;[^}]*font-weight:\s*400;/);
     assert.doesNotMatch(options, /\.tm-volume-options-button-label\s*{[^}]*transform:/);
     assert.match(options, /#tm-volume-options-popup \.tm-volume-options-checklist \.tm-volume-options-row\s*{[^}]*margin:\s*0 -8px;/);

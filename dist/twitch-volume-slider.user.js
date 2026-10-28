@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Twitch Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      2.8.3
-// @description  Compact in-bar volume indicator that expands into a wide Twitch volume slider.
+// @version      3.0
+// @description  Compact Twitch volume controls with optional automatic volume normalization.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
 // @match        https://www.twitch.tv/*
+// @match        https://*.ext-twitch.tv/*
 // @updateURL    https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
 // @downloadURL  https://raw.githubusercontent.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/main/dist/twitch-volume-slider.user.js
 // @run-at       document-start
@@ -14,6 +15,233 @@
 "use strict";
 
 (() => {
+  // src/shared/styles.js
+  function createStyleElement(document2, id) {
+    if (document2.getElementById(id)) return null;
+    const parent = document2.head || document2.documentElement;
+    if (!parent) return null;
+    const style = document2.createElement("style");
+    style.id = id;
+    parent.appendChild(style);
+    return style;
+  }
+  var fillStyleTemplate = (template, values) => template.replace(/\{\{([A-Za-z0-9]+)\}\}/g, (_, key) => {
+    if (!(key in values)) throw new Error(`Missing style token ${key}`);
+    return values[key];
+  });
+
+  // src/shared/player-tooltips.js
+  var selector = "[data-tm-tooltip]";
+  var tooltipId = "tm-volume-player-tooltip";
+  var css = `
+.tm-player-tooltip {
+  box-sizing:border-box; position:absolute; z-index:10002; width:max-content;
+  max-width:320px; padding:5px 9px; border:0; border-radius:8px;
+  background:rgba(0,0,0,.3); color:#eee; backdrop-filter:blur(12px);
+  font:500 13px/15px "YouTube Noto",Roboto,Arial,Helvetica,sans-serif;
+  letter-spacing:normal; text-align:left; text-shadow:none; text-transform:none;
+  white-space:normal; overflow-wrap:anywhere; pointer-events:none;
+  animation:none; transition:none;
+}
+.tm-player-tooltip[data-platform="twitch"] {
+  position:fixed;
+  padding:4px 8px; border-radius:4px; backdrop-filter:none;
+  background:var(--color-background-tooltip,#fff); color:var(--color-text-tooltip,#0e0e10);
+  font:600 14px/1.4 var(--font-base,Inter,Roobert,"Helvetica Neue",Helvetica,Arial,sans-serif);
+  animation:tm-tooltip-pop-in 100ms ease backwards;
+  transform-origin:center;
+}
+@keyframes tm-tooltip-pop-in {
+  from { opacity:0; transform:scale(.9); }
+  to { opacity:1; transform:scale(1); }
+}
+@media (prefers-reduced-motion:reduce) {
+  .tm-player-tooltip[data-platform="twitch"] { animation:none; }
+}
+.tm-player-tooltip[data-platform="twitch"]::after {
+  content:""; position:absolute; top:100%; left:var(--tm-tooltip-arrow-x,50%);
+  transform:translateX(-50%); border:5px solid transparent; border-bottom:0;
+  border-top-color:var(--color-background-tooltip,#fff);
+}
+.tm-player-tooltip[data-platform="twitch"][data-placement="bottom"]::after {
+  top:auto; bottom:100%; border-top:0; border-bottom:5px solid var(--color-background-tooltip,#fff);
+}
+/* YouTube keeps its previous tooltip fading after entering a custom control.
+   Keep one label visible and make control-button handoffs immediate. Seek
+   previews retain their own transitions. Display remains owned by YouTube. */
+#movie_player:has(.tm-player-tooltip[data-platform="youtube"]) .ytp-tooltip {
+  visibility:hidden !important;
+}
+#movie_player:has(.ytp-chrome-bottom button:hover:not([data-tm-tooltip])) .ytp-tooltip.ytp-bottom:not(.ytp-preview):not(.ytp-tooltip-progress-bar-style) {
+  opacity:1 !important; transition:none !important;
+}`;
+  function installPlayerTooltips(window2, platform) {
+    const { document: document2 } = window2;
+    let target = null, tooltip = null, observer = null, showTimer = null;
+    const rootSelector = platform === "youtube" ? "#movie_player" : '.video-player,[data-a-target="player-overlay-click-handler"]';
+    function getVisiblePlayer(element) {
+      if (!element?.isConnected || element.hidden || !element.dataset.tmTooltip) {
+        return null;
+      }
+      const root = element.closest(rootSelector);
+      if (!root) {
+        return null;
+      }
+      if (platform === "youtube") {
+        if (element.getAttribute("aria-expanded") === "true" || document2.getElementById("tm-volume-options-popup")?.hasAttribute("hidden") === false) {
+          return null;
+        }
+        if (root.classList.contains("ytp-settings-shown")) {
+          return null;
+        }
+        for (const menu of root.querySelectorAll(".ytp-popup:not(button)")) {
+          if (menu.getClientRects().length && window2.getComputedStyle(menu).visibility !== "hidden") {
+            return null;
+          }
+        }
+      } else if (element.closest('[data-a-target="player-controls"]')?.getAttribute("data-a-visible") === "false") {
+        return null;
+      }
+      for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+        const style = window2.getComputedStyle(ancestor);
+        if (ancestor.hidden || style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+          return null;
+        }
+        if (ancestor === root && platform === "youtube") {
+          break;
+        }
+      }
+      return root;
+    }
+    function hide() {
+      window2.clearTimeout(showTimer);
+      observer?.disconnect();
+      observer = null;
+      tooltip?.remove();
+      tooltip = null;
+      target = null;
+    }
+    function show() {
+      const root = getVisiblePlayer(target);
+      if (!root) {
+        hide();
+        return;
+      }
+      const style = createStyleElement(document2, "tm-volume-player-tooltip-style");
+      if (style) {
+        style.textContent = css;
+      }
+      tooltip = document2.createElement("div");
+      tooltip.id = tooltipId;
+      tooltip.className = "tm-player-tooltip";
+      tooltip.dataset.platform = platform;
+      tooltip.setAttribute("role", "tooltip");
+      tooltip.textContent = target.dataset.tmTooltip;
+      const nativeText = platform === "youtube" && root.querySelector(".ytp-tooltip .ytp-tooltip-bottom-text");
+      if (nativeText) {
+        const native = window2.getComputedStyle(nativeText);
+        for (const property of ["font", "color", "backgroundColor", "borderRadius", "padding", "backdropFilter", "boxShadow"]) {
+          tooltip.style[property] = native[property];
+        }
+      }
+      const fixed = platform === "twitch";
+      const host = fixed ? document2.fullscreenElement || document2.body : root;
+      host.appendChild(tooltip);
+      const box = root.getBoundingClientRect(), anchor = target.getBoundingClientRect();
+      const sx = fixed ? 1 : box.width / root.offsetWidth || 1, sy = fixed ? 1 : box.height / root.offsetHeight || 1;
+      const originX = fixed ? 0 : box.left + root.clientLeft * sx, originY = fixed ? 0 : box.top + root.clientTop * sy;
+      const leftEdge = Math.max(fixed ? box.left + 8 : 8, (8 - originX) / sx);
+      const rightEdge = Math.min(fixed ? box.right - 8 : root.clientWidth - 8, (window2.innerWidth - 8 - originX) / sx);
+      tooltip.style.maxWidth = `${Math.max(0, Math.min(320, rightEdge - leftEdge))}px`;
+      const width = tooltip.offsetWidth, height = tooltip.offsetHeight;
+      const center = ((anchor.left + anchor.right) / 2 - originX) / sx;
+      const desiredLeft = platform === "twitch" ? (anchor.right - originX) / sx - width : center - width / 2;
+      const left = Math.max(leftEdge, Math.min(desiredLeft, rightEdge - width));
+      const controls = platform === "youtube" && target.closest(".ytp-chrome-bottom");
+      const anchorTop = controls ? controls.getBoundingClientRect().top : anchor.top;
+      const above = Math.floor((anchorTop - originY) / sy - height - 10);
+      const below = above < (fixed ? Math.max(0, box.top) : Math.max(0, -originY / sy));
+      tooltip.dataset.placement = below ? "bottom" : "top";
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${below ? (anchor.bottom - originY) / sy + 10 : above}px`;
+      tooltip.style.setProperty("--tm-tooltip-arrow-x", `${Math.max(8, Math.min(width - 8, center - left))}px`);
+      observer = new window2.MutationObserver(() => {
+        if (!getVisiblePlayer(target) || tooltip.textContent !== target.dataset.tmTooltip) {
+          hide();
+        }
+      });
+      observer.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["hidden", "aria-expanded", "data-tm-tooltip", "data-a-visible", "class", "style"]
+      });
+      if (fixed) {
+        for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          observer.observe(ancestor, { childList: true, attributes: true, attributeFilter: ["hidden", "class", "style"] });
+        }
+      }
+    }
+    function enter(element, delay) {
+      if (element === target) {
+        return;
+      }
+      hide();
+      if (!getVisiblePlayer(element)) {
+        return;
+      }
+      target = element;
+      if (delay) {
+        showTimer = window2.setTimeout(show, delay);
+      } else {
+        show();
+      }
+    }
+    document2.addEventListener("pointerover", (event) => {
+      if (event.pointerType === "touch") {
+        return;
+      }
+      const element = event.target.closest?.(selector);
+      if (element) {
+        enter(element, platform === "youtube" ? 0 : 200);
+      } else if (target && !target.contains(event.target)) {
+        hide();
+      }
+    }, true);
+    document2.addEventListener("pointerout", (event) => {
+      if (!target?.contains(event.target) || target.contains(event.relatedTarget)) {
+        return;
+      }
+      hide();
+    }, true);
+    document2.addEventListener("focusin", (event) => {
+      const element = event.target.closest?.(selector);
+      if (element?.matches(":focus-visible")) {
+        enter(element, 0);
+      }
+    }, true);
+    document2.addEventListener("focusout", (event) => {
+      if (target?.contains(event.target)) {
+        hide();
+      }
+    }, true);
+    for (const type of ["pointerdown", "click"]) {
+      document2.addEventListener(type, hide, true);
+    }
+    document2.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        hide();
+      }
+    }, true);
+    window2.addEventListener("scroll", (event) => {
+      if (event.target === document2 || event.target === window2 || event.target.contains?.(target)) {
+        hide();
+      }
+    }, true);
+    window2.addEventListener("resize", hide);
+    document2.addEventListener("fullscreenchange", hide);
+  }
+
   // src/shared/volume.js
   var clampVolume = (value) => Math.min(100, Math.max(0, Number(value) || 0));
   var VOLUME_STEPS = [1, 2, 5, 10];
@@ -42,6 +270,7 @@
   }
   function createVolumePersistence({ window: window2, storage, storageKey, debounceMs, getVolumeStep }) {
     let saveTimer = 0;
+    let scheduledVolume = 0;
     function getSavedVolume() {
       try {
         const saved = storage.getItem(storageKey);
@@ -70,12 +299,1423 @@
     }
     function scheduleSaveVolume(value) {
       cancelScheduledSaveVolume();
-      saveTimer = window2.setTimeout(() => {
-        saveVolume(value);
-        saveTimer = 0;
-      }, debounceMs);
+      scheduledVolume = value;
+      saveTimer = window2.setTimeout(flushScheduledSaveVolume, debounceMs);
     }
-    return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
+    function flushScheduledSaveVolume() {
+      if (!saveTimer) return;
+      cancelScheduledSaveVolume();
+      saveVolume(scheduledVolume);
+    }
+    return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume, flushScheduledSaveVolume };
+  }
+
+  // src/shared/lufs-meter.js
+  function createLufsMeter(sampleRate) {
+    if (!Number.isFinite(sampleRate) || sampleRate < 8e3) throw new RangeError("Invalid audio sample rate");
+    const shelfK = Math.tan(Math.PI * 1681.974450955533 / sampleRate);
+    const shelfQ = 0.7071752369554196;
+    const high = 10 ** (3.999843853973347 / 20);
+    const middle = high ** 0.4996667741545416;
+    const shelfDenominator = 1 + shelfK / shelfQ + shelfK * shelfK;
+    const shelf = [
+      (high + middle * shelfK / shelfQ + shelfK * shelfK) / shelfDenominator,
+      2 * (shelfK * shelfK - high) / shelfDenominator,
+      (high - middle * shelfK / shelfQ + shelfK * shelfK) / shelfDenominator,
+      2 * (shelfK * shelfK - 1) / shelfDenominator,
+      (1 - shelfK / shelfQ + shelfK * shelfK) / shelfDenominator
+    ];
+    const highPassK = Math.tan(Math.PI * 38.13547087602444 / sampleRate);
+    const highPassDenominator = 1 + highPassK / 0.5003270373238773 + highPassK * highPassK;
+    const highPass = [
+      1,
+      -2,
+      1,
+      2 * (highPassK * highPassK - 1) / highPassDenominator,
+      (1 - highPassK / 0.5003270373238773 + highPassK * highPassK) / highPassDenominator
+    ];
+    const frameLength = Math.round(sampleRate / 20);
+    const attackLength = Math.round(sampleRate / 200);
+    const powers = new Float64Array(60);
+    const [s0, s1, s2, sa1, sa2] = shelf;
+    const [h0, h1, h2, ha1, ha2] = highPass;
+    let states = [], weights = [], rawEnergy = [], frameEnergy = [], attackEnergy = [];
+    let frameSamples = 0, frameCount = 0, attackSamples = 0;
+    let previousAttack = 0, rapidSamples = 0, reportEnergy = 0, reportSamples = 0;
+    let trackingAttack = false;
+    const lufs = (power) => power > 0 ? -0.691 + 10 * Math.log10(power) : -Infinity;
+    return {
+      process(channels, onFrame, onAttack) {
+        if (!channels.length || !channels[0]?.length) return;
+        if (trackingAttack && !onAttack) {
+          attackSamples = previousAttack = rapidSamples = reportEnergy = reportSamples = 0;
+          attackEnergy.fill(0);
+        }
+        trackingAttack = !!onAttack;
+        if (channels.length !== states.length) {
+          if (channels.length > 6) throw new RangeError("Unsupported channel layout");
+          states = channels.map(() => new Float64Array(4));
+          weights = channels.length === 6 ? [1, 1, 1, 0, 1.41, 1.41] : channels.length === 5 ? [1, 1, 1, 1.41, 1.41] : channels.length === 4 ? [1, 1, 1.41, 1.41] : channels.map(() => 1);
+          rawEnergy = channels.map(() => 0);
+          frameEnergy = channels.map(() => 0);
+          attackEnergy = channels.map(() => 0);
+          powers.fill(0);
+          frameSamples = frameCount = attackSamples = 0;
+          previousAttack = rapidSamples = reportEnergy = reportSamples = 0;
+        }
+        let offset = 0;
+        while (offset < channels[0].length) {
+          const count = Math.min(channels[0].length - offset, frameLength - frameSamples, trackingAttack ? attackLength - attackSamples : Infinity);
+          const end = offset + count;
+          for (let channel = 0; channel < channels.length; channel++) {
+            const input = channels[channel], state = states[channel], weight = weights[channel];
+            let z0 = state[0], z1 = state[1], z2 = state[2], z3 = state[3];
+            let raw = rawEnergy[channel], energy = frameEnergy[channel], attack = attackEnergy[channel];
+            for (let index = offset; index < end; index++) {
+              const value = input[index];
+              if (!Number.isFinite(value)) throw new RangeError("Invalid audio sample");
+              raw += value * value;
+              const filtered = s0 * value + z0;
+              z0 = s1 * value - sa1 * filtered + z1;
+              z1 = s2 * value - sa2 * filtered;
+              const weighted = h0 * filtered + z2;
+              z2 = h1 * filtered - ha1 * weighted + z3;
+              z3 = h2 * filtered - ha2 * weighted;
+              const power2 = weight * weighted * weighted;
+              energy += power2;
+              if (trackingAttack) attack += power2;
+            }
+            state[0] = z0;
+            state[1] = z1;
+            state[2] = z2;
+            state[3] = z3;
+            rawEnergy[channel] = raw;
+            frameEnergy[channel] = energy;
+            attackEnergy[channel] = attack;
+          }
+          offset = end;
+          frameSamples += count;
+          if (trackingAttack) attackSamples += count;
+          if (trackingAttack && attackSamples === attackLength) {
+            const energy = attackEnergy.reduce((sum, value) => sum + value, 0);
+            const power2 = energy / attackLength;
+            if (power2 > 1e-8 && power2 > previousAttack * 2) rapidSamples = Math.round(sampleRate * 0.1);
+            previousAttack = power2;
+            reportEnergy += energy;
+            reportSamples += attackLength;
+            if (rapidSamples > 0) onAttack?.(power2);
+            else if (reportSamples >= attackLength * 4) onAttack?.(reportEnergy / reportSamples);
+            if (reportSamples >= attackLength * 4) reportEnergy = reportSamples = 0;
+            rapidSamples = Math.max(0, rapidSamples - attackLength);
+            attackSamples = 0;
+            attackEnergy.fill(0);
+          }
+          if (frameSamples !== frameLength) continue;
+          const power = frameEnergy.reduce((sum, value) => sum + value, 0) / frameLength;
+          powers[frameCount % powers.length] = power;
+          frameCount++;
+          let momentary = 0, shortTerm = 0;
+          for (let age = 0; age < Math.min(frameCount, powers.length); age++) {
+            const value = powers[(frameCount - 1 - age) % powers.length];
+            shortTerm += value;
+            if (age < 8) momentary += value;
+          }
+          onFrame({
+            power,
+            rawPower: Math.max(...rawEnergy) / frameLength,
+            duration: frameLength / sampleRate,
+            momentaryPower: momentary / Math.min(frameCount, 8),
+            momentaryLufs: frameCount >= 8 ? lufs(momentary / 8) : null,
+            shortTermLufs: frameCount >= 60 ? lufs(shortTerm / 60) : null
+          });
+          rawEnergy.fill(0);
+          frameSamples = 0;
+          frameEnergy.fill(0);
+        }
+      }
+    };
+  }
+
+  // src/shared/normalization-gain.js
+  var NORMALIZATION_PROFILE = Object.freeze({
+    targetLufs: -18,
+    energyHeadroomLu: 3,
+    lookaheadMs: 20,
+    attackMs: 1,
+    releaseMs: 180,
+    holdMs: 20,
+    riseDbPerSecond: 24,
+    peakDb: -10,
+    referenceDecayLuPerSecond: 3,
+    programmeRecoveryMs: 1200,
+    recoveryConfirmationMs: 3e3
+  });
+  function createProgrammeState(selected = 0.3, energyHeadroomLu = NORMALIZATION_PROFILE.energyHeadroomLu) {
+    const history2 = [];
+    const targetPower = 10 ** ((NORMALIZATION_PROFILE.targetLufs + 0.691) / 10);
+    const energyCeiling = targetPower * 10 ** (energyHeadroomLu / 10);
+    let startupGain = 0, waiting = true, programmeGain = 1, time = 0, referenceHold = 0, lowerDuration = 0;
+    return {
+      setSelected(value) {
+        selected = Math.max(0, Math.min(1, value));
+      },
+      getProgrammeGain() {
+        return selected > 0 ? Math.min(waiting ? startupGain : programmeGain, 1 / selected) : 0;
+      },
+      frame(frame) {
+        if (waiting && (frame.rawPower < 1e-9 || frame.power < 1e-9)) return;
+        waiting = false;
+        time += frame.duration;
+        while (history2.length && history2[0].time <= time - 3) history2.shift();
+        if (frame.rawPower < 1e-4 || frame.power <= 0) return;
+        history2.push({ time, power: frame.power, duration: frame.duration });
+        const ordered = history2.slice().sort((a, b) => a.power - b.power);
+        const duration = history2.reduce((sum, item) => sum + item.duration, 0);
+        let cumulative = 0, reference = 0;
+        for (const item of ordered) {
+          cumulative += item.duration;
+          if (cumulative >= duration * 0.65) {
+            reference = item.power;
+            break;
+          }
+        }
+        lowerDuration = reference < referenceHold * 10 ** (-1 / 10) ? lowerDuration + frame.duration : 0;
+        const recovering = lowerDuration >= NORMALIZATION_PROFILE.recoveryConfirmationMs / 1e3;
+        referenceHold = recovering && referenceHold > targetPower ? Math.max(targetPower, referenceHold * 10 ** (-NORMALIZATION_PROFILE.referenceDecayLuPerSecond * frame.duration / 10)) : referenceHold * 10 ** (-0.5 * frame.duration / 10);
+        if (duration >= 1) referenceHold = Math.max(referenceHold, reference);
+        reference = Math.max(reference, referenceHold);
+        let desired = Math.min(1 / selected, 10 ** (6 / 20), Math.max(0.1, Math.sqrt(targetPower / reference)));
+        if (!referenceHold) desired = Math.min(1, desired);
+        if (desired < programmeGain) programmeGain = desired;
+        else {
+          const recovery = time < 3 ? 0.9 : recovering && desired <= 1 ? NORMALIZATION_PROFILE.programmeRecoveryMs / 1e3 : 3;
+          programmeGain = Math.exp(Math.log(programmeGain) + (Math.log(desired) - Math.log(programmeGain)) * (1 - Math.exp(-frame.duration / recovery)));
+        }
+      },
+      short(power) {
+        if (waiting && power >= 1e-9) startupGain = Math.min(1, Math.sqrt(energyCeiling / power));
+      }
+    };
+  }
+
+  // src/shared/normalization-graph.js
+  var GAIN_DB_RANGE = 60;
+  var CONTROL_RANGE = 8;
+  var curves;
+  function controlCurves() {
+    if (curves) return curves;
+    const sample = (count, fn) => Float32Array.from({ length: count }, (_, i) => fn(i / (count - 1) * 2 - 1));
+    const peak = 10 ** (NORMALIZATION_PROFILE.peakDb / 20);
+    const energy = 10 ** ((NORMALIZATION_PROFILE.targetLufs + 0.691 + NORMALIZATION_PROFILE.energyHeadroomLu) / 10);
+    curves = {
+      absolute: new Float32Array([1, 0, 1]),
+      square: sample(4097, (x) => x * x),
+      peak: sample(65537, (x) => x > peak / CONTROL_RANGE ? Math.min(1, 20 * Math.log10(x * CONTROL_RANGE / peak) / GAIN_DB_RANGE) : 0),
+      energy: sample(131073, (x) => x > energy / CONTROL_RANGE ** 2 ? Math.min(1, 10 * Math.log10(x * CONTROL_RANGE ** 2 / energy) / GAIN_DB_RANGE) : 0),
+      gain: sample(4097, (x) => 10 ** (-Math.max(0, x) * GAIN_DB_RANGE / 20))
+    };
+    return curves;
+  }
+  function createNativeGainGraph(context, { selected = 0.3 } = {}) {
+    const rate = context.sampleRate, nodes = [], tables = controlCurves();
+    const own = (node) => {
+      nodes.push(node);
+      return node;
+    };
+    function gain(value, mono = true) {
+      const node = own(context.createGain());
+      node.gain.value = value;
+      if (mono) {
+        node.channelCount = 1;
+        node.channelCountMode = "explicit";
+      }
+      return node;
+    }
+    function shape(curve, mono = true) {
+      const node = own(context.createWaveShaper());
+      node.curve = curve;
+      if (mono) {
+        node.channelCount = 1;
+        node.channelCountMode = "explicit";
+      }
+      return node;
+    }
+    function maximum(a, b) {
+      const negative = gain(-1), absolute2 = shape(tables.absolute), out = gain(0.5);
+      b.connect(negative);
+      negative.connect(absolute2);
+      a.connect(absolute2);
+      a.connect(out);
+      b.connect(out);
+      absolute2.connect(out);
+      return out;
+    }
+    function delay(input, samples) {
+      const node = own(context.createDelay(0.1));
+      node.delayTime.value = samples / rate;
+      input.connect(node);
+      return node;
+    }
+    const programme = gain(0, false);
+    programme.channelCount = 2;
+    programme.channelCountMode = "explicit";
+    programme.channelInterpretation = "speakers";
+    const k = Math.tan(Math.PI * 1681.974450955533 / rate), q = 0.7071752369554196;
+    const high = 10 ** (3.999843853973347 / 20), middle = high ** 0.4996667741545416, denominator = 1 + k / q + k * k;
+    const shelf = own(context.createIIRFilter([
+      (high + middle * k / q + k * k) / denominator,
+      2 * (k * k - high) / denominator,
+      (high - middle * k / q + k * k) / denominator
+    ], [1, 2 * (k * k - 1) / denominator, (1 - k / q + k * k) / denominator]));
+    const h = Math.tan(Math.PI * 38.13547087602444 / rate), highPassDenominator = 1 + h / 0.5003270373238773 + h * h;
+    const highPass = own(context.createIIRFilter([1, -2, 1], [
+      1,
+      2 * (h * h - 1) / highPassDenominator,
+      (1 - h / 0.5003270373238773 + h * h) / highPassDenominator
+    ]));
+    programme.connect(shelf);
+    shelf.connect(highPass);
+    const scale = gain(1 / CONTROL_RANGE, false), square = shape(tables.square, false), sum = gain(2);
+    highPass.connect(scale);
+    scale.connect(square);
+    square.connect(sum);
+    const energy = own(context.createConvolver()), count = Math.round(rate * 5e-3), impulse = context.createBuffer(1, count, rate);
+    impulse.getChannelData(0).fill(1 / count);
+    energy.normalize = false;
+    energy.buffer = impulse;
+    sum.connect(energy);
+    const energyAttenuation = shape(tables.energy);
+    energy.connect(energyAttenuation);
+    const peakScale = gain(1 / CONTROL_RANGE, false), absolute = shape(tables.absolute, false), split = own(context.createChannelSplitter(2));
+    programme.connect(peakScale);
+    peakScale.connect(absolute);
+    absolute.connect(split);
+    const left = gain(1), right = gain(1);
+    split.connect(left, 0);
+    split.connect(right, 1);
+    const peak = maximum(left, right), peakAttenuation = shape(tables.peak);
+    peak.connect(peakAttenuation);
+    let held = maximum(energyAttenuation, peakAttenuation);
+    const lookahead = 2 ** Math.ceil(Math.log2(rate * NORMALIZATION_PROFILE.lookaheadMs / 1e3));
+    const window2 = 2 ** Math.ceil(Math.log2(lookahead + Math.round(rate * NORMALIZATION_PROFILE.holdMs / 1e3)));
+    for (let span = 1; span < window2; span *= 2) held = maximum(held, delay(held, span));
+    const memory = own(context.createDelay(0.1));
+    memory.delayTime.value = 0;
+    const attack = Math.exp(-1 / (rate * NORMALIZATION_PROFILE.attackMs / 1e3));
+    const release = Math.exp(-1 / (rate * NORMALIZATION_PROFILE.releaseMs / 1e3));
+    const decay = gain((release - attack) * release ** 127 / (1 - attack)), linear = gain(1);
+    memory.connect(decay);
+    memory.connect(linear);
+    const offset = own(context.createConstantSource());
+    offset.offset.value = -NORMALIZATION_PROFILE.riseDbPerSecond * (128 + attack / (1 - attack)) / rate / GAIN_DB_RANGE;
+    offset.start();
+    offset.connect(linear);
+    const requested = maximum(held, maximum(decay, linear));
+    const envelope = own(context.createIIRFilter([1 - attack], [1, -attack]));
+    requested.connect(envelope);
+    envelope.connect(memory);
+    const multiplier = shape(tables.gain);
+    envelope.connect(multiplier);
+    const monitor = own(context.createAnalyser());
+    monitor.fftSize = 32;
+    multiplier.connect(monitor);
+    const gainSamples = new Float32Array(32);
+    const audio = delay(programme, lookahead), attenuated = gain(0, false), level = gain(selected, false);
+    audio.connect(attenuated);
+    multiplier.connect(attenuated.gain);
+    attenuated.connect(level);
+    let targetGain = 0;
+    return {
+      input: programme,
+      output: level,
+      lookaheadMs: lookahead / rate * 1e3,
+      nodeCount: nodes.length,
+      setGain(value, at = context.currentTime) {
+        if (value === targetGain) return;
+        targetGain = value;
+        programme.gain.setTargetAtTime(value, at, 3e-3);
+      },
+      setSelected(value, at = context.currentTime) {
+        level.gain.setTargetAtTime(value, at, 5e-3);
+      },
+      readGain() {
+        monitor.getFloatTimeDomainData(gainSamples);
+        return programme.gain.value * level.gain.value * Math.max(0, gainSamples[gainSamples.length - 1]);
+      },
+      dispose() {
+        try {
+          offset.stop();
+        } catch {
+        }
+        for (const node of nodes) node.disconnect();
+      }
+    };
+  }
+
+  // src/shared/normalization-output.js
+  var documents = /* @__PURE__ */ new WeakMap();
+  function mediaTransitionTime(context) {
+    return context.currentTime + Math.max(context.baseLatency || 0, context.outputLatency || 0, 128 / context.sampleRate);
+  }
+  function waitForMediaRender(window2, context, time) {
+    return new Promise((resolve) => {
+      const check = () => {
+        if (context.state !== "running" || context.currentTime >= time) resolve();
+        else window2.setTimeout(check, 2);
+      };
+      check();
+    });
+  }
+  function fadeInMediaOutput(window2, video) {
+    const document2 = documents.get(window2), route = document2?.routes.get(video), gate = route?.ordinary;
+    if (!gate || route.pending) return Promise.resolve();
+    const context = document2.context;
+    return waitForMediaRender(window2, context, context.currentTime + (context.baseLatency || 0) + 256 / context.sampleRate).then(() => {
+      if (route.ordinary !== gate || route.pending) return;
+      const at = mediaTransitionTime(context);
+      gate.gain.setValueAtTime(0, at);
+      gate.gain.linearRampToValueAtTime(1, at + 5e-3);
+    });
+  }
+  function registry(window2) {
+    let state = documents.get(window2);
+    if (!state) {
+      state = { sources: /* @__PURE__ */ new WeakMap(), routes: /* @__PURE__ */ new WeakMap(), active: /* @__PURE__ */ new Set(), reserved: /* @__PURE__ */ new WeakSet(), external: /* @__PURE__ */ new WeakSet() };
+      documents.set(window2, state);
+    }
+    return state;
+  }
+  function installMediaOutputGuard(window2) {
+    const state = registry(window2);
+    const Context = window2.AudioContext || window2.webkitAudioContext;
+    if (state.createSource || !Context?.prototype.createMediaElementSource) {
+      return;
+    }
+    state.createSource = Context.prototype.createMediaElementSource;
+    function externalSource(video, create) {
+      if (state.reserved.has(video) || state.sources.has(video)) {
+        throw new window2.DOMException("Volume Slider already owns this media element", "InvalidStateError");
+      }
+      const source = create();
+      state.external.add(video);
+      return source;
+    }
+    Context.prototype.createMediaElementSource = function(video) {
+      return externalSource(video, () => state.createSource.call(this, video));
+    };
+    if (window2.MediaElementAudioSourceNode) {
+      window2.MediaElementAudioSourceNode = new Proxy(window2.MediaElementAudioSourceNode, {
+        construct(target, args, newTarget) {
+          return externalSource(args[1]?.mediaElement, () => Reflect.construct(target, args, newTarget));
+        }
+      });
+    }
+  }
+  function assertMediaOutputAvailable(window2, video) {
+    if (registry(window2).external.has(video)) {
+      throw mediaOutputConflict();
+    }
+  }
+  function reserveMediaOutput(window2, video) {
+    assertMediaOutputAvailable(window2, video);
+    registry(window2).reserved.add(video);
+  }
+  function registerExternalMediaOutput(window2, video) {
+    if (video && !ownsMediaOutput(window2, video)) {
+      registry(window2).external.add(video);
+    }
+  }
+  function mediaOutputConflict() {
+    const error = new Error("Another audio processor already owns this player");
+    error.name = "AudioSourceConflict";
+    return error;
+  }
+  function ownsMediaOutput(window2, video) {
+    const state = documents.get(window2);
+    return !!video && !!state && (state.reserved.has(video) || state.sources.has(video));
+  }
+  function reconcile(document2) {
+    for (const route of document2.active) {
+      if (!route.video.isConnected) {
+        document2.sources.get(route.video)?.disconnect();
+        route.ordinary?.disconnect();
+        route.ordinary = null;
+        document2.active.delete(route);
+      }
+    }
+    const context = document2.context;
+    if (context.state === "running") document2.activated = true;
+    if (document2.active.size) {
+      if (document2.suspending) return document2.suspending.then(() => reconcile(document2));
+      if (context.state === "suspended") {
+        return context.resume().then(() => {
+          if (context.state === "running") return reconcile(document2);
+        });
+      }
+      return Promise.resolve();
+    }
+    if (context.state === "running" && !document2.suspending && context.suspend) {
+      document2.suspending = context.suspend().finally(() => {
+        document2.suspending = null;
+        if (document2.active.size) {
+          reconcile(document2).catch(() => {
+          });
+        }
+      });
+      return document2.suspending;
+    }
+    return Promise.resolve();
+  }
+  function activity(document2, route, paused) {
+    if (!paused && (route.pending || document2.sources.has(route.video))) document2.active.add(route);
+    else document2.active.delete(route);
+    return reconcile(document2);
+  }
+  function acquireMediaOutput(window2, video) {
+    installMediaOutputGuard(window2);
+    assertMediaOutputAvailable(window2, video);
+    const url = video.currentSrc && new URL(video.currentSrc, window2.location.href);
+    if (video.mediaKeys || !video.srcObject && (!url || url.origin !== window2.location.origin && !video.crossOrigin)) {
+      throw new Error("Direct audio processing requires an accessible media source");
+    }
+    const document2 = registry(window2);
+    if (!document2.context) {
+      const Context = window2.AudioContext || window2.webkitAudioContext;
+      const context = new Context({ latencyHint: "interactive" });
+      document2.context = context;
+      const resume = () => {
+        reconcile(document2).catch(() => {
+        });
+      };
+      window2.document.addEventListener("pointerdown", resume, true);
+      window2.document.addEventListener("keydown", resume, true);
+    }
+    let route = document2.routes.get(video);
+    if (!route) {
+      route = { video, pending: false };
+      document2.routes.set(video, route);
+      for (const type of ["play", "playing", "pause", "ended"]) {
+        video.addEventListener(type, () => {
+          activity(document2, route, video.paused || video.ended).catch(() => {
+          });
+        });
+      }
+    }
+    route.pending = true;
+    let source = document2.sources.get(video);
+    function restoreRoute() {
+      route.pending = false;
+      route.ordinary?.disconnect();
+      route.ordinary = null;
+      if (source) {
+        source.disconnect();
+        if (video.isConnected) {
+          const gate = route.ordinary = document2.context.createGain();
+          gate.gain.value = 0;
+          gate.connect(document2.context.destination);
+          source.connect(gate);
+        }
+      }
+      activity(document2, route, video.paused || video.ended).catch(() => {
+      });
+    }
+    return {
+      context: document2.context,
+      get source() {
+        return source;
+      },
+      setPaused(paused) {
+        activity(document2, route, paused).catch(() => {
+        });
+      },
+      resume() {
+        return route.restoring ? route.restoring.then(() => activity(document2, route, video.paused || video.ended)) : activity(document2, route, video.paused || video.ended);
+      },
+      connect(input) {
+        const context = document2.context;
+        const activatedPause = context.state === "suspended" && document2.activated && (video.paused || video.ended);
+        if (context.state !== "running" && !activatedPause) throw new Error("Audio processing requires player activation");
+        if (!source) {
+          assertMediaOutputAvailable(window2, video);
+          try {
+            source = document2.createSource.call(document2.context, video);
+          } catch (error) {
+            if (error.name === "InvalidStateError") {
+              throw mediaOutputConflict();
+            }
+            throw error;
+          }
+          document2.sources.set(video, source);
+        }
+        route.ordinary?.disconnect();
+        route.ordinary = null;
+        source.disconnect();
+        source.connect(input);
+      },
+      restore(after) {
+        if (after) {
+          route.pending = false;
+          route.restoring = after.then(() => {
+            route.restoring = null;
+            if (route.pending) {
+              source?.disconnect();
+            } else {
+              restoreRoute();
+            }
+          });
+          return route.restoring;
+        }
+        if (route.restoring) {
+          route.pending = false;
+          return route.restoring;
+        }
+        restoreRoute();
+      }
+    };
+  }
+
+  // src/shared/normalization-playback.js
+  function createAudiblePlayback({ window: window2, video, selected, onMetrics, onFailure }) {
+    const output = acquireMediaOutput(window2, video), { context } = output;
+    let gate, graph, disposal, analysis;
+    const programme = createProgrammeState(selected);
+    let stopped = false, connected = false, node = null, reader = null, muted = true, paused = video.paused;
+    let meterBackend = "starting", rate = 0, samples = 0, hasFrame = false, lastReport = -Infinity;
+    function updateGain() {
+      graph?.setGain(programme.getProgrammeGain());
+    }
+    function short(power) {
+      if (stopped || hasFrame) return;
+      programme.short(power);
+      updateGain();
+    }
+    function frame(value) {
+      if (stopped) return;
+      programme.frame(value);
+      updateGain();
+      if (value.rawPower >= 1e-9 && value.power >= 1e-9) hasFrame = true;
+      const now = window2.performance.now();
+      if (now - lastReport < 100) return;
+      lastReport = now;
+      onMetrics({
+        gain: graph.readGain(),
+        samples,
+        delayMs: graph.lookaheadMs,
+        backend: "native graph",
+        meterBackend,
+        baseLatencyMs: (context.baseLatency || 0) * 1e3,
+        outputLatencyMs: (context.outputLatency || 0) * 1e3
+      });
+    }
+    const owned = {
+      context,
+      backend: "native graph",
+      get connected() {
+        return connected;
+      },
+      get analyzing() {
+        return !!analysis;
+      },
+      get running() {
+        return !stopped && !!analysis && context.state === "running";
+      },
+      startAnalysis(track) {
+        if (stopped) return Promise.resolve();
+        return analysis || (analysis = (async () => {
+          let native = false;
+          if (window2.MediaStreamTrackProcessor) {
+            try {
+              nativeAnalysis(track);
+              native = true;
+            } catch {
+            }
+          }
+          if (!native) await workletAnalysis();
+        })().catch(fail));
+      },
+      setState(next) {
+        if (stopped) return;
+        if (selected !== next.selected) {
+          selected = next.selected;
+          programme.setSelected(selected);
+          graph?.setSelected(selected);
+          updateGain();
+        }
+        paused = next.paused;
+        const silent = next.muted || paused || selected === 0;
+        if (gate && muted !== silent) {
+          muted = silent;
+          const at = silent ? context.currentTime : mediaTransitionTime(context);
+          gate.gain.cancelScheduledValues(context.currentTime);
+          gate.gain.setValueAtTime(0, at);
+          if (!silent) gate.gain.linearRampToValueAtTime(1, at + 5e-3);
+        }
+        output.setPaused(paused);
+      },
+      resume() {
+        return output.resume();
+      },
+      dispose() {
+        if (stopped) return disposal;
+        stopped = true;
+        if (!gate) {
+          return disposal = Promise.resolve(output.restore());
+        }
+        const at = mediaTransitionTime(context);
+        gate.gain.cancelScheduledValues(at);
+        gate.gain.setValueAtTime(gate.gain.value, at);
+        gate.gain.linearRampToValueAtTime(0, at + 5e-3);
+        reader?.cancel().catch(() => {
+        });
+        if (node) {
+          node.port.onmessage = null;
+          node.onprocessorerror = null;
+          node.port.postMessage("stop");
+          node.disconnect();
+          node.port.close();
+        }
+        const silenced = waitForMediaRender(window2, context, at + 5e-3 + 128 / context.sampleRate).then(() => {
+          video.volume = 0;
+          return waitForMediaRender(window2, context, context.currentTime + (context.baseLatency || 0) + 256 / context.sampleRate);
+        });
+        return disposal = output.restore(silenced).then(() => {
+          graph?.dispose();
+          gate.disconnect();
+        });
+      }
+    };
+    function fail(error) {
+      if (!stopped) {
+        owned.dispose();
+        onFailure(error);
+      }
+    }
+    function nativeAnalysis(track) {
+      reader = new window2.MediaStreamTrackProcessor({ track, maxBufferSize: 8 }).readable.getReader();
+      meterBackend = "native frames";
+      (async () => {
+        let meter, planes = [], input = [];
+        try {
+          while (!stopped) {
+            const { value: data, done } = await reader.read();
+            if (done) break;
+            try {
+              if (stopped || paused || context.state !== "running") continue;
+              if (!meter || rate !== data.sampleRate) {
+                rate = data.sampleRate;
+                meter = createLufsMeter(rate);
+              }
+              const count = data.numberOfFrames;
+              if (planes.length !== data.numberOfChannels || planes[0]?.length !== count) {
+                planes = Array.from({ length: data.numberOfChannels }, () => new Float32Array(count));
+                input = planes.length === 1 ? [planes[0], planes[0]] : planes.length === 2 ? planes : Array.from({ length: 2 }, () => new Float32Array(count));
+              }
+              for (let channel = 0; channel < planes.length; channel++) data.copyTo(planes[channel], { planeIndex: channel, format: "f32-planar" });
+              const channels = planes.length;
+              if (channels > 2) {
+                for (let i = 0; i < count; i++) {
+                  input[0][i] = channels === 4 ? 0.5 * (planes[0][i] + planes[2][i]) : planes[0][i] + Math.SQRT1_2 * (planes[2][i] + (channels >= 5 ? planes[channels - 2][i] : 0));
+                  input[1][i] = channels === 4 ? 0.5 * (planes[1][i] + planes[3][i]) : planes[1][i] + Math.SQRT1_2 * (planes[2][i] + (channels >= 5 ? planes[channels - 1][i] : 0));
+                }
+              }
+              samples += count;
+              meter.process(input, frame, hasFrame ? void 0 : short);
+            } finally {
+              data.close();
+            }
+          }
+          if (!stopped) fail(new Error("Audio analysis ended"));
+        } catch (error) {
+          fail(error);
+        } finally {
+          reader?.releaseLock();
+        }
+      })();
+    }
+    async function workletAnalysis() {
+      if (!context.audioWorklet || !window2.AudioWorkletNode) throw new Error("No supported audio analysis input");
+      const code = `const createLufsMeter=${createLufsMeter.toString()};
+registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
+ constructor(){super();this.meter=createLufsMeter(sampleRate);this.send=frame=>{this.port.postMessage(frame);if(frame.rawPower>=1e-9&&frame.power>=1e-9)this.measured=true};this.short=power=>{if(!this.measured)this.port.postMessage({attackPower:power})};this.port.onmessage=()=>{this.stopped=true}}
+ process(inputs){if(this.stopped)return false;try{this.meter.process(inputs[0]||[],this.send,this.measured?undefined:this.short);return true}catch(error){this.port.postMessage({failed:true,message:error.message});return false}}
+});`;
+      const url = window2.URL.createObjectURL(new window2.Blob([code], { type: "application/javascript" }));
+      try {
+        await context.audioWorklet.addModule(url);
+        if (stopped) return;
+        node = new window2.AudioWorkletNode(context, "tm-native-graph-meter", {
+          numberOfInputs: 1,
+          numberOfOutputs: 0,
+          channelCount: 2,
+          channelCountMode: "explicit",
+          channelInterpretation: "speakers"
+        });
+        meterBackend = "audio worklet";
+        rate = context.sampleRate;
+        node.port.onmessage = ({ data }) => {
+          if (stopped || paused) return;
+          if (data.failed) fail(new Error(data.message));
+          else if (data.attackPower != null) short(data.attackPower);
+          else {
+            samples += Math.round(data.duration * rate);
+            frame(data);
+          }
+        };
+        node.onprocessorerror = () => fail(new Error("Audio analysis failed"));
+        output.source.connect(node);
+      } finally {
+        window2.URL.revokeObjectURL(url);
+      }
+    }
+    owned.ready = (async () => {
+      await owned.resume();
+      if (stopped) return;
+      gate = context.createGain();
+      gate.gain.value = 0;
+      gate.connect(context.destination);
+      graph = createNativeGainGraph(context, { selected });
+      graph.output.connect(gate);
+      output.connect(graph.input);
+      connected = true;
+    })().catch(fail);
+    return owned;
+  }
+
+  // src/shared/normalization.js
+  function createVolumeNormalizer({ window: window2, getVolume, setVolume, isMuted, onStatusChanged = () => {
+  } }) {
+    installMediaOutputGuard(window2);
+    const retiring = /* @__PURE__ */ new WeakMap();
+    let enabled = false, sourceChanging = false, session = null, status = "Off", lastUiAt = -Infinity, lastDiagnostic = null;
+    const now = () => window2.performance.now();
+    function report(next, immediate = false) {
+      const changed = status !== next;
+      status = next;
+      schedule();
+      if (!changed && !immediate && now() - lastUiAt < 500) return;
+      if (session) {
+        const diagnostic = JSON.stringify({
+          status,
+          selected: session.preferred,
+          output: session.preferred === 0 ? 0 : session.blocked ? session.preferred : Math.round(100 * (session.metrics?.gain || 0)),
+          backend: session.playback?.backend || "starting",
+          context: session.playback?.context.state,
+          metrics: session.metrics || null,
+          error: session.error || null
+        });
+        if (diagnostic !== lastDiagnostic) {
+          lastDiagnostic = diagnostic;
+          window2.document.documentElement.dataset.tmAudioNormalization = diagnostic;
+        }
+      }
+      lastUiAt = now();
+      onStatusChanged();
+    }
+    function schedule() {
+      const owned = session;
+      if (!owned) return;
+      const cadence = owned.blocked || owned.video.paused || owned.video.ended ? 500 : sourceChanging || owned.track?.muted || owned.track?.readyState === "ended" || !owned.metrics || !owned.playback?.running ? 50 : 250;
+      if (owned.cadence === cadence) return;
+      window2.clearInterval(owned.timer);
+      owned.cadence = cadence;
+      owned.timer = window2.setInterval(tick, cadence);
+    }
+    function nativeWrite(owned, value, options = { preserveMute: true }) {
+      owned.writing = true;
+      try {
+        owned.video.volume = value / 100;
+        setVolume(owned.video, value, options);
+      } finally {
+        owned.writing = false;
+      }
+    }
+    function silence(owned) {
+      if (owned.releasing) return;
+      const volume = owned.playback?.connected ? 100 : 0;
+      if (getVolume(owned.video) !== volume || volume === 0 && owned.video.volume !== 0) nativeWrite(owned, volume);
+    }
+    function sync(owned) {
+      if (!owned.playback) return;
+      owned.playback.setState({ selected: owned.preferred / 100, muted: isMuted(owned.video), paused: owned.video.paused || owned.video.ended });
+    }
+    function release(owned) {
+      owned.generation++;
+      const finishing = owned.playback?.dispose() || owned.releasing;
+      owned.playback = null;
+      const stream = owned.stream;
+      owned.stream = null;
+      const stopTracks = () => {
+        if (stream) {
+          for (const track of stream.getTracks()) track.stop();
+        }
+      };
+      if (finishing) {
+        const releasing = Promise.resolve(finishing).then(() => {
+          stopTracks();
+          if (owned.releasing === releasing) {
+            owned.releasing = null;
+            if (session === owned) tick();
+          }
+        });
+        owned.releasing = releasing;
+      } else {
+        stopTracks();
+      }
+      owned.track = null;
+      owned.connecting = false;
+      owned.metrics = null;
+      owned.trackMutedAt = 0;
+      return owned.releasing || Promise.resolve();
+    }
+    function reset(owned) {
+      release(owned);
+      reserveMediaOutput(window2, owned.video);
+      owned.blocked = false;
+      owned.started = now();
+      owned.lastFrame = 0;
+      silence(owned);
+      report("Starting audio analysis");
+    }
+    function unavailable(owned, error) {
+      if (session !== owned) return;
+      const released = release(owned);
+      owned.blocked = true;
+      owned.error = String(error?.message || error || "Audio unavailable");
+      owned.sourceConflict = error?.name === "AudioSourceConflict";
+      owned.retryAt = now() + (owned.retryDelay || 1e3);
+      owned.retryDelay = Math.min(3e4, (owned.retryDelay || 1e3) * 2);
+      released.then(() => {
+        if (session !== owned || !owned.blocked) return;
+        try {
+          nativeWrite(owned, owned.preferred);
+        } catch {
+        }
+        fadeInMediaOutput(window2, owned.video);
+      });
+      report(owned.sourceConflict ? "Another audio processor is active \u2014 normal volume" : "Audio unavailable \u2014 normal volume");
+    }
+    async function connect(owned) {
+      if (owned.connecting || owned.playback?.analyzing || owned.blocked) return;
+      owned.connecting = true;
+      const generation = owned.generation;
+      try {
+        const capture = owned.video.captureStream || owned.video.mozCaptureStream;
+        if (!capture || owned.video.mediaKeys) throw new Error("Audio capture is unavailable");
+        owned.playback || (owned.playback = createAudiblePlayback({
+          window: window2,
+          video: owned.video,
+          selected: owned.preferred / 100,
+          onMetrics(metrics) {
+            if (session !== owned || owned.generation !== generation || owned.blocked) return;
+            owned.metrics = metrics;
+            owned.lastFrame = now();
+            sync(owned);
+            if (now() - owned.started > 3e3) owned.retryDelay = 1e3;
+            owned.error = null;
+            report(owned.video.paused || owned.video.ended || owned.video.readyState < 2 || sourceChanging ? "Waiting for playback" : owned.track?.muted ? "Waiting for accessible audio" : isMuted(owned.video) || owned.preferred === 0 ? "Waiting for audio" : "Active");
+          },
+          onFailure: (error) => {
+            if (session === owned && owned.generation === generation) unavailable(owned, error);
+          }
+        }));
+        await owned.playback.ready;
+        if (session !== owned || owned.generation !== generation || owned.blocked) return;
+        silence(owned);
+        sync(owned);
+        if (owned.video.paused || owned.video.ended || owned.video.readyState < 2) {
+          owned.connecting = false;
+          return;
+        }
+        owned.stream || (owned.stream = capture.call(owned.video));
+        for (const track2 of owned.stream.getVideoTracks()) track2.stop();
+        const track = owned.stream.getAudioTracks().find((item) => item.readyState === "live");
+        if (!track) {
+          owned.connecting = false;
+          return;
+        }
+        if (track.muted) throw new Error("Captured audio is inaccessible");
+        owned.track = track;
+        owned.started = now();
+        await owned.playback.startAnalysis(track);
+        if (session !== owned || owned.generation !== generation || owned.blocked) return;
+        owned.connecting = false;
+        silence(owned);
+        sync(owned);
+      } catch (error) {
+        if (session === owned && owned.generation === generation) unavailable(owned, error);
+      }
+    }
+    function tick() {
+      try {
+        check();
+      } finally {
+        schedule();
+      }
+    }
+    function check() {
+      const owned = session;
+      if (!owned) return;
+      if (!owned.video.isConnected) {
+        bind(null);
+        return;
+      }
+      if (owned.blocked) {
+        if (owned.sourceConflict) {
+          return;
+        }
+        if (sourceChanging || owned.video.paused || owned.video.readyState < 2 || now() < owned.retryAt) return;
+        try {
+          reset(owned);
+        } catch (error) {
+          unavailable(owned, error);
+          return;
+        }
+      }
+      try {
+        silence(owned);
+        sync(owned);
+        if (sourceChanging) {
+          if (now() - owned.changingAt > 3e3) {
+            sourceChanging = false;
+            unavailable(owned, new Error("Source transition did not complete"));
+          } else report("Waiting for playback");
+          return;
+        }
+        if (owned.video.paused || owned.video.ended || owned.video.readyState < 2) {
+          owned.lastFrame = 0;
+          owned.started = now();
+          report("Waiting for playback");
+          return;
+        }
+        if (owned.track?.readyState === "ended") reset(owned);
+        connect(owned);
+        if (owned.blocked) return;
+        if (owned.track?.muted) {
+          owned.trackMutedAt || (owned.trackMutedAt = now());
+          if (now() - owned.trackMutedAt > 1500) unavailable(owned, new Error("Captured audio is inaccessible"));
+          else report("Waiting for accessible audio");
+          return;
+        }
+        owned.trackMutedAt = 0;
+        if (!owned.playback?.running) {
+          if (now() - owned.started > 3e3) unavailable(owned, new Error("Click the player to activate audio processing"));
+          else report(owned.playback?.connected && owned.playback.context.state === "suspended" ? "Click the player to activate" : "Starting audio analysis");
+          return;
+        }
+        if (now() - (owned.lastFrame || owned.started) > (owned.metrics ? 1500 : 3e3)) {
+          unavailable(owned, new Error(owned.metrics ? "Live audio processing stalled" : "Audio analysis did not start"));
+        }
+      } catch (error) {
+        unavailable(owned, error);
+      }
+    }
+    function bind(video, preferredVolume) {
+      if (session?.video === video) return;
+      if (session) {
+        const owned2 = session;
+        session = null;
+        window2.clearInterval(owned2.timer);
+        for (const type of ["emptied", "loadstart", "seeking"]) owned2.video.removeEventListener(type, owned2.reset);
+        for (const type of ["play", "playing", "loadedmetadata", "seeked", "pause", "ended", "volumechange"]) owned2.video.removeEventListener(type, owned2.update);
+        window2.document.removeEventListener("pointerdown", owned2.gesture, true);
+        window2.document.removeEventListener("keydown", owned2.gesture, true);
+        retiring.set(owned2.video, owned2);
+        release(owned2).then(() => {
+          if (retiring.get(owned2.video) !== owned2) return;
+          if (owned2.video.isConnected && session?.video !== owned2.video) {
+            try {
+              nativeWrite(owned2, owned2.preferred, owned2.restoreOptions);
+            } catch {
+            }
+            fadeInMediaOutput(window2, owned2.video);
+          }
+          retiring.delete(owned2.video);
+        });
+        delete window2.document.documentElement.dataset.tmAudioNormalization;
+        lastDiagnostic = null;
+      }
+      if (!enabled || !video) {
+        report(enabled ? "Waiting for playback" : "Off");
+        return;
+      }
+      retiring.delete(video);
+      const owned = session = { video, preferred: clampVolume(preferredVolume ?? getVolume(video)), generation: 0, started: now(), changingAt: now(), lastFrame: 0 };
+      owned.reset = (event) => {
+        if (event?.type !== "seeking") sourceChanging = false;
+        try {
+          reset(owned);
+        } catch (error) {
+          unavailable(owned, error);
+        }
+      };
+      owned.update = (event) => {
+        if (owned.writing || owned.blocked) return;
+        if (event.type === "play" || event.type === "playing") {
+          owned.started = now();
+          owned.lastFrame = 0;
+        }
+        if (owned.updateQueued) return;
+        owned.updateQueued = true;
+        window2.queueMicrotask(() => {
+          owned.updateQueued = false;
+          if (session === owned) tick();
+        });
+      };
+      owned.gesture = () => {
+        if (owned.sourceConflict) {
+          return;
+        }
+        if (owned.blocked) reset(owned);
+        owned.playback?.resume().catch(() => {
+        });
+        tick();
+      };
+      for (const type of ["emptied", "loadstart", "seeking"]) video.addEventListener(type, owned.reset);
+      for (const type of ["play", "playing", "loadedmetadata", "seeked", "pause", "ended", "volumechange"]) video.addEventListener(type, owned.update);
+      window2.document.addEventListener("pointerdown", owned.gesture, true);
+      window2.document.addEventListener("keydown", owned.gesture, true);
+      try {
+        reset(owned);
+        tick();
+      } catch (error) {
+        unavailable(owned, error);
+      }
+    }
+    return {
+      bind,
+      isBoundTo: (video) => session?.video === video,
+      setEnabled(value) {
+        enabled = !!value;
+        if (!enabled) bind(null);
+        else if (!session) report("Waiting for playback");
+      },
+      setSourceChanging(value) {
+        const next = !!value;
+        if (sourceChanging === next) return;
+        sourceChanging = next;
+        if (session) {
+          if (next) {
+            session.changingAt = now();
+            reset(session);
+          } else tick();
+        }
+      },
+      getStatus: () => status,
+      getDetails() {
+        if (session?.sourceConflict) {
+          return "Turn off the other audio processor, then reload to use Auto-normalize volume.";
+        }
+        if (!session || !status.startsWith("Active")) return "";
+        const output = Math.round(100 * (session.metrics?.gain || 0));
+        return `${output < session.preferred ? "Reducing loud audio" : output > session.preferred ? "Raising quiet audio" : "No volume adjustment"}
+Output ${output}% \xB7 Selected ${session.preferred}%`;
+      },
+      getPreferredVolume(video, raw) {
+        return (session?.video === video ? session : retiring.get(video))?.preferred ?? raw;
+      },
+      acceptNativeVolume(video) {
+        const owned = session?.video === video ? session : retiring.get(video);
+        if (!owned || owned.writing) return;
+        owned.preferred = clampVolume(getVolume(video));
+        if (retiring.get(video) === owned) return;
+        if (!owned.blocked) {
+          silence(owned);
+          sync(owned);
+        }
+        report(status, true);
+      },
+      setPreferredVolume(video, value, options) {
+        const owned = session?.video === video ? session : retiring.get(video);
+        if (!owned) {
+          setVolume(video, value, options);
+          return;
+        }
+        owned.preferred = clampVolume(value);
+        if (retiring.get(video) === owned) {
+          owned.restoreOptions = options;
+          return;
+        }
+        if (owned.blocked) nativeWrite(owned, owned.preferred, options);
+        else {
+          nativeWrite(owned, owned.playback?.connected ? 100 : 0, options);
+          sync(owned);
+        }
+        report(status, true);
+      }
+    };
+  }
+
+  // src/shared/native-volume-input.js
+  function bindNativeVolumeInput({ window: window2, video, player, selector: selector3, excludeSelector, normalizer, onChange }) {
+    let active = true;
+    const types = ["pointerdown", "pointermove", "input", "change", "wheel", "keydown"];
+    const onInput = (event) => {
+      if (!event.target?.closest?.(selector3) || !player.contains(event.target)) return;
+      if (excludeSelector && event.target.closest(excludeSelector)) return;
+      if (event.type === "pointermove" && !event.buttons) return;
+      if (event.type === "keydown" && !["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) return;
+      window2.queueMicrotask(() => {
+        if (!active || !video.isConnected) return;
+        normalizer.acceptNativeVolume(video);
+        onChange();
+      });
+    };
+    for (const type of types) window2.document.addEventListener(type, onInput, true);
+    return () => {
+      active = false;
+      for (const type of types) window2.document.removeEventListener(type, onInput, true);
+    };
+  }
+
+  // src/shared/speaker-icon.js
+  function getSpeakerIconMode(pct, muted) {
+    if (muted || pct <= 0) return "muted";
+    if (pct >= 50) return "high";
+    return "low";
+  }
+  function createSpeakerIconGroup(document2, mode) {
+    const ns = "http://www.w3.org/2000/svg";
+    const group = document2.createElementNS(ns, "g");
+    const addPath = (d) => {
+      const path = document2.createElementNS(ns, "path");
+      path.setAttribute("fill", "currentColor");
+      path.setAttribute("d", d);
+      group.appendChild(path);
+    };
+    if (mode === "muted") {
+      addPath("M11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16C1 13.20 1.26 14.22 1.77 15.12C2.28 16.02 3.02 16.78 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.25 22 12.51 21.90 12.70 21.71C12.89 21.52 13 21.26 13 21V3C13 2.73 12.89 2.48 12.70 2.29C12.51 2.10 12.25 2 11.98 2C11.80 2 11.63 2.05 11.48 2.14ZM4.94 8.40L11 4.76V19.22L4.94 15.59C4.35 15.23 3.85 14.73 3.51 14.13C3.17 13.53 3 12.85 3 12.16V11.83C3 11.14 3.18 10.46 3.52 9.86C3.86 9.26 4.35 8.76 4.94 8.40Z");
+      addPath("M16.05 7.65L18.75 10.35L21.45 7.65L22.85 9.05L20.15 11.75L22.85 14.45L21.45 15.85L18.75 13.15L16.05 15.85L14.65 14.45L17.35 11.75L14.65 9.05L16.05 7.65Z");
+      return group;
+    }
+    addPath("M11.60 2.08L11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16L1.01 12.56C1.07 13.52 1.37 14.46 1.87 15.29C2.38 16.12 3.08 16.81 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.16 22 12.33 21.95 12.49 21.87C12.64 21.78 12.77 21.65 12.86 21.50C12.95 21.35 13 21.17 13 21V3C12.99 2.83 12.95 2.67 12.87 2.52C12.80 2.37 12.68 2.25 12.54 2.16C12.41 2.07 12.25 2.01 12.08 2C11.92 1.98 11.75 2.01 11.60 2.08Z");
+    addPath("M15.53 7.05C15.35 7.22 15.25 7.45 15.24 7.70C15.23 7.95 15.31 8.19 15.46 8.38L15.53 8.46L15.70 8.64C16.09 9.06 16.39 9.55 16.61 10.08L16.70 10.31C16.90 10.85 17 11.42 17 12L16.99 12.24C16.96 12.73 16.87 13.22 16.70 13.68L16.61 13.91C16.36 14.51 15.99 15.07 15.53 15.53C15.35 15.72 15.25 15.97 15.26 16.23C15.26 16.49 15.37 16.74 15.55 16.92C15.73 17.11 15.98 17.21 16.24 17.22C16.50 17.22 16.76 17.12 16.95 16.95C17.60 16.29 18.11 15.52 18.46 14.67L18.59 14.35C18.82 13.71 18.95 13.03 18.99 12.34L19 12C18.99 11.19 18.86 10.39 18.59 9.64L18.46 9.32C18.15 8.57 17.72 7.89 17.18 7.30L16.95 7.05L16.87 6.98C16.68 6.82 16.43 6.74 16.19 6.75C15.94 6.77 15.71 6.87 15.53 7.05Z");
+    if (mode === "high") {
+      addPath("M18.36 4.22C18.18 4.39 18.08 4.62 18.07 4.87C18.05 5.12 18.13 5.36 18.29 5.56L18.36 5.63L18.66 5.95C19.36 6.72 19.91 7.60 20.31 8.55L20.47 8.96C20.82 9.94 21 10.96 21 11.99L20.98 12.44C20.94 13.32 20.77 14.19 20.47 15.03L20.31 15.44C19.86 16.53 19.19 17.52 18.36 18.36C18.17 18.55 18.07 18.80 18.07 19.07C18.07 19.33 18.17 19.59 18.36 19.77C18.55 19.96 18.80 20.07 19.07 20.07C19.33 20.07 19.59 19.96 19.77 19.77C20.79 18.75 21.61 17.54 22.16 16.20L22.35 15.70C22.72 14.68 22.93 13.62 22.98 12.54L23 12C22.99 10.73 22.78 9.48 22.35 8.29L22.16 7.79C21.67 6.62 20.99 5.54 20.15 4.61L19.77 4.22L19.70 4.15C19.51 3.99 19.26 3.91 19.02 3.93C18.77 3.94 18.53 4.04 18.36 4.22Z");
+    }
+    return group;
+  }
+
+  // src/shared/volume-feedback.js
+  function createVolumeFeedback({ window: window2, player }) {
+    const document2 = player.ownerDocument;
+    let popup = null;
+    let timer = 0;
+    const clear = () => {
+      window2.clearTimeout(timer);
+      timer = 0;
+      popup?.remove();
+      popup = null;
+    };
+    const onKey = (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") clear();
+    };
+    player.addEventListener("pointerdown", clear, true);
+    player.addEventListener("keydown", onKey, true);
+    function show(value, muted = false, label) {
+      const percent = Math.round(clampVolume(value));
+      if (!popup) {
+        popup = document2.createElement("div");
+        popup.dataset.tmVolumeFeedback = "true";
+        popup.setAttribute("role", "status");
+        popup.setAttribute("aria-live", "polite");
+        popup.setAttribute("aria-atomic", "true");
+        Object.assign(popup.style, {
+          all: "initial",
+          position: "absolute",
+          top: "10%",
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          boxSizing: "border-box",
+          maxWidth: "calc(100% - 24px)",
+          padding: "8px 12px",
+          borderRadius: "6px",
+          background: "rgba(0,0,0,.7)",
+          color: "#fff",
+          font: "600 20px/1.2 Arial,Helvetica,sans-serif",
+          fontVariantNumeric: "tabular-nums",
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          zIndex: "20"
+        });
+        const icon = document2.createElementNS("http://www.w3.org/2000/svg", "svg");
+        icon.setAttribute("viewBox", "0 0 24 24");
+        icon.setAttribute("aria-hidden", "true");
+        icon.setAttribute("focusable", "false");
+        Object.assign(icon.style, { display: "block", flex: "none", width: "24px", height: "24px", color: "inherit" });
+        popup.append(icon, document2.createTextNode(""));
+        player.appendChild(popup);
+      }
+      const mode = getSpeakerIconMode(percent, muted);
+      if (popup.dataset.volumeIcon !== mode) {
+        popup.firstElementChild.replaceChildren(createSpeakerIconGroup(document2, mode));
+        popup.dataset.volumeIcon = mode;
+      }
+      popup.setAttribute("aria-label", label ? `${label}, volume ${percent}%` : `${muted ? "Muted, volume" : "Volume"} ${percent}%`);
+      popup.lastChild.nodeValue = label || `${percent}%`;
+      window2.clearTimeout(timer);
+      timer = window2.setTimeout(clear, 500);
+    }
+    return {
+      show,
+      showMute(value, muted) {
+        show(value, muted, muted ? "Muted" : "Unmuted");
+      },
+      clear,
+      dispose() {
+        clear();
+        player.removeEventListener("pointerdown", clear, true);
+        player.removeEventListener("keydown", onKey, true);
+      }
+    };
+  }
+
+  // src/platforms/twitch-extension-keys.js
+  var messageType = "tm-volume-player-key-v1";
+  var playerKeys = /* @__PURE__ */ new Set(["ArrowUp", "ArrowDown", " "]);
+  var recentCommands = /* @__PURE__ */ new WeakMap();
+  var extensionOrigin = (origin) => /^https:\/\/[a-z0-9-]+\.ext-twitch\.tv$/i.test(origin);
+  var interactive = 'input, textarea, select, button, a[href], [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="button"], [role="slider"], [role="combobox"]';
+  function validMessage(event) {
+    return extensionOrigin(event.origin) && event.data?.type === messageType && typeof event.data.id === "string" && event.data.id.length > 0 && event.data.id.length <= 64 && playerKeys.has(event.data.key) && !(event.data.key === " " && event.data.repeat);
+  }
+  function startTwitchExtensionKeys(window2) {
+    if (window2.parent === window2 || !extensionOrigin(window2.location.origin)) return;
+    window2.addEventListener("keydown", (event) => {
+      if (!playerKeys.has(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key === " " && event.repeat) return;
+      if (event.target?.closest?.(interactive)) return;
+      window2.queueMicrotask(() => {
+        if (event.defaultPrevented) return;
+        event.preventDefault();
+        event.stopPropagation();
+        window2.parent.postMessage({ type: messageType, id: window2.crypto.randomUUID(), key: event.key, repeat: event.repeat }, "*");
+      });
+    });
+    window2.addEventListener("message", (event) => {
+      const frame = window2.document.activeElement;
+      if (validMessage(event) && frame?.tagName === "IFRAME" && frame.contentWindow === event.source) {
+        window2.parent.postMessage({ type: messageType, id: event.data.id, key: event.data.key, repeat: event.data.repeat === true }, "*");
+      }
+    });
+  }
+  function focusedTwitchExtensionKey(event, player) {
+    const frame = player?.ownerDocument.activeElement;
+    if (!validMessage(event) || !frame?.matches?.("iframe.extension-view__iframe") || !player.contains(frame) || frame.contentWindow !== event.source) return null;
+    let seen = recentCommands.get(frame);
+    if (!seen) {
+      seen = /* @__PURE__ */ new Set();
+      recentCommands.set(frame, seen);
+    }
+    if (seen.has(event.data.id)) return null;
+    seen.add(event.data.id);
+    if (seen.size > 64) seen.delete(seen.values().next().value);
+    return event.data.key;
+  }
+
+  // src/shared/normalization-ui.js
+  function createNormalizationIcon(document2) {
+    const icon = document2.createElement("span");
+    icon.className = "tm-normalization-icon";
+    icon.hidden = true;
+    icon.dataset.tmTooltip = "Auto-normalize volume is on";
+    icon.setAttribute("aria-hidden", "true");
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document2.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 14 14");
+    svg.setAttribute("focusable", "false");
+    const frame = document2.createElementNS(ns, "circle");
+    frame.setAttribute("cx", "7");
+    frame.setAttribute("cy", "7");
+    frame.setAttribute("r", "6.5");
+    const waveform = document2.createElementNS(ns, "path");
+    waveform.setAttribute("d", "M3.5 5.5v3 M7 3.5v7 M10.5 5.5v3");
+    svg.append(frame, waveform);
+    icon.append(svg);
+    return icon;
+  }
+  function updateNormalizationIcon(overlay, status) {
+    if (!overlay) return;
+    const visible = status.startsWith("Active") || status === "Waiting for playback" || status === "Starting audio analysis" || status === "Waiting for audio";
+    const icon = overlay.querySelector(".tm-normalization-icon");
+    const description = overlay.querySelector(".tm-normalization-description");
+    if (!icon || !description || icon.hidden === !visible) return;
+    overlay.classList.toggle("tm-normalization-enabled", visible);
+    icon.hidden = !visible;
+    for (const control of overlay.querySelectorAll('.tm-volume-icon-cell, input[type="range"]')) {
+      const ids = (control.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== description.id);
+      if (visible) ids.push(description.id);
+      if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
+      else control.removeAttribute("aria-describedby");
+    }
+  }
+
+  // src/shared/volume-number.js
+  var VOLUME_NUMBER_FONT_FAMILY = '"Segoe UI", system-ui, sans-serif';
+  var VOLUME_NUMBER_FONT_WEIGHT = 600;
+  var VOLUME_NUMBER_FONT_SIZE = 16;
+  var VOLUME_NUMBER_COMPACT_SIZE = 15;
+  var VOLUME_NUMBER_COMPACT_SPACING = -0.25;
+  var COMPACT_MAX_WIDTH = 22.5;
+  function createVolumeNumberRenderer(document2, center) {
+    let context;
+    let pixelRatio;
+    const positions = /* @__PURE__ */ new Map();
+    return (element, text) => {
+      const compact = text.length > 2;
+      const size = compact ? VOLUME_NUMBER_COMPACT_SIZE : VOLUME_NUMBER_FONT_SIZE;
+      const ratio = document2.defaultView?.devicePixelRatio || 1;
+      if (ratio !== pixelRatio) {
+        positions.clear();
+        pixelRatio = ratio;
+      }
+      if (element.textContent !== text) {
+        element.textContent = text;
+      }
+      element.toggleAttribute("data-compact", compact);
+      if (context === void 0) {
+        context = document2.defaultView?.CanvasRenderingContext2D ? document2.createElement("canvas").getContext("2d") : null;
+      }
+      if (!context) {
+        return;
+      }
+      let position = positions.get(text);
+      if (!position) {
+        context.font = `${VOLUME_NUMBER_FONT_WEIGHT} ${size}px ${VOLUME_NUMBER_FONT_FAMILY}`;
+        let metrics = context.measureText(text);
+        const spacing = compact ? VOLUME_NUMBER_COMPACT_SPACING * (text.length - 1) : 0;
+        const width = metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight + spacing;
+        let fittedSize = size;
+        if (compact && width > COMPACT_MAX_WIDTH) {
+          fittedSize = Number((size * COMPACT_MAX_WIDTH / width).toFixed(3));
+          context.font = `${VOLUME_NUMBER_FONT_WEIGHT} ${fittedSize}px ${VOLUME_NUMBER_FONT_FAMILY}`;
+          metrics = context.measureText(text);
+        }
+        const {
+          actualBoundingBoxLeft: left,
+          actualBoundingBoxRight: right,
+          actualBoundingBoxAscent: ascent,
+          actualBoundingBoxDescent: descent
+        } = metrics;
+        if (![left, right, ascent, descent].every(Number.isFinite) || left + right <= 0 || ascent + descent <= 0) {
+          return;
+        }
+        position = {
+          x: center + (left - right - spacing) / 2,
+          y: center + (ascent - descent) / 2,
+          fontSize: fittedSize
+        };
+        positions.set(text, position);
+      }
+      element.setAttribute("text-anchor", "start");
+      element.setAttribute("dominant-baseline", "alphabetic");
+      element.setAttribute("alignment-baseline", "alphabetic");
+      element.style.fontSize = position.fontSize < size ? `${position.fontSize}px` : "";
+      element.setAttribute("x", String(Number(position.x.toFixed(3))));
+      element.setAttribute("y", String(Number(position.y.toFixed(3))));
+    };
   }
 
   // src/shared/overlay-ui.js
@@ -121,7 +1761,6 @@
       isAlwaysExpandedEnabled,
       isSliderOnVideo,
       updateOverlayOpacity,
-      finishExpandedHoldIfDue,
       getVolumeStep,
       accentLight: VOLUME_ACCENT_LIGHT,
       accentDark: VOLUME_ACCENT_DARK,
@@ -134,8 +1773,7 @@
     const VOLUME_INDICATOR_TEXT_Y = "20";
     const VOLUME_ARC_RADIUS = "14.5";
     const VOLUME_ARC_STROKE_WIDTH = "3";
-    const VOLUME_INDICATOR_COMPACT_TEXT_LENGTH = "22.5";
-    const VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX = 1.5;
+    const renderVolumeNumber = createVolumeNumberRenderer(document2, Number(VOLUME_INDICATOR_CENTER));
     function updateSliderBar(slider) {
       const value = Number(slider.value) || 0;
       const pct = Math.min(Math.max(value, 0), 100);
@@ -188,19 +1826,7 @@
       }
       const percent = overlay.querySelector(".tm-volume-percent");
       if (percent) {
-        const text = muted ? "M" : String(Math.round(pct));
-        const isCompact = text.length > 2;
-        percent.textContent = text;
-        percent.setAttribute("x", VOLUME_INDICATOR_CENTER);
-        percent.setAttribute("y", VOLUME_INDICATOR_TEXT_Y);
-        if (isCompact) {
-          percent.setAttribute("textLength", VOLUME_INDICATOR_COMPACT_TEXT_LENGTH);
-          percent.setAttribute("lengthAdjust", "spacingAndGlyphs");
-        } else {
-          percent.removeAttribute("textLength");
-          percent.removeAttribute("lengthAdjust");
-        }
-        opticallyCenterVolumeText(percent);
+        renderVolumeNumber(percent, muted ? "M" : String(Math.round(pct)));
       }
       const arc = overlay.querySelector(".tm-volume-arc");
       if (arc) {
@@ -211,27 +1837,6 @@
         arc.setAttribute("stroke-dasharray", dashValue);
         arc.style.strokeDasharray = dashValue;
       }
-    }
-    function opticallyCenterVolumeText(textElement) {
-      textElement.removeAttribute("transform");
-      if (typeof textElement.getBBox !== "function") return;
-      let box;
-      try {
-        box = textElement.getBBox();
-      } catch {
-        return;
-      }
-      if (!box || !Number.isFinite(box.x) || !Number.isFinite(box.width) || box.width <= 0) {
-        return;
-      }
-      const visualCenter = box.x + box.width / 2;
-      const correction = Number(VOLUME_INDICATOR_CENTER) - visualCenter;
-      const safeCorrection = Math.max(
-        -VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX,
-        Math.min(VOLUME_TEXT_MAX_OPTICAL_SHIFT_PX, correction)
-      );
-      if (Math.abs(safeCorrection) < 0.01) return;
-      textElement.setAttribute("transform", `translate(${safeCorrection.toFixed(2)} 0)`);
     }
     function setOverlayExpanded(overlay, expanded, force = false, options = {}) {
       if (!overlay) return;
@@ -286,13 +1891,30 @@
       updateOverlayOpacity(overlay);
     }
     function shouldKeepOverlayExpanded(overlay) {
-      return isAlwaysExpandedEnabled() || overlay.matches(":hover") || overlay.contains(document2.activeElement) || overlay.dataset.tmDragging === "true";
+      return isAlwaysExpandedEnabled() || overlay.matches(":hover") || overlay.contains(document2.activeElement) && document2.activeElement.matches(":focus-visible") || overlay.dataset.tmDragging === "true";
     }
     function clearExpandedHoldTimer(overlay) {
       if (overlay._expandedHoldTimer) {
         clearTimeout(overlay._expandedHoldTimer);
         overlay._expandedHoldTimer = 0;
       }
+    }
+    function finishExpandedHoldIfDue(overlay) {
+      if (!overlay) return;
+      if (!overlay.isConnected) {
+        clearExpandedHold(overlay);
+        return;
+      }
+      if (shouldKeepOverlayExpanded(overlay)) return;
+      if (Date.now() < (overlay._expandedHoldUntil || 0)) {
+        scheduleExpandedHoldRelease(overlay);
+        return;
+      }
+      clearExpandedHold(overlay);
+      setOverlayExpanded(overlay, false);
+    }
+    function collapseOverlayIfIdle(overlay) {
+      window2.setTimeout(() => finishExpandedHoldIfDue(overlay), 0);
     }
     function clearExpandedHold(overlay) {
       overlay.dataset.tmKeepExpanded = "false";
@@ -321,31 +1943,6 @@
       overlay._expandedHoldUntil = Date.now() + VOLUME_CHANGE_EXPANDED_HOLD_MS;
       setOverlayExpanded(overlay, true);
       scheduleExpandedHoldRelease(overlay);
-    }
-    function getSpeakerIconMode(pct, muted) {
-      if (muted || pct <= 0) return "muted";
-      if (pct >= 50) return "high";
-      return "low";
-    }
-    function makeSpeakerIconGroup(ns, mode) {
-      const group = document2.createElementNS(ns, "g");
-      const addPath = (d) => {
-        const path = document2.createElementNS(ns, "path");
-        path.setAttribute("fill", "currentColor");
-        path.setAttribute("d", d);
-        group.appendChild(path);
-      };
-      if (mode === "muted") {
-        addPath("M11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16C1 13.20 1.26 14.22 1.77 15.12C2.28 16.02 3.02 16.78 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.25 22 12.51 21.90 12.70 21.71C12.89 21.52 13 21.26 13 21V3C13 2.73 12.89 2.48 12.70 2.29C12.51 2.10 12.25 2 11.98 2C11.80 2 11.63 2.05 11.48 2.14ZM4.94 8.40L11 4.76V19.22L4.94 15.59C4.35 15.23 3.85 14.73 3.51 14.13C3.17 13.53 3 12.85 3 12.16V11.83C3 11.14 3.18 10.46 3.52 9.86C3.86 9.26 4.35 8.76 4.94 8.40Z");
-        addPath("M16.05 7.65L18.75 10.35L21.45 7.65L22.85 9.05L20.15 11.75L22.85 14.45L21.45 15.85L18.75 13.15L16.05 15.85L14.65 14.45L17.35 11.75L14.65 9.05L16.05 7.65Z");
-        return group;
-      }
-      addPath("M11.60 2.08L11.48 2.14L3.91 6.68C3.02 7.21 2.28 7.97 1.77 8.87C1.26 9.77 1 10.79 1 11.83V12.16L1.01 12.56C1.07 13.52 1.37 14.46 1.87 15.29C2.38 16.12 3.08 16.81 3.91 17.31L11.48 21.85C11.63 21.94 11.80 21.99 11.98 21.99C12.16 22 12.33 21.95 12.49 21.87C12.64 21.78 12.77 21.65 12.86 21.50C12.95 21.35 13 21.17 13 21V3C12.99 2.83 12.95 2.67 12.87 2.52C12.80 2.37 12.68 2.25 12.54 2.16C12.41 2.07 12.25 2.01 12.08 2C11.92 1.98 11.75 2.01 11.60 2.08Z");
-      addPath("M15.53 7.05C15.35 7.22 15.25 7.45 15.24 7.70C15.23 7.95 15.31 8.19 15.46 8.38L15.53 8.46L15.70 8.64C16.09 9.06 16.39 9.55 16.61 10.08L16.70 10.31C16.90 10.85 17 11.42 17 12L16.99 12.24C16.96 12.73 16.87 13.22 16.70 13.68L16.61 13.91C16.36 14.51 15.99 15.07 15.53 15.53C15.35 15.72 15.25 15.97 15.26 16.23C15.26 16.49 15.37 16.74 15.55 16.92C15.73 17.11 15.98 17.21 16.24 17.22C16.50 17.22 16.76 17.12 16.95 16.95C17.60 16.29 18.11 15.52 18.46 14.67L18.59 14.35C18.82 13.71 18.95 13.03 18.99 12.34L19 12C18.99 11.19 18.86 10.39 18.59 9.64L18.46 9.32C18.15 8.57 17.72 7.89 17.18 7.30L16.95 7.05L16.87 6.98C16.68 6.82 16.43 6.74 16.19 6.75C15.94 6.77 15.71 6.87 15.53 7.05Z");
-      if (mode === "high") {
-        addPath("M18.36 4.22C18.18 4.39 18.08 4.62 18.07 4.87C18.05 5.12 18.13 5.36 18.29 5.56L18.36 5.63L18.66 5.95C19.36 6.72 19.91 7.60 20.31 8.55L20.47 8.96C20.82 9.94 21 10.96 21 11.99L20.98 12.44C20.94 13.32 20.77 14.19 20.47 15.03L20.31 15.44C19.86 16.53 19.19 17.52 18.36 18.36C18.17 18.55 18.07 18.80 18.07 19.07C18.07 19.33 18.17 19.59 18.36 19.77C18.55 19.96 18.80 20.07 19.07 20.07C19.33 20.07 19.59 19.96 19.77 19.77C20.79 18.75 21.61 17.54 22.16 16.20L22.35 15.70C22.72 14.68 22.93 13.62 22.98 12.54L23 12C22.99 10.73 22.78 9.48 22.35 8.29L22.16 7.79C21.67 6.62 20.99 5.54 20.15 4.61L19.77 4.22L19.70 4.15C19.51 3.99 19.26 3.91 19.02 3.93C18.77 3.94 18.53 4.04 18.36 4.22Z");
-      }
-      return group;
     }
     function formatCssPx(value) {
       if (!Number.isFinite(value)) return "0px";
@@ -458,7 +2055,7 @@
         return circle;
       };
       const appendSpeakerIcon = (className, mode, transform) => {
-        const group = makeSpeakerIconGroup(ns, mode);
+        const group = createSpeakerIconGroup(document2, mode);
         group.setAttribute("class", `${className} tm-volume-speaker-icon`);
         group.setAttribute("transform", transform);
         svg.appendChild(group);
@@ -491,9 +2088,9 @@
       percent.setAttribute("text-anchor", "middle");
       percent.setAttribute("dominant-baseline", "central");
       percent.setAttribute("alignment-baseline", "central");
-      percent.setAttribute("font-family", "Arial, Helvetica, sans-serif");
-      percent.setAttribute("font-size", "15");
-      percent.setAttribute("font-weight", "700");
+      percent.setAttribute("font-family", VOLUME_NUMBER_FONT_FAMILY);
+      percent.setAttribute("font-size", String(VOLUME_NUMBER_FONT_SIZE));
+      percent.setAttribute("font-weight", String(VOLUME_NUMBER_FONT_WEIGHT));
       percent.textContent = "0";
       svg.appendChild(percent);
       appendSpeakerIcon("tm-volume-speaker-muted", "muted", "translate(8 8)");
@@ -501,7 +2098,7 @@
       appendSpeakerIcon("tm-volume-speaker-high", "high", "translate(8 8)");
       return svg;
     }
-    return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks };
+    return { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, collapseOverlayIfIdle, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks };
   }
 
   // src/shared/options-ui.js
@@ -512,10 +2109,12 @@
       refreshOptionsPopupState,
       getVolumeSliderMode,
       setVolumeSliderMode,
-      getReplaceNativePlacement,
-      setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
+      isNormalizationEnabled,
+      setNormalizationEnabled,
+      getNormalizationStatus,
+      getNormalizationDetails,
       getVolumeStep,
       setVolumeStep,
       isAlwaysExpandedEnabled,
@@ -565,27 +2164,31 @@
         });
       });
     }
+    function syncNormalizationStatus(popup) {
+      if (!popup) return;
+      const normalizationStatus = popup.querySelector("#tm-volume-options-normalization-status");
+      const status = getNormalizationStatus();
+      if (normalizationStatus && normalizationStatus.textContent !== status) normalizationStatus.textContent = status;
+      if (normalizationStatus) normalizationStatus.dataset.state = status.startsWith("Active") ? "active" : "idle";
+      const feedback = popup.querySelector(".tm-volume-options-normalization-feedback");
+      if (feedback) feedback.hidden = !isNormalizationEnabled();
+      const normalizationDetails = popup.querySelector("#tm-volume-options-normalization-details");
+      const details = getNormalizationDetails();
+      if (normalizationDetails) {
+        if (normalizationDetails.textContent !== details) normalizationDetails.textContent = details;
+        normalizationDetails.hidden = !details;
+      }
+    }
     function syncOptionsPopupState(popup) {
       if (!popup) return;
       const selectedMode = getVolumeSliderMode();
-      const selectedPlacement = getReplaceNativePlacement();
       const selectedAppearance = getVolumeAppearance();
       const selectedStep = getVolumeStep();
       const onVideo = isSliderOnVideo();
-      ["on", "off", "replace-native"].forEach((mode) => {
-        popup.querySelector(`#tm-volume-options-mode-${mode}`)?.setAttribute("aria-checked", selectedMode === mode ? "true" : "false");
-      });
-      const placementSection = popup.querySelector("#tm-volume-options-placement-section");
-      const placementEnabled = selectedMode === "replace-native";
-      if (placementSection) {
-        placementSection.dataset.disabled = placementEnabled ? "false" : "true";
-      }
-      ["native", "custom"].forEach((placement) => {
-        const radio = popup.querySelector(`#tm-volume-options-placement-${placement}`);
-        if (!radio) return;
-        radio.setAttribute("aria-checked", selectedPlacement === placement ? "true" : "false");
-        radio.disabled = !placementEnabled;
-      });
+      popup.querySelector("#tm-volume-options-normalization")?.setAttribute("aria-checked", isNormalizationEnabled() ? "true" : "false");
+      syncNormalizationStatus(popup);
+      const modeSelect = popup.querySelector("#tm-volume-options-mode");
+      if (modeSelect) modeSelect.value = selectedMode;
       ["new", "classic"].forEach((appearance) => {
         popup.querySelector(`#tm-volume-options-appearance-${appearance}`)?.setAttribute("aria-checked", selectedAppearance === appearance ? "true" : "false");
       });
@@ -599,6 +2202,8 @@
       if (opacitySection) opacitySection.style.display = onVideoDisplay;
       const sizeSection = popup.querySelector("#tm-volume-options-size-section");
       if (sizeSection) sizeSection.style.display = onVideoDisplay;
+      const appearanceHint = popup.querySelector(".tm-volume-options-appearance-hint");
+      if (appearanceHint) appearanceHint.hidden = onVideo;
       syncOptionsRadioGroups(popup);
     }
     function handleRadioNavigation(event) {
@@ -687,85 +2292,51 @@
     }
     function createModeSection() {
       const section = document2.createElement("div");
-      section.className = "tm-volume-options-section";
-      section.appendChild(createOptionsSectionLabel("Mode"));
-      const stack = document2.createElement("div");
-      stack.className = "tm-volume-options-segment-stack";
-      stack.setAttribute("role", "radiogroup");
-      stack.setAttribute("aria-label", "Mode");
-      stack.appendChild(createOptionsSegment([
-        createOptionsRadio(
-          "tm-volume-options-mode-on",
-          "On",
-          getVolumeSliderMode() === "on",
-          () => setVolumeSliderMode("on")
-        ),
-        createOptionsRadio(
-          "tm-volume-options-mode-off",
-          "Off",
-          getVolumeSliderMode() === "off",
-          () => setVolumeSliderMode("off")
-        )
-      ]));
-      stack.appendChild(createOptionsSegment([
-        createOptionsRadio(
-          "tm-volume-options-mode-replace-native",
-          "Replace native",
-          getVolumeSliderMode() === "replace-native",
-          () => setVolumeSliderMode("replace-native")
-        )
-      ]));
-      section.appendChild(stack);
-      return section;
-    }
-    function createPlacementSection() {
-      const section = document2.createElement("div");
-      section.className = "tm-volume-options-section";
-      section.id = "tm-volume-options-placement-section";
-      section.appendChild(createOptionsSectionLabel("Position when replacing native"));
-      const segment = createOptionsSegment([
-        createOptionsRadio(
-          "tm-volume-options-placement-native",
-          "Native spot",
-          getReplaceNativePlacement() === "native",
-          () => setReplaceNativePlacement("native")
-        ),
-        createOptionsRadio(
-          "tm-volume-options-placement-custom",
-          "Custom spot",
-          getReplaceNativePlacement() === "custom",
-          () => setReplaceNativePlacement("custom")
-        )
-      ]);
-      segment.setAttribute("role", "radiogroup");
-      segment.setAttribute("aria-label", "Position when replacing native");
-      section.appendChild(segment);
+      section.className = "tm-volume-options-mode";
+      const label = document2.createElement("label");
+      label.htmlFor = "tm-volume-options-mode";
+      label.textContent = "Mode";
+      const select = document2.createElement("select");
+      select.id = label.htmlFor;
+      for (const [value, text] of [["on", "On"], ["off", "Off"], ["replace-native", "Replace native"]]) {
+        const option = document2.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        select.appendChild(option);
+      }
+      select.value = getVolumeSliderMode();
+      select.addEventListener("change", () => {
+        setVolumeSliderMode(select.value);
+        refreshOptionsPopupState();
+      });
+      select.addEventListener("keydown", (event) => event.stopPropagation());
+      section.append(label, select);
       return section;
     }
     function createBehaviorSection() {
       const section = document2.createElement("div");
       section.className = "tm-volume-options-section";
-      section.appendChild(createOptionsSectionLabel("Slider behavior"));
+      section.appendChild(createOptionsSectionLabel("Behavior"));
       const list = document2.createElement("div");
       list.className = "tm-volume-options-checklist";
-      list.appendChild(createOptionsCheckboxRow(
-        "tm-volume-options-always-expanded",
-        "Always expanded",
-        isAlwaysExpandedEnabled(),
-        (next) => setAlwaysExpandedEnabled(next)
-      ));
       list.appendChild(createOptionsCheckboxRow(
         "tm-volume-options-location-video",
         "Show on video",
         isSliderOnVideo(),
         (next) => setSliderLocation(next ? "video" : "controls")
       ));
+      list.appendChild(createOptionsCheckboxRow(
+        "tm-volume-options-always-expanded",
+        "Always expanded",
+        isAlwaysExpandedEnabled(),
+        (next) => setAlwaysExpandedEnabled(next)
+      ));
       section.appendChild(list);
       return section;
     }
     function createVolumeStepSection() {
       const section = document2.createElement("div");
-      section.className = "tm-volume-options-section";
+      section.className = "tm-volume-options-step-setting";
       section.id = "tm-volume-options-step-section";
       section.appendChild(createOptionsSectionLabel("Adjustment step"));
       const segment = createOptionsSegment(VOLUME_STEPS.map(
@@ -779,6 +2350,46 @@
       segment.setAttribute("role", "radiogroup");
       segment.setAttribute("aria-label", "Volume adjustment step");
       section.appendChild(segment);
+      return section;
+    }
+    function createNormalizationSection() {
+      const section = document2.createElement("div");
+      section.className = "tm-volume-options-section";
+      section.appendChild(createOptionsSectionLabel("Audio"));
+      const list = document2.createElement("div");
+      list.className = "tm-volume-options-checklist";
+      const toggle = createOptionsCheckboxRow(
+        "tm-volume-options-normalization",
+        "Auto-normalize volume",
+        isNormalizationEnabled(),
+        setNormalizationEnabled
+      );
+      toggle.setAttribute("aria-describedby", "tm-volume-options-normalization-help tm-volume-options-normalization-status");
+      list.appendChild(toggle);
+      section.appendChild(list);
+      const help = document2.createElement("p");
+      help.id = "tm-volume-options-normalization-help";
+      help.className = "tm-volume-options-help";
+      help.textContent = "Keeps sources closer in loudness. Your slider sets the listening level. Increases are limited to normal player volume.";
+      help.hidden = true;
+      section.appendChild(help);
+      const feedback = document2.createElement("div");
+      feedback.className = "tm-volume-options-normalization-feedback";
+      const status = document2.createElement("p");
+      status.id = "tm-volume-options-normalization-status";
+      status.className = "tm-volume-options-help";
+      status.setAttribute("role", "status");
+      status.textContent = getNormalizationStatus();
+      feedback.appendChild(status);
+      const details = document2.createElement("p");
+      details.id = "tm-volume-options-normalization-details";
+      details.className = "tm-volume-options-help";
+      details.setAttribute("aria-live", "off");
+      details.textContent = getNormalizationDetails();
+      details.hidden = !details.textContent;
+      feedback.appendChild(details);
+      section.appendChild(feedback);
+      section.appendChild(createVolumeStepSection());
       return section;
     }
     function createAppearanceSection() {
@@ -972,6 +2583,7 @@
       popup.id = OPTIONS_POPUP_ID;
       popup.setAttribute("role", "dialog");
       popup.setAttribute("aria-label", "Volume Slider Options");
+      popup.tabIndex = -1;
       popup.toggleAttribute("hidden", true);
       const header = document2.createElement("div");
       header.className = "tm-volume-options-header";
@@ -981,20 +2593,66 @@
       header.appendChild(title);
       const body = document2.createElement("div");
       body.className = "tm-volume-options-body";
-      body.appendChild(createModeSection());
-      body.appendChild(createPlacementSection());
-      body.appendChild(createAppearanceSection());
-      body.appendChild(createVolumeStepSection());
-      body.appendChild(createBehaviorSection());
-      body.appendChild(createThicknessSection());
-      body.appendChild(createOpacitySection());
-      body.appendChild(createSizeSection());
+      const tabList = document2.createElement("div");
+      tabList.className = "tm-volume-options-tabs";
+      tabList.setAttribute("role", "tablist");
+      tabList.setAttribute("aria-label", "Volume settings");
+      const panels = ["general", "appearance"].map((name) => {
+        const panel = document2.createElement("div");
+        panel.id = `tm-volume-options-panel-${name}`;
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-labelledby", `tm-volume-options-tab-${name}`);
+        body.appendChild(panel);
+        return panel;
+      });
+      const tabs = panels.map((panel, index) => {
+        const tab = document2.createElement("button");
+        tab.type = "button";
+        tab.id = panel.getAttribute("aria-labelledby");
+        tab.className = "tm-volume-options-tab";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-controls", panel.id);
+        tab.appendChild(createOptionsButtonLabel(index ? "Appearance" : "General"));
+        tab.addEventListener("click", () => selectTab(index));
+        tab.addEventListener("keydown", (event) => {
+          let next;
+          if (event.key === "ArrowLeft") next = (index + panels.length - 1) % panels.length;
+          else if (event.key === "ArrowRight") next = (index + 1) % panels.length;
+          else if (event.key === "Home") next = 0;
+          else if (event.key === "End") next = panels.length - 1;
+          else return;
+          event.preventDefault();
+          event.stopPropagation();
+          selectTab(next);
+          tabs[next].focus();
+        });
+        tabList.appendChild(tab);
+        return tab;
+      });
+      function selectTab(index) {
+        stopOptionsPreview();
+        tabs.forEach((tab, i) => {
+          tab.setAttribute("aria-selected", i === index ? "true" : "false");
+          tab.tabIndex = i === index ? 0 : -1;
+          panels[i].hidden = i !== index;
+        });
+        body.scrollTop = 0;
+      }
+      panels[0].append(createNormalizationSection(), createBehaviorSection());
+      panels[1].append(createAppearanceSection(), createThicknessSection(), createSizeSection(), createOpacitySection());
+      const hint = document2.createElement("p");
+      hint.className = "tm-volume-options-help tm-volume-options-appearance-hint";
+      hint.append("To adjust size and opacity,", document2.createElement("br"), "enable \u201CShow on video\u201D in General.");
+      panels[1].appendChild(hint);
+      selectTab(0);
       popup.appendChild(header);
+      popup.appendChild(createModeSection());
+      popup.appendChild(tabList);
       popup.appendChild(body);
       popup.addEventListener("click", (event) => event.stopPropagation());
       return popup;
     }
-    return { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview };
+    return { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview };
   }
 
   // src/shared/settings.js
@@ -1012,11 +2670,8 @@
   function normalizeVolumeSliderMode(mode) {
     return normalizeChoice(mode, MODES);
   }
-  function normalizeReplaceNativePlacement(placement) {
-    return normalizeChoice(placement, ["native", "custom"]);
-  }
-  function normalizeSliderLocation(location) {
-    return normalizeChoice(location, LOCATIONS);
+  function normalizeSliderLocation(location2) {
+    return normalizeChoice(location2, LOCATIONS);
   }
   function normalizeVolumeAppearance(appearance) {
     return normalizeChoice(appearance, APPEARANCES);
@@ -1048,12 +2703,15 @@
     overlayId,
     onPlacementChanged,
     onModeChanged,
+    onNormalizationChanged = () => {
+    },
     clearExpandedHold,
     setOverlayExpanded,
     collapseOverlayIfIdle,
     ensureOverlay
   }) {
     const sessionValues = /* @__PURE__ */ new Map();
+    const pendingSizeFrames = /* @__PURE__ */ new WeakSet();
     const read = (key) => {
       const cached = sessionValues.get(key);
       if (cached?.unsaved) {
@@ -1087,9 +2745,6 @@
     }
     function getVolumeSliderMode() {
       return normalizeVolumeSliderMode(userSettings.volumeSliderMode) || getSavedVolumeSliderMode();
-    }
-    function getReplaceNativePlacement() {
-      return normalizeReplaceNativePlacement(userSettings.replaceNativePlacement) || normalizeReplaceNativePlacement(read(keys.replacePlacement)) || "native";
     }
     function getSliderLocation() {
       return normalizeSliderLocation(userSettings.sliderLocation) || normalizeSliderLocation(read(keys.location)) || "controls";
@@ -1150,12 +2805,8 @@
       write(keys.appearance, normalizeVolumeAppearance(appearance) || "new");
       updateOverlayAppearance(getOverlay());
     }
-    function setSliderLocation(location) {
-      write(keys.location, normalizeSliderLocation(location) || "controls");
-      onPlacementChanged();
-    }
-    function setReplaceNativePlacement(placement) {
-      write(keys.replacePlacement, normalizeReplaceNativePlacement(placement) || "native");
+    function setSliderLocation(location2) {
+      write(keys.location, normalizeSliderLocation(location2) || "controls");
       onPlacementChanged();
     }
     function getSavedVolumeStep() {
@@ -1184,6 +2835,13 @@
       if (keys.legacySnap) remove(keys.legacySnap);
       updateVolumeStepUi(getOverlay());
     }
+    function isNormalizationEnabled() {
+      return normalizeBooleanSetting(userSettings.normalizeVolume) ?? read(keys.normalization) === "true";
+    }
+    function setNormalizationEnabled(enabled) {
+      write(keys.normalization, enabled ? "true" : "false");
+      onNormalizationChanged();
+    }
     function isAlwaysExpandedEnabled() {
       const override = normalizeBooleanSetting(userSettings.alwaysExpanded);
       return override ?? read(keys.expanded) === "true";
@@ -1194,7 +2852,7 @@
       if (!overlay) return;
       clearExpandedHold(overlay);
       if (enabled) setOverlayExpanded(overlay, true);
-      else collapseOverlayIfIdle(overlay, true);
+      else collapseOverlayIfIdle(overlay);
     }
     function getSavedOverlayOpacityPercent(focused) {
       const fallback = focused ? defaults.activeOpacity : defaults.idleOpacity;
@@ -1227,9 +2885,14 @@
       const scale = isSliderOnVideo() ? getSavedOverlaySizePercent() / 100 : 1;
       overlay.style.setProperty("--tm-overlay-scale", String(scale));
       syncOverlayTicks(overlay);
-      overlay.ownerDocument?.defaultView?.requestAnimationFrame?.(() => {
-        syncOverlayTicks(overlay);
-      });
+      const view = overlay.ownerDocument?.defaultView;
+      if (view?.requestAnimationFrame && !pendingSizeFrames.has(overlay)) {
+        pendingSizeFrames.add(overlay);
+        view.requestAnimationFrame(() => {
+          pendingSizeFrames.delete(overlay);
+          if (overlay.isConnected) syncOverlayTicks(overlay);
+        });
+      }
     }
     function syncOverlayTicks(overlay) {
       overlay?.querySelector?.(".tm-slider-ticks")?._tmSliderTicksSync?.();
@@ -1267,7 +2930,7 @@
       if (!overlay) return;
       delete overlay.dataset.tmOptionsPreview;
       if (isAlwaysExpandedEnabled()) setOverlayExpanded(overlay, true, true);
-      else collapseOverlayIfIdle(overlay, true);
+      else collapseOverlayIfIdle(overlay);
       updateOverlayOpacity(overlay);
     }
     function setSavedSliderThicknessPercent(value) {
@@ -1305,7 +2968,7 @@
       restoreOverlayPreview(overlay);
     }
     function isOverlayInteractionFocused(overlay) {
-      return overlay?.dataset.tmOptionsPreview === "thickness" || overlay?.dataset.tmOptionsPreview === "opacity-active" || overlay?.dataset.tmDragging === "true" || overlay?.dataset.tmHovering === "true" || overlay?.matches?.(":hover") || overlay?.contains?.(document2.activeElement);
+      return overlay?.dataset.tmOptionsPreview === "thickness" || overlay?.dataset.tmOptionsPreview === "opacity-active" || overlay?.dataset.tmDragging === "true" || overlay?.dataset.tmHovering === "true" || overlay?.matches?.(":hover") || overlay?.contains?.(document2.activeElement) && document2.activeElement.matches(":focus-visible");
     }
     function setVolumeSliderMode(mode) {
       const normalizedMode = normalizeVolumeSliderMode(mode) || "on";
@@ -1314,13 +2977,12 @@
     }
     const isOverlayEnabled = () => getVolumeSliderMode() !== "off";
     const isNativeVolumeReplacementEnabled = () => getVolumeSliderMode() === "replace-native";
-    const shouldUseNativeReplacementSlot = () => isNativeVolumeReplacementEnabled() && getReplaceNativePlacement() === "native";
     return {
+      isNormalizationEnabled,
+      setNormalizationEnabled,
       getVolumeSliderMode,
-      getReplaceNativePlacement,
       isSliderOnVideo,
       setSliderLocation,
-      setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
       updateOverlayAppearance,
@@ -1346,8 +3008,7 @@
       updateOverlayOpacity,
       setVolumeSliderMode,
       isOverlayEnabled,
-      isNativeVolumeReplacementEnabled,
-      shouldUseNativeReplacementSlot
+      isNativeVolumeReplacementEnabled
     };
   }
 
@@ -1389,10 +3050,10 @@
       }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document2.activeElement === first) {
+      if (event.shiftKey && (document2.activeElement === first || document2.activeElement === popup)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document2.activeElement === last) {
+      } else if (!event.shiftKey && (document2.activeElement === last || document2.activeElement === popup)) {
         event.preventDefault();
         first.focus();
       }
@@ -1409,10 +3070,22 @@
     svg.setAttribute("width", "24");
     svg.setAttribute("aria-hidden", "true");
     svg.setAttribute("focusable", "false");
-    const path = document2.createElementNS(namespace, "path");
-    path.setAttribute("fill", "#fff");
-    path.setAttribute("d", "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6h2z");
-    svg.appendChild(path);
+    for (const [row, x, y] of [["top", 15, 5], ["middle", 7, 11], ["bottom", 11, 17]]) {
+      const track = document2.createElementNS(namespace, "rect");
+      track.setAttribute("x", "3");
+      track.setAttribute("y", String(y));
+      track.setAttribute("width", "18");
+      track.setAttribute("height", "2");
+      track.setAttribute("fill", "#fff");
+      const handle = document2.createElementNS(namespace, "rect");
+      handle.setAttribute("class", `tm-options-handle tm-options-handle-${row}`);
+      handle.setAttribute("x", String(x));
+      handle.setAttribute("y", String(y - 2));
+      handle.setAttribute("width", "2");
+      handle.setAttribute("height", "6");
+      handle.setAttribute("fill", "#fff");
+      svg.append(track, handle);
+    }
     return svg;
   }
 
@@ -1489,21 +3162,6 @@
     return { getVideoElement, resetVideoElement, ensurePlayerPositioning };
   }
 
-  // src/shared/styles.js
-  function createStyleElement(document2, id) {
-    if (document2.getElementById(id)) return null;
-    const parent = document2.head || document2.documentElement;
-    if (!parent) return null;
-    const style = document2.createElement("style");
-    style.id = id;
-    parent.appendChild(style);
-    return style;
-  }
-  var fillStyleTemplate = (template, values) => template.replace(/\{\{([A-Za-z0-9]+)\}\}/g, (_, key) => {
-    if (!(key in values)) throw new Error(`Missing style token ${key}`);
-    return values[key];
-  });
-
   // src/shared/options-styles.js
   var OPTIONS_STYLE_TEMPLATE = String.raw`
             #{{optionsButtonId}} {
@@ -1522,6 +3180,22 @@
                 height: 24px;
                 width: 24px;
             }
+            #{{optionsButtonId}} .tm-options-handle {
+                transform: translateX(0);
+                transition: transform 180ms cubic-bezier(0.2, 0, 0.2, 1);
+            }
+            #{{optionsButtonId}}[aria-expanded="true"] .tm-options-handle-top {
+                transform: translateX(-8px);
+            }
+            #{{optionsButtonId}}[aria-expanded="true"] .tm-options-handle-middle {
+                transform: translateX(8px);
+            }
+            #{{optionsButtonId}}[aria-expanded="true"] .tm-options-handle-bottom {
+                transform: translateX(-6px);
+            }
+            @media (prefers-reduced-motion: reduce) {
+                #{{optionsButtonId}} .tm-options-handle { transition: none; }
+            }
             #{{optionsPopupId}} {
                 background: rgba(18, 18, 18, 0.97);
                 border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1534,12 +3208,13 @@
                 font-size: 14px;
                 line-height: 1;
                 max-height: 70vh;
-                max-width: 320px;
+                max-width: calc(100vw - 16px);
                 min-width: 288px;
+                outline: none;
                 overflow: hidden;
                 position: absolute;
                 user-select: none;
-                width: 288px;
+                width: 320px;
                 z-index: 10001;
             }
             #{{optionsPopupId}},
@@ -1563,18 +3238,124 @@
             #{{optionsPopupId}}[hidden] {
                 display: none;
             }
+            #{{optionsPopupId}} [hidden] {
+                display: none !important;
+            }
+            #{{optionsPopupId}} .tm-volume-options-mode {
+                align-items: center;
+                display: flex;
+                flex-shrink: 0;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 8px 16px 10px;
+                line-height: 20px;
+            }
+            #{{optionsPopupId}} select {
+                -webkit-appearance: none;
+                appearance: none;
+                background-color: rgba(255, 255, 255, 0.08);
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+                background-position: right 12px center;
+                background-repeat: no-repeat;
+                background-size: 12px 12px;
+                border: 0;
+                border-radius: 6px;
+                color: #fff;
+                color-scheme: dark;
+                cursor: pointer;
+                font: inherit;
+                line-height: 20px;
+                outline: none;
+                padding: 7px 32px 7px 10px;
+                width: 176px;
+            }
+            #{{optionsPopupId}} select:open {
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 7.5 3-3 3 3' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            }
+            #{{optionsPopupId}} select:focus-visible {
+                background-color: rgba(255, 255, 255, 0.16);
+            }
+            #{{optionsPopupId}} select option {
+                background-color: #242424;
+                color: #fff;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tabs {
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                display: grid;
+                flex-shrink: 0;
+                grid-template-columns: 1fr 1fr;
+                padding: 0 16px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab {
+                background: transparent;
+                border: 0;
+                color: rgba(255, 255, 255, 0.65);
+                cursor: pointer;
+                display: grid;
+                padding: 11px 0;
+                place-items: center;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab[aria-selected="true"] {
+                box-shadow: inset 0 -2px {{accentDark}};
+                color: #fff;
+            }
+            #{{optionsPopupId}} .tm-volume-options-tab:hover {
+                color: #fff;
+            }
+            #{{optionsPopupId}} :is(button, input):focus-visible {
+                outline: 2px solid {{accentDark}};
+                outline-offset: -2px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-normalization-feedback {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.09);
+                border-radius: 6px;
+                margin-top: 6px;
+                padding: 8px 10px;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status {
+                color: rgba(255, 255, 255, 0.9);
+                margin: 0;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status::before {
+                background: rgba(255, 255, 255, 0.45);
+                border-radius: 50%;
+                content: '';
+                display: inline-block;
+                height: 6px;
+                margin-right: 7px;
+                vertical-align: 1px;
+                width: 6px;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-status[data-state="active"]::before {
+                background: #60cf83;
+            }
+            #{{optionsPopupId}} #tm-volume-options-normalization-details {
+                white-space: pre-line;
+            }
+            #{{optionsPopupId}} .tm-volume-options-step-setting {
+                margin-top: 14px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-step-setting .tm-volume-options-section-label {
+                color: rgba(255, 255, 255, 0.75);
+                font-size: 12px;
+                font-weight: 400;
+                margin-bottom: 8px;
+            }
+            #{{optionsPopupId}} .tm-volume-options-appearance-hint {
+                padding: 8px 16px 0;
+            }
 {{platformOptionsCss}}
             .tm-volume-options-header {
                 align-items: center;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
                 display: flex;
                 flex-shrink: 0;
-                padding: 12px 16px;
+                padding: 10px 16px 4px;
             }
             .tm-volume-options-title {
                 color: #fff;
-                font-size: 14px;
-                font-weight: 500;
+                font-size: 15px;
+                font-weight: 600;
                 line-height: 20px;
             }
             .tm-volume-options-body {
@@ -1618,26 +3399,31 @@
                 padding-top: 12px;
             }
             .tm-volume-options-section-label {
-                color: rgba(255, 255, 255, 0.55);
-                font-size: 11px;
-                font-weight: 500;
-                letter-spacing: 0.04em;
-                line-height: 14px;
+                color: #fff;
+                font-size: 14px;
+                font-weight: 600;
+                line-height: 20px;
                 margin: 0 0 10px;
-                text-transform: uppercase;
             }
             .tm-volume-options-checklist {
                 display: flex;
                 flex-direction: column;
             }
+            #{{optionsPopupId}} .tm-volume-options-help {
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 12px;
+                line-height: 1.4;
+                margin: 6px 0 0;
+                white-space: normal;
+            }
             #{{optionsPopupId}} .tm-volume-options-checklist .tm-volume-options-row {
                 align-items: center;
                 column-gap: 12px;
                 display: grid;
-                grid-template-columns: 1fr 18px;
+                grid-template-columns: 1fr 32px;
                 justify-content: stretch;
                 margin: 0 -8px;
-                min-height: 32px;
+                min-height: 36px;
                 padding: 5px 8px;
                 width: calc(100% + 16px);
             }
@@ -1678,33 +3464,30 @@
                 opacity: 0.45;
             }
             .tm-volume-options-checkbox {
-                background: transparent;
-                border: 1.5px solid rgba(255, 255, 255, 0.45);
-                border-radius: 3px;
-                display: grid;
+                background: rgba(255, 255, 255, 0.22);
+                border: 0;
+                border-radius: 10px;
+                display: block;
                 flex-shrink: 0;
                 height: 18px;
-                place-items: center;
-                transition: all 0.12s ease;
-                width: 18px;
+                position: relative;
+                width: 32px;
+            }
+            .tm-volume-options-checkbox::after {
+                background: #fff;
+                border-radius: 50%;
+                content: '';
+                height: 14px;
+                left: 2px;
+                position: absolute;
+                top: 2px;
+                width: 14px;
             }
             .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox {
                 background: {{accentDark}};
-                border-color: {{accentDark}};
             }
             .tm-volume-options-row[aria-checked="true"] .tm-volume-options-checkbox::after {
-                border: solid #fff;
-                border-width: 0 0 3px 3px;
-                box-sizing: border-box;
-                content: '';
-                height: 6px;
-                transform: translateY(-1px) rotate(-45deg);
-                width: 10px;
-            }
-            .tm-volume-options-segment-stack {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
+                left: 16px;
             }
             .tm-volume-options-section-label + * {
                 padding-top: 2px;
@@ -1759,16 +3542,6 @@
                 box-shadow: none;
                 color: #fff;
                 text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio {
-                cursor: not-allowed;
-                opacity: 0.4;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio:hover {
-                background: transparent;
-            }
-            .tm-volume-options-section[data-disabled="true"] .tm-volume-options-radio[aria-checked="true"] {
-                background: {{accentDisabled}};
             }
             .tm-volume-options-opacity-row {
                 display: flex;
@@ -1912,7 +3685,6 @@
     optionsButtonId,
     optionsPopupId,
     accentDark,
-    accentDisabled,
     closeHideControlsClass = ""
   }) {
     const style = createStyleElement(document2, styleId);
@@ -1921,7 +3693,6 @@
       optionsButtonId,
       optionsPopupId,
       accentDark,
-      accentDisabled,
       platformOptionsCss: getPlatformOptionsCss(platform, closeHideControlsClass)
     });
   }
@@ -1936,6 +3707,7 @@
   --tm-pill-expanded-width: clamp(var(--tm-pill-min-width), var(--tm-pill-zoom-adaptive-width), var(--tm-pill-max-width));
   --tm-label-row-width: 50px;
   --tm-slider-row-offset: 62px;
+  --tm-normalization-accent: {{normalizationAccent}};
   filter: {{panelDropShadow}};
 }
 {{platformFootprintCss}}
@@ -2093,6 +3865,55 @@
   border-radius: 50%;
 }
 
+#{{overlayId}}.tm-normalization-enabled {
+  /* Keep the inset waveform visible at the pill's rounded edge. */
+  overflow: clip !important;
+  overflow-clip-margin: 8px;
+}
+
+#{{overlayId}} .tm-normalization-icon {
+  position: absolute;
+  left: 28px;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  display: block;
+  pointer-events: auto;
+}
+
+#{{overlayId}} .tm-normalization-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#{{overlayId}} .tm-normalization-icon circle {
+  fill: #17171b;
+  stroke: var(--tm-normalization-accent);
+  stroke-width: 1;
+}
+
+#{{overlayId}} .tm-normalization-icon path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+#{{overlayId}} .tm-normalization-icon[hidden] {
+  display: none;
+}
+
+#{{overlayId}} .tm-normalization-description {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 #{{overlayId}} .tm-volume-indicator {
   position: relative;
   width: 40px;
@@ -2138,14 +3959,20 @@
 
 #{{overlayId}} .tm-volume-percent {
   fill: rgba(255, 255, 255, 0.96);
-  font: 700 15px/1 Arial, Helvetica, sans-serif;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
+  font: {{numberFont}};
+  font-variant-numeric: normal;
+  font-feature-settings: normal;
   font-synthesis: none;
   letter-spacing: 0;
-  text-shadow: 0 0 3px rgba(0, 0, 0, 0.75);
+  text-shadow: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.95));
   text-rendering: geometricPrecision;
   user-select: none;
+}
+
+#{{overlayId}} .tm-volume-percent[data-compact] {
+  font-size: {{numberCompactSize}}px;
+  letter-spacing: {{numberCompactSpacing}}px;
 }
 
 #{{overlayId}} .tm-volume-indicator.muted {
@@ -2330,6 +4157,10 @@
       overlayId,
       valueLabelId,
       panelDropShadow,
+      normalizationAccent: platform === "twitch" ? "#a970ff" : "#cc4444",
+      numberFont: `${VOLUME_NUMBER_FONT_WEIGHT} ${VOLUME_NUMBER_FONT_SIZE}px/1 ${VOLUME_NUMBER_FONT_FAMILY}`,
+      numberCompactSize: VOLUME_NUMBER_COMPACT_SIZE,
+      numberCompactSpacing: VOLUME_NUMBER_COMPACT_SPACING,
       ...getSliderPlatformStyles(platform, overlayId)
     });
   }
@@ -2351,6 +4182,12 @@
     indicator.className = "tm-volume-indicator";
     indicator.appendChild(makeVolumeIndicatorSvg());
     iconCell.appendChild(indicator);
+    const normalizationIcon = createNormalizationIcon(document2);
+    const normalizationDescription = document2.createElement("span");
+    normalizationDescription.className = "tm-normalization-description";
+    normalizationDescription.id = `${overlay.id}-normalization-description`;
+    normalizationDescription.textContent = normalizationIcon.dataset.tmTooltip;
+    iconCell.append(normalizationIcon, normalizationDescription);
     const panelBg = document2.createElement("div");
     panelBg.className = "tm-volume-panel-bg";
     const topRow = document2.createElement("div");
@@ -2520,17 +4357,18 @@
       return value;
     };
     const finish = (event) => {
+      if (!pointerActive) return;
       const wasDragging = overlay.dataset.tmDragging === "true";
       if (event?.type === "pointerup" && wasDragging) snapDirectClickIfNeeded();
       overlay.dataset.tmDragging = "false";
       pointerActive = false;
       onFinish?.(event, wasDragging);
       if (finishLayout) {
-        finishLayout(!overlay.matches(":hover"));
+        finishLayout();
         return;
       }
       updateOpacity();
-      collapseIfIdle(!overlay.matches(":hover"));
+      collapseIfIdle();
     };
     const start = (event) => {
       pointerStartX = event.clientX;
@@ -2555,9 +4393,7 @@
     };
     slider.addEventListener("pointerdown", start);
     slider.addEventListener("pointermove", move);
-    slider.addEventListener("pointerup", finish);
     slider.addEventListener("click", snapDirectClickIfNeeded);
-    slider.addEventListener("pointercancel", finish);
     window2.addEventListener("pointerup", finish, true);
     window2.addEventListener("pointercancel", finish, true);
     window2.addEventListener("blur", finish);
@@ -2566,9 +4402,7 @@
       dispose() {
         slider.removeEventListener("pointerdown", start);
         slider.removeEventListener("pointermove", move);
-        slider.removeEventListener("pointerup", finish);
         slider.removeEventListener("click", snapDirectClickIfNeeded);
-        slider.removeEventListener("pointercancel", finish);
         window2.removeEventListener("pointerup", finish, true);
         window2.removeEventListener("pointercancel", finish, true);
         window2.removeEventListener("blur", finish);
@@ -2689,9 +4523,65 @@
     } };
   }
 
+  // src/platforms/twitch-audio-compatibility.js
+  var buttons = /* @__PURE__ */ new WeakMap();
+  var selector2 = '[data-a-target="seventv-player-audio-compressor-button"]';
+  var explanation = "7TV compressor unavailable while Volume Slider controls audio. Reload with Auto-normalize volume off to use it.";
+  function registerExistingTwitchAudio(window2, video) {
+    if (window2.document.querySelector('[data-a-target="seventv-player-audio-compressor-button"].is-active:not(.is-unavailable)')) {
+      registerExternalMediaOutput(window2, video);
+    }
+  }
+  function syncTwitchAudioCompatibility(window2, video, mutations) {
+    if (mutations && !mutations.some(({ target, addedNodes }) => target.nodeType === 1 && target.closest(selector2) || [...addedNodes].some((node) => node.nodeType === 1 && (node.matches(selector2) || node.querySelector(selector2))))) {
+      return;
+    }
+    const owned = ownsMediaOutput(window2, video);
+    for (const button of window2.document.querySelectorAll(selector2)) {
+      let saved = buttons.get(button);
+      if (owned) {
+        if (!saved) {
+          saved = {
+            disabled: button.disabled,
+            label: button.getAttribute("aria-label"),
+            title: button.getAttribute("title"),
+            tooltip: button.getAttribute("data-tm-tooltip"),
+            hover: (event) => event.stopImmediatePropagation()
+          };
+          buttons.set(button, saved);
+          button.addEventListener("mouseenter", saved.hover, true);
+        }
+        if (!button.disabled) {
+          button.disabled = true;
+        }
+        if (button.getAttribute("aria-label") !== explanation) {
+          button.setAttribute("aria-label", explanation);
+        }
+        if (button.dataset.tmTooltip !== explanation) {
+          button.dataset.tmTooltip = explanation;
+        }
+        if (button.hasAttribute("title")) {
+          button.removeAttribute("title");
+        }
+      } else if (saved) {
+        button.disabled = saved.disabled;
+        for (const [attribute, value] of [["aria-label", saved.label], ["title", saved.title], ["data-tm-tooltip", saved.tooltip]]) {
+          if (value === null) {
+            button.removeAttribute(attribute);
+          } else {
+            button.setAttribute(attribute, value);
+          }
+        }
+        button.removeEventListener("mouseenter", saved.hover, true);
+        buttons.delete(button);
+      }
+    }
+  }
+
   // src/platforms/twitch.js
   function startTwitchVolumeSlider() {
     "use strict";
+    installPlayerTooltips(window, "twitch");
     let storage = null;
     try {
       storage = localStorage;
@@ -2707,7 +4597,6 @@
     const MUTE_STORAGE_KEY = "tm-twitch-muted";
     const VOLUME_MODE_KEY = "tm-twitch-volume-slider-mode";
     const SLIDER_LOCATION_KEY = "tm-twitch-volume-slider-location";
-    const REPLACE_NATIVE_PLACEMENT_KEY = "tm-twitch-volume-slider-replace-placement";
     const VOLUME_STEP_KEY = "tm-twitch-volume-slider-step";
     const LEGACY_SNAP_TO_5_KEY = "tm-twitch-volume-slider-snap-to-5";
     const ALWAYS_EXPANDED_KEY = "tm-twitch-volume-slider-always-expanded";
@@ -2735,7 +4624,6 @@
     const VOLUME_ACCENT_LIGHT = "#a970ff";
     const VOLUME_ACCENT_DARK = "#9146ff";
     const VOLUME_ACCENT_MID = "#b38cff";
-    const VOLUME_ACCENT_DISABLED = "rgba(145, 70, 255, 0.55)";
     const VOLUME_ARC_TRACK = "rgba(255, 255, 255, 0.38)";
     const VOLUME_PANEL_DROP_SHADOW = "drop-shadow(0 2px 5px rgba(0, 0, 0, 0.06))";
     const STARTUP_MUTE_GUARD_MS = 4e3;
@@ -2743,8 +4631,6 @@
     const USER_SETTINGS = {
       // Volume slider mode: 'saved', 'off', 'on', or 'replace-native'. Default: 'saved'
       volumeSliderMode: "saved",
-      // Where to place the slider when replacing native volume: 'saved', 'native', or 'custom'. Default: 'saved'
-      replaceNativePlacement: "saved",
       // Slider location: 'saved', 'controls', or 'video'. Default: 'saved'
       sliderLocation: "saved",
       // Volume adjustment step: 'saved', 1, 2, 5, or 10. Default: 'saved'
@@ -2759,10 +4645,14 @@
       // Bar thickness: 'saved' or 25-125 as a percentage of the 2.5 bar. Default: 75
       sliderThickness: "saved",
       // Volume icon style: 'saved', 'new', or 'classic'. Default: 'saved'
-      volumeAppearance: "saved"
+      volumeAppearance: "saved",
+      // Loudness normalization: 'saved', true, or false. Default: off
+      normalizeVolume: "saved"
     };
     let cachedApi = null;
     let cachedApiFromElement = null;
+    const nativeVolumeOwners = /* @__PURE__ */ new WeakSet();
+    const nativeMuteOwners = /* @__PURE__ */ new WeakSet();
     let startupLockUntil = 0;
     let startupCorrectionApplied = false;
     let stopActiveStartupMuteGuard = null;
@@ -2784,17 +4674,18 @@
     const NAV_REATTACH_DELAY_MS = 700;
     const NAV_LATE_RESTORE_DELAY_MS = 4200;
     const NAV_DEBOUNCE_MS = 180;
-    const { getVolumeSliderMode, getReplaceNativePlacement, isSliderOnVideo, setSliderLocation, setReplaceNativePlacement, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled, shouldUseNativeReplacementSlot } = createVolumeSettings({
+    const { isNormalizationEnabled, setNormalizationEnabled, getVolumeSliderMode, isSliderOnVideo, setSliderLocation, getVolumeAppearance, setVolumeAppearance, updateOverlayAppearance, getVolumeStep, setVolumeStep, isAlwaysExpandedEnabled, setAlwaysExpandedEnabled, getSavedOverlayOpacityPercent, setSavedOverlayOpacityPercent, resetSavedOverlayOpacityPercent, getSavedOverlaySizePercent, setSavedOverlaySizePercent, resetSavedOverlaySizePercent, getSavedSliderThicknessPercent, setSavedSliderThicknessPercent, resetSavedSliderThicknessPercent, beginThicknessSliderPreview, endThicknessSliderPreview, beginOpacitySliderPreview, endOpacitySliderPreview, updateSliderThickness, isOverlayInteractionFocused, updateOverlayOpacity, setVolumeSliderMode, isOverlayEnabled, isNativeVolumeReplacementEnabled } = createVolumeSettings({
       document,
       storage,
       userSettings: USER_SETTINGS,
       overlayId: OVERLAY_ID,
-      keys: { mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, replacePlacement: REPLACE_NATIVE_PLACEMENT_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
+      keys: { normalization: "tm-twitch-volume-slider-normalization", mode: VOLUME_MODE_KEY, location: SLIDER_LOCATION_KEY, step: VOLUME_STEP_KEY, legacySnap: LEGACY_SNAP_TO_5_KEY, expanded: ALWAYS_EXPANDED_KEY, idleOpacity: OVERLAY_OPACITY_IDLE_KEY, activeOpacity: OVERLAY_OPACITY_ACTIVE_KEY, overlaySize: OVERLAY_SIZE_KEY, sliderThickness: SLIDER_THICKNESS_KEY, appearance: VOLUME_APPEARANCE_KEY },
       defaults: { idleOpacity: DEFAULT_OVERLAY_OPACITY_IDLE, activeOpacity: DEFAULT_OVERLAY_OPACITY_ACTIVE, overlaySize: DEFAULT_OVERLAY_SIZE, sliderThickness: DEFAULT_SLIDER_THICKNESS },
       onPlacementChanged: () => {
         attachSliderIfPossible();
         applyNativeVolumeVisibility();
       },
+      onNormalizationChanged: () => syncNormalization(),
       onModeChanged: (mode) => {
         if (mode === "off") removeOverlay();
         else attachSliderIfPossible();
@@ -2802,15 +4693,38 @@
         injectVolumeOptionsButton();
         refreshOptionsPopupState();
         updateOptionsButtonState();
+        syncNormalization();
       },
       clearExpandedHold: (overlay) => clearExpandedHold(overlay),
       setOverlayExpanded: (overlay, expanded, force, options) => setOverlayExpanded(overlay, expanded, force, options),
-      collapseOverlayIfIdle: (overlay, force) => collapseOverlayIfIdle(overlay, force),
+      collapseOverlayIfIdle: (overlay) => collapseOverlayIfIdle(overlay),
       ensureOverlay: () => {
         attachSliderIfPossible();
         return document.getElementById(OVERLAY_ID);
       }
     });
+    registerExistingTwitchAudio(window, getVideoElement());
+    const normalizer = createVolumeNormalizer({
+      window,
+      getVolume: getRawVolume,
+      setVolume: setRawVolume,
+      isMuted,
+      onStatusChanged: () => {
+        syncNormalizationStatus(getOptionsPopup());
+        syncNormalizationIcon();
+        syncTwitchAudioCompatibility(window, getVideoElement());
+      }
+    });
+    function syncNormalization(video = overlayLifecycle.active?.root?._tmVolumeVideo || null) {
+      const enabled = isNormalizationEnabled() && isOverlayEnabled();
+      normalizer.setEnabled(enabled);
+      normalizer.bind(video);
+      refreshOptionsPopupState();
+      syncNormalizationIcon();
+    }
+    function syncNormalizationIcon() {
+      updateNormalizationIcon(document.getElementById(OVERLAY_ID), normalizer.getStatus());
+    }
     const { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume } = createVolumePersistence({
       window,
       storage,
@@ -2839,9 +4753,10 @@
       return video?.closest?.(".video-player__container") || player;
     }
     function isTwitchPreviewPlayer(player = getPlayerContainer()) {
+      const isBrowsePage = /^\/(?:$|(?:directory|following|search)(?:\/|$))/.test(window.location.pathname);
       const rect = player?.getBoundingClientRect?.();
       const width = Number(rect?.width);
-      return Number.isFinite(width) && width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
+      return isBrowsePage && Number.isFinite(width) && width > 0 && width <= TWITCH_PREVIEW_PLAYER_MAX_WIDTH_PX;
     }
     function getTwitchControlsHost(player = getPlayerContainer()) {
       return player?.querySelector?.(".player-controls__left-control-group") || document.querySelector("#channel-player .player-controls__left-control-group") || document.querySelector('[aria-label="Player Controls"] .player-controls__left-control-group') || document.querySelector(".player-controls__left-control-group");
@@ -2923,7 +4838,7 @@
     function placeOverlayInControls(overlay, controlsHost) {
       if (!overlay || !controlsHost) return;
       const nativeVolumeGroup = getNativeVolumeGroup(controlsHost);
-      if (shouldUseNativeReplacementSlot() && nativeVolumeGroup && nativeVolumeGroup.parentElement === controlsHost) {
+      if (isNativeVolumeReplacementEnabled() && nativeVolumeGroup && nativeVolumeGroup.parentElement === controlsHost) {
         if (overlay.parentElement !== controlsHost || overlay.nextElementSibling !== nativeVolumeGroup) {
           controlsHost.insertBefore(overlay, nativeVolumeGroup);
         }
@@ -2985,13 +4900,12 @@
         panelDropShadow: VOLUME_PANEL_DROP_SHADOW
       });
     }
-    const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, scheduleExpandedHoldRelease, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
+    const { updateSliderBar, updateVolumeIndicator, setOverlayExpanded, shouldKeepOverlayExpanded, clearExpandedHold, collapseOverlayIfIdle, markVolumeChangedWhileExpanded, makeVolumeIndicatorSvg, populateSliderTicks } = createOverlayUi({
       document,
       window,
       isAlwaysExpandedEnabled,
       isSliderOnVideo,
       updateOverlayOpacity,
-      finishExpandedHoldIfDue,
       getVolumeStep,
       accentLight: VOLUME_ACCENT_LIGHT,
       accentDark: VOLUME_ACCENT_DARK,
@@ -3012,35 +4926,6 @@
       const rootStyle = controlsRoot ? window.getComputedStyle(controlsRoot) : null;
       const controlsStyle = window.getComputedStyle(controls);
       return shellStyle?.display === "none" || shellStyle?.visibility === "hidden" || Number(shellStyle?.opacity) === 0 || rootStyle?.display === "none" || rootStyle?.visibility === "hidden" || Number(rootStyle?.opacity) === 0 || controlsStyle.display === "none" || controlsStyle.visibility === "hidden" || Number(controlsStyle.opacity) === 0;
-    }
-    function finishExpandedHoldIfDue(overlay) {
-      if (!overlay?.isConnected) {
-        clearExpandedHold(overlay);
-        return;
-      }
-      if (isAlwaysExpandedEnabled() || shouldKeepOverlayExpanded(overlay)) {
-        return;
-      }
-      if (Date.now() < (overlay._expandedHoldUntil || 0)) {
-        scheduleExpandedHoldRelease(overlay);
-        return;
-      }
-      clearExpandedHold(overlay);
-      collapseOverlayIfIdle(overlay, true);
-    }
-    function collapseOverlayIfIdle(overlay, force = false) {
-      window.setTimeout(() => {
-        if (isAlwaysExpandedEnabled()) {
-          setOverlayExpanded(overlay, true);
-          return;
-        }
-        if (overlay.dataset.tmKeepExpanded === "true") {
-          return;
-        }
-        if (force || !shouldKeepOverlayExpanded(overlay)) {
-          setOverlayExpanded(overlay, false);
-        }
-      }, 0);
     }
     function getTwitchPlayerApi(video) {
       try {
@@ -3088,22 +4973,15 @@
       return null;
     }
     function getVolume(video) {
-      try {
-        const api = getTwitchPlayerApi(video);
-        if (api) {
-          if (api.isMuted && api.isMuted()) return 0;
-          const vol2 = api.getVolume();
-          return Math.round((typeof vol2 === "number" ? vol2 : 0) * 100);
-        }
-      } catch (e) {
-      }
-      const vol = (video.muted ? 0 : video.volume) || 0;
-      return Math.round(vol * 100);
+      return isMuted(video) ? 0 : getUnderlyingVolume(video);
     }
     function getUnderlyingVolume(video) {
+      return normalizer.getPreferredVolume(video, getRawVolume(video));
+    }
+    function getRawVolume(video) {
       try {
         const api = getTwitchPlayerApi(video);
-        if (api) {
+        if (api && !nativeVolumeOwners.has(video)) {
           const vol = api.getVolume();
           return Math.round((typeof vol === "number" ? vol : 0) * 100);
         }
@@ -3116,25 +4994,21 @@
       video.muted = video.defaultMuted = !!muted;
     }
     function setVolume(video, value, options = {}) {
+      normalizer.setPreferredVolume(video, value, options);
+    }
+    function setRawVolume(video, value, options = {}) {
       const preserveMute = options.preserveMute === true;
+      if (!preserveMute && isMuted(video)) setMuted(video, false);
       const api = getTwitchPlayerApi(video);
       if (api) {
-        if (!preserveMute) {
-          try {
-            if (api.isMuted?.()) {
-              if (typeof api.setMuted === "function") api.setMuted(false);
-              else setNativeVideoMuted(video, false);
-            }
-          } catch (e) {
-            setNativeVideoMuted(video, false);
-          }
-        }
         try {
+          nativeVolumeOwners.delete(video);
           api.setVolume(Math.min(1, Math.max(0, value / 100)));
           return;
         } catch (e) {
         }
       }
+      nativeVolumeOwners.add(video);
       video.volume = value / 100;
       if (!preserveMute) {
         setNativeVideoMuted(video, false);
@@ -3143,10 +5017,14 @@
     function isMuted(video) {
       try {
         const api = getTwitchPlayerApi(video);
-        if (api && api.isMuted) return api.isMuted();
+        if (api && api.isMuted && !nativeMuteOwners.has(video)) return api.isMuted();
       } catch (e) {
       }
       return !!video.muted;
+    }
+    function isMutedForDisplay(video) {
+      const savedMute = Date.now() <= startupLockUntil ? readSavedMute() : null;
+      return savedMute ?? isMuted(video);
     }
     function setMuted(video, muted) {
       const nextMuted = !!muted;
@@ -3156,16 +5034,18 @@
       try {
         const api = getTwitchPlayerApi(video);
         if (api && api.setMuted) {
+          nativeMuteOwners.delete(video);
           api.setMuted(nextMuted);
           setNativeVideoMuted(video, nextMuted);
           return;
         }
       } catch (e) {
       }
+      nativeMuteOwners.add(video);
       setNativeVideoMuted(video, nextMuted);
     }
     function toggleMute(video) {
-      setMuted(video, !isMuted(video));
+      setMuted(video, !isMutedForDisplay(video));
     }
     function restoreSavedVolume(video) {
       const savedMute = readSavedMute();
@@ -3237,13 +5117,14 @@
       }
     }
     function markUserVolumeIntent() {
+      cancelDelayedFirstAttachRestore();
       stopStartupMuteGuard();
       userIntentUntil = Date.now() + USER_INTENT_GRACE_MS;
     }
     function setSliderFromPlayer(slider, label, video) {
       try {
-        const muted = isMuted(video);
-        const displayValue = muted ? getUnderlyingVolume(video) : getVolume(video);
+        const muted = isMutedForDisplay(video);
+        const displayValue = getUnderlyingVolume(video);
         slider.value = String(displayValue);
         if (label) {
           label.textContent = muted ? "Muted" : `${displayValue}%`;
@@ -3260,21 +5141,25 @@
         styleId: OPTIONS_STYLE_ID,
         optionsButtonId: OPTIONS_BUTTON_ID,
         optionsPopupId: OPTIONS_POPUP_ID,
-        accentDark: VOLUME_ACCENT_DARK,
-        accentDisabled: VOLUME_ACCENT_DISABLED
+        accentDark: VOLUME_ACCENT_DARK
       });
-    }
-    function getVolumeModeLabel(mode = getVolumeSliderMode()) {
-      if (mode === "off") return "Off";
-      return mode === "replace-native" ? "Replace native" : "On";
     }
     function updateOptionsButtonState(btn = document.getElementById(OPTIONS_BUTTON_ID)) {
       if (!btn) return;
       const mode = getVolumeSliderMode();
-      const label = `Volume Slider Options (${getVolumeModeLabel(mode)})`;
-      btn.dataset.tmVolumeMode = mode;
-      btn.setAttribute("aria-label", label);
-      btn.setAttribute("title", label);
+      const label = "Volume Slider Options";
+      if (btn.dataset.tmVolumeMode !== mode) {
+        btn.dataset.tmVolumeMode = mode;
+      }
+      if (btn.getAttribute("aria-label") !== label) {
+        btn.setAttribute("aria-label", label);
+      }
+      if (btn.dataset.tmTooltip !== label) {
+        btn.dataset.tmTooltip = label;
+      }
+      if (btn.hasAttribute("title")) {
+        btn.removeAttribute("title");
+      }
     }
     function injectVolumeOptionsButton() {
       ensureOptionsStyles();
@@ -3349,16 +5234,18 @@
       const popup = getOptionsPopup();
       return !!popup && !popup.hasAttribute("hidden");
     }
-    const { buildOptionsPopup, syncOptionsPopupState, stopOptionsPreview } = createOptionsUi({
+    const { buildOptionsPopup, syncOptionsPopupState, syncNormalizationStatus, stopOptionsPreview } = createOptionsUi({
       document,
       optionsPopupId: OPTIONS_POPUP_ID,
       refreshOptionsPopupState,
       getVolumeSliderMode,
       setVolumeSliderMode,
-      getReplaceNativePlacement,
-      setReplaceNativePlacement,
       getVolumeAppearance,
       setVolumeAppearance,
+      isNormalizationEnabled,
+      setNormalizationEnabled,
+      getNormalizationStatus: () => normalizer.getStatus(),
+      getNormalizationDetails: () => normalizer.getDetails(),
       getVolumeStep,
       setVolumeStep,
       isAlwaysExpandedEnabled,
@@ -3409,10 +5296,9 @@
       popup.style.left = "auto";
       popup.style.top = "auto";
       const margin = 8;
-      const viewportTop = window.visualViewport?.offsetTop ?? 0;
-      const popupBottomY = playerRect.bottom - Math.max(margin, bottomPx);
-      const minTop = Math.max(playerRect.top + margin, viewportTop + margin);
-      popup.style.maxHeight = `${Math.floor(Math.max(120, popupBottomY - minTop))}px`;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const playerHeight = playerRect.height - Math.max(margin, bottomPx) - margin;
+      popup.style.maxHeight = `${Math.floor(Math.max(120, Math.min(playerHeight, viewportHeight - margin * 2)))}px`;
       const body = popup.querySelector(".tm-volume-options-body");
       if (!body) return;
       if (resetScroll) body.scrollTop = 0;
@@ -3494,7 +5380,7 @@
     function releaseTwitchVolumeFocusSoon(overlay) {
       window.setTimeout(() => {
         const active = document.activeElement;
-        if (active && overlay?.contains?.(active)) {
+        if (active && overlay?.contains?.(active) && !active.matches(":focus-visible")) {
           active.blur();
         }
       }, 0);
@@ -3510,8 +5396,7 @@
       positionOptionsPopup(popup, true);
       startOptionsControlsHold();
       document.getElementById(OPTIONS_BUTTON_ID)?.setAttribute("aria-expanded", "true");
-      const initialFocus = popup.querySelector('[id^="tm-volume-options-mode-"][role="radio"][aria-checked="true"]:not(:disabled)') || getOptionsPopupFocusable(popup)[0];
-      initialFocus?.focus();
+      popup.focus({ preventScroll: true });
       if (!optionsPopupOutsideHandler) {
         optionsPopupOutsideHandler = (event) => {
           const btn = document.getElementById(OPTIONS_BUTTON_ID);
@@ -3599,9 +5484,6 @@
       }
     }
     function createOverlay(video, player, controlsHost) {
-      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) {
-        disposeActiveOverlay();
-      }
       const existing = document.getElementById(OVERLAY_ID);
       if (existing) {
         return existing;
@@ -3610,6 +5492,8 @@
       const overlay = createVolumeOverlay({ document, overlayId: OVERLAY_ID });
       overlay._tmVolumeVideo = video;
       const cleanupRegistry = createCleanupRegistry();
+      const keyboardFeedback = createVolumeFeedback({ window, player });
+      cleanupRegistry.add(() => keyboardFeedback.dispose());
       let hasPointerIntent = false;
       const markPointerIntent = () => {
         hasPointerIntent = true;
@@ -3625,8 +5509,7 @@
       });
       overlay.addEventListener("mouseleave", () => {
         overlay.dataset.tmHovering = "false";
-        overlay.dataset.tmDragging = "false";
-        collapseOverlayIfIdle(overlay, true);
+        collapseOverlayIfIdle(overlay);
         updateOverlayOpacity(overlay);
       });
       overlay.addEventListener("focusin", () => {
@@ -3694,14 +5577,15 @@
         syncVolumeControl({ slider, label, overlay, value, muted, updateSliderBar, updateVolumeIndicator });
       };
       const initVol = getSavedVolume();
+      if (readSavedMute() === null) saveMute(isMuted(video));
       if (initVol !== null) {
-        syncInitialSliderState(initVol, isMuted(video));
+        syncInitialSliderState(initVol, isMutedForDisplay(video));
       } else {
-        syncInitialSliderState(getVolume(video), isMuted(video));
+        syncInitialSliderState(getUnderlyingVolume(video), isMutedForDisplay(video));
       }
       const applySliderValue = (value, { preserveMute = false, markInteraction = true } = {}) => {
         setVolume(video, value, { preserveMute });
-        const muted = isMuted(video);
+        const muted = preserveMute ? isMutedForDisplay(video) : isMuted(video);
         saveMute(muted);
         label.textContent = muted ? "Muted" : `${value}%`;
         updateSliderBar(slider);
@@ -3719,13 +5603,15 @@
         if (!direction) return;
         event.preventDefault();
         event.stopPropagation();
-        const currentValue = Number(slider.value) || 0;
+        const currentValue = getUnderlyingVolume(video);
         const nextValue = clampVolume(currentValue + direction * KEYBOARD_VOLUME_STEP);
-        if (nextValue === currentValue) return;
-        markUserVolumeIntent();
-        slider.value = String(nextValue);
-        applySliderValue(nextValue, { preserveMute: true, markInteraction: false });
-        startKeyboardControlsHold();
+        if (nextValue !== currentValue) {
+          markUserVolumeIntent();
+          slider.value = String(nextValue);
+          applySliderValue(nextValue, { preserveMute: true, markInteraction: false });
+          startKeyboardControlsHold();
+        }
+        keyboardFeedback.show(nextValue, isMutedForDisplay(video));
       };
       slider.addEventListener("keydown", applyKeyboardVolumeStep);
       let playerWasLastPressed = false;
@@ -3745,6 +5631,25 @@
         applyKeyboardVolumeStep(event);
       };
       document.addEventListener("keydown", applyPlayerKeyboardVolumeStep, true);
+      const onExtensionKey = (event) => {
+        const key = focusedTwitchExtensionKey(event, getPlayerContainer(video) || player);
+        if (!key || isOptionsPopupOpen()) return;
+        if (key === " ") {
+          keyboardFeedback.clear();
+          if (video.paused) {
+            video.play().catch(() => {
+            });
+          } else {
+            video.pause();
+          }
+        } else {
+          applyKeyboardVolumeStep({ key, preventDefault() {
+          }, stopPropagation() {
+          } });
+        }
+      };
+      window.addEventListener("message", onExtensionKey);
+      cleanupRegistry.add(() => window.removeEventListener("message", onExtensionKey));
       cleanupRegistry.add(bindWheelVolumeStep({
         target: iconCell,
         slider,
@@ -3762,12 +5667,12 @@
         applyValue: applySliderValue,
         setExpanded: () => setOverlayExpanded(overlay, true),
         updateOpacity: () => updateOverlayOpacity(overlay),
-        collapseIfIdle: (force) => collapseOverlayIfIdle(overlay, force),
+        collapseIfIdle: () => collapseOverlayIfIdle(overlay),
         onFinish: (event, wasDragging) => {
           if (wasDragging && event?.type !== "blur") releaseTwitchVolumeFocusSoon(overlay);
         },
-        finishLayout: (force) => {
-          collapseOverlayIfIdle(overlay, force);
+        finishLayout: () => {
+          collapseOverlayIfIdle(overlay);
           updateOverlayOpacity(overlay);
         }
       });
@@ -3786,15 +5691,15 @@
       const onVideoVolumeChange = () => {
         const now = Date.now();
         if (now <= startupLockUntil) {
-          if (now <= userIntentUntil || startupCorrectionApplied) {
-            return;
+          if (now > userIntentUntil && !startupCorrectionApplied) {
+            const savedValue = getSavedVolume();
+            const muted = isMuted(video);
+            if (savedValue !== null && Math.abs(getUnderlyingVolume(video) - savedValue) > 1) {
+              setVolume(video, savedValue, { preserveMute: muted });
+            }
+            startupCorrectionApplied = true;
           }
-          const savedValue = getSavedVolume();
-          const muted = isMuted(video);
-          if (savedValue !== null && Math.abs(getUnderlyingVolume(video) - savedValue) > 1) {
-            setVolume(video, savedValue, { preserveMute: muted });
-          }
-          startupCorrectionApplied = true;
+          setSliderFromPlayer(slider, label, video);
           return;
         }
         try {
@@ -3804,12 +5709,12 @@
           if (isNativeVolumeReplacementEnabled() && now > userIntentUntil && savedValue !== null && Math.abs(playerVolume - savedValue) > 1) {
             cancelScheduledSaveVolume();
             setVolume(video, savedValue, { preserveMute: muted });
-            saveMute(muted);
+            if (!isNormalizationEnabled()) saveMute(muted);
             setSliderFromPlayer(slider, label, video);
             return;
           }
           setSliderFromPlayer(slider, label, video);
-          saveMute(muted);
+          if (!isNormalizationEnabled()) saveMute(muted);
           if (!muted) {
             scheduleSaveVolume(playerVolume);
           }
@@ -3817,6 +5722,61 @@
         }
       };
       video.addEventListener("volumechange", onVideoVolumeChange);
+      let sourceMutePending = false;
+      const onSourceReset = () => {
+        if (!isNormalizationEnabled()) return;
+        const savedMute = readSavedMute();
+        if (savedMute === null) return;
+        sourceMutePending = true;
+        startupLockUntil = Math.max(startupLockUntil, Date.now() + 2e3);
+        startupCorrectionApplied = false;
+      };
+      const onSourceReady = (event) => {
+        if (!isNormalizationEnabled() || event.type === "playing" && !sourceMutePending) return;
+        const savedMute = readSavedMute();
+        if (savedMute !== null) setMuted(video, savedMute);
+        sourceMutePending = event.type !== "playing";
+      };
+      for (const type of ["emptied", "loadstart"]) video.addEventListener(type, onSourceReset, true);
+      for (const type of ["loadedmetadata", "playing"]) video.addEventListener(type, onSourceReady);
+      cleanupRegistry.add(() => {
+        for (const type of ["emptied", "loadstart"]) video.removeEventListener(type, onSourceReset, true);
+        for (const type of ["loadedmetadata", "playing"]) video.removeEventListener(type, onSourceReady);
+      });
+      cleanupRegistry.add(bindNativeVolumeInput({
+        window,
+        video,
+        player,
+        selector: '[data-a-target="player-volume-slider"]',
+        excludeSelector: '[data-a-target="player-mute-unmute-button"]',
+        normalizer,
+        onChange: () => {
+          markUserVolumeIntent();
+          saveMute(isMuted(video));
+          onVideoVolumeChange();
+        }
+      }));
+      const onNativeMuteInput = (event) => {
+        if (isOptionsPopupOpen() || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        const target = event.target;
+        if (!(target instanceof window.Element) || target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+        const activePlayer = getPlayerContainer(video) || player;
+        const muteButton = event.type === "click" && target.closest('[data-a-target="player-mute-unmute-button"]') && activePlayer.contains(target);
+        const muteKey = event.type === "keydown" && event.key.toLowerCase() === "m";
+        if (!muteButton && !muteKey) return;
+        const before = isMuted(video);
+        markUserVolumeIntent();
+        window.setTimeout(() => {
+          if (!overlayLifecycle.owns(overlay) || !video.isConnected) return;
+          saveMute(isMuted(video));
+          setSliderFromPlayer(slider, label, video);
+          if (muteKey && before !== isMuted(video)) keyboardFeedback.showMute(getUnderlyingVolume(video), isMuted(video));
+        }, 0);
+      };
+      for (const type of ["click", "keydown"]) document.addEventListener(type, onNativeMuteInput, true);
+      cleanupRegistry.add(() => {
+        for (const type of ["click", "keydown"]) document.removeEventListener(type, onNativeMuteInput, true);
+      });
       const onLayoutChange = () => {
         if (!overlay.isConnected) return;
         const activePlayer = getPlayerContainer(video);
@@ -3829,7 +5789,6 @@
             return;
           }
           if (!isAlwaysExpandedEnabled()) {
-            overlay.dataset.tmDragging = "false";
             clearExpandedHold(overlay);
             setOverlayExpanded(overlay, false, true);
           }
@@ -3873,6 +5832,7 @@
       return overlay;
     }
     function disposeActiveOverlay() {
+      normalizer.bind(null);
       stopOptionsPreview();
       cancelDelayedFirstAttachRestore();
       overlayLifecycle.dispose();
@@ -3905,13 +5865,15 @@
         injectVolumeOptionsButton();
         return !!document.getElementById(OPTIONS_BUTTON_ID);
       }
+      if (overlayLifecycle.active && !overlayLifecycle.active.root.isConnected) disposeActiveOverlay();
       let overlay = document.getElementById(OVERLAY_ID);
       if (overlay && overlay._tmVolumeVideo !== video) {
         disposeActiveOverlay();
         overlay = null;
       }
-      if (!overlay && video) {
+      if (!overlay && video && !normalizer.isBoundTo(video)) {
         restoreSavedVolumeBeforeControls(video);
+        if (isNormalizationEnabled()) syncNormalization(video);
       }
       if (!video || !player || !controlsHost) {
         injectVolumeOptionsButton();
@@ -3938,6 +5900,7 @@
       injectVolumeOptionsButton();
       ensureNativeSettingsHoldIsolation();
       ensureAttachObserver();
+      syncNormalization();
       return true;
     }
     function getAttachObserverRoot() {
@@ -3950,42 +5913,55 @@
     }
     let lastAttach = 0;
     const ATTACH_COOLDOWN_MS = 1e3;
-    let attachQueued = false;
+    let attachFrame = 0;
+    let trailingAttachTimer = 0;
+    function finishPendingAttach() {
+      trailingAttachTimer = 0;
+      resetVideoElement();
+      if (attachSliderIfPossible()) lastAttach = Date.now();
+    }
     function handleAttachObserverMutations(mutations) {
-      const hasAddedNodes = mutations.some((m) => m.addedNodes && m.addedNodes.length > 0);
-      const hasRemovedNodes = mutations.some((m) => m.removedNodes && m.removedNodes.length > 0);
-      if (!hasAddedNodes && !hasRemovedNodes || attachQueued) return;
+      syncTwitchAudioCompatibility(window, getVideoElement(), mutations);
+      const playerSelector = '.video-player,[data-a-target="video-player"],[data-a-target="player-overlay-click-handler"]';
+      const relevant = mutations.some(({ target, addedNodes, removedNodes }) => {
+        if (!addedNodes.length && !removedNodes.length) return false;
+        if (target.nodeType === 1 && target.closest("#tm-volume-slider-overlay,#tm-volume-options-popup,[data-tm-volume-feedback]")) return false;
+        if (target.nodeType === 1 && target.closest(playerSelector)) return true;
+        return [...addedNodes, ...removedNodes].some((node) => node.nodeType === 1 && (node.matches(playerSelector + ",video") || node.querySelector(playerSelector + ",video")));
+      });
+      if (!relevant) return;
+      const videoAdded = mutationAddsVideo(mutations);
+      if (videoAdded && isOverlayEnabled() && isNormalizationEnabled()) {
+        resetVideoElement();
+        const video = getVideoElement();
+        if (video && !normalizer.isBoundTo(video) && attachSliderIfPossible()) {
+          lastAttach = Date.now();
+          return;
+        }
+      }
       applyNativeVolumeVisibility();
       const overlay = document.getElementById(OVERLAY_ID);
       const button = document.getElementById(OPTIONS_BUTTON_ID);
       const overlayMissing = isOverlayEnabled() && (!overlay || !overlay.isConnected);
-      const videoMayHaveChanged = isOverlayEnabled() && !!overlay && mutationAddsVideo(mutations);
+      const videoMayHaveChanged = isOverlayEnabled() && !!overlay && videoAdded;
       const buttonMissing = !button || !button.isConnected;
       const buttonMisplaced = !buttonMissing && !isOptionsButtonInPreferredSlot();
       if (buttonMissing || buttonMisplaced) {
         injectVolumeOptionsButton();
       }
       if (!overlayMissing && !videoMayHaveChanged) return;
-      attachQueued = true;
-      requestAnimationFrame(() => {
-        attachQueued = false;
-        if (!isOverlayEnabled()) {
-          injectVolumeOptionsButton();
-          return;
-        }
-        const currentOverlay = document.getElementById(OVERLAY_ID);
-        if (!videoMayHaveChanged && currentOverlay && currentOverlay.isConnected) {
-          injectVolumeOptionsButton();
-          return;
-        }
-        const now = Date.now();
-        if (now - lastAttach < ATTACH_COOLDOWN_MS) return;
-        if (attachSliderIfPossible()) {
-          lastAttach = now;
-        }
+      if (attachFrame || trailingAttachTimer) return;
+      attachFrame = requestAnimationFrame(() => {
+        attachFrame = 0;
+        const remaining = ATTACH_COOLDOWN_MS - (Date.now() - lastAttach);
+        if (remaining > 0) trailingAttachTimer = window.setTimeout(finishPendingAttach, remaining);
+        else finishPendingAttach();
       });
     }
     function disconnectAttachObserver() {
+      window.cancelAnimationFrame(attachFrame);
+      window.clearTimeout(trailingAttachTimer);
+      attachFrame = trailingAttachTimer = 0;
       attachObserver?.disconnect();
       attachObserver = null;
       attachObserverTarget = null;
@@ -4009,12 +5985,14 @@
       if (!window.MutationObserver) return;
       ensureAttachObserver();
       if (attachObserverTarget || attachBootstrapObserver) return;
+      const bootstrapRoot = document.body || document.documentElement;
+      if (!bootstrapRoot) return;
       attachBootstrapObserver = new MutationObserver(() => {
         if (!getAttachObserverRoot()) return;
         ensureAttachObserver();
         attachSliderIfPossible();
       });
-      attachBootstrapObserver.observe(document.body, { childList: true, subtree: true });
+      attachBootstrapObserver.observe(bootstrapRoot, { childList: true, subtree: true });
     }
     function setupInitialAttempts() {
       const maxAttempts = 20;
@@ -4125,13 +6103,10 @@
       setupNavigationHandler();
       setupNativeSettingsCloseHandler();
     }
-    if (document.readyState === "complete" || document.readyState === "interactive") {
-      init();
-    } else {
-      window.addEventListener("DOMContentLoaded", init, { once: true });
-    }
+    init();
   }
 
   // src/entries/twitch.user.js
-  startTwitchVolumeSlider();
+  if (location.hostname.endsWith(".ext-twitch.tv")) startTwitchExtensionKeys(window);
+  else startTwitchVolumeSlider();
 })();

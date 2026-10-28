@@ -19,4 +19,10 @@ test('volume persistence owns custom-step snapping, debounce cancellation, and s
   step=2; slider.value='47'; assert.equal(persistence.readSteppedSliderValue(slider),48); assert.equal(slider.value,'48');
   persistence.scheduleSaveVolume(60); persistence.scheduleSaveVolume(65); assert.equal(cleared,1); pending();
   assert.equal(values.get('volume'),'65');
+  persistence.scheduleSaveVolume(70); persistence.flushScheduledSaveVolume();
+  assert.equal(values.get('volume'),'70'); assert.equal(pending,null);
+  persistence.saveVolume(75); persistence.flushScheduledSaveVolume();
+  assert.equal(values.get('volume'),'75','a consumed save cannot be flushed again');
+  persistence.scheduleSaveVolume(80); persistence.cancelScheduledSaveVolume(); persistence.flushScheduledSaveVolume();
+  assert.equal(values.get('volume'),'75','explicit cancellation discards the pending save');
 });

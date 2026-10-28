@@ -32,6 +32,7 @@ export function getVolumeTickInterval(step) {
 
 export function createVolumePersistence({ window, storage, storageKey, debounceMs, getVolumeStep }) {
   let saveTimer = 0;
+  let scheduledVolume = 0;
 
   function getSavedVolume() {
     try {
@@ -62,11 +63,15 @@ export function createVolumePersistence({ window, storage, storageKey, debounceM
 
   function scheduleSaveVolume(value) {
     cancelScheduledSaveVolume();
-    saveTimer = window.setTimeout(() => {
-      saveVolume(value);
-      saveTimer = 0;
-    }, debounceMs);
+    scheduledVolume = value;
+    saveTimer = window.setTimeout(flushScheduledSaveVolume, debounceMs);
   }
 
-  return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume };
+  function flushScheduledSaveVolume() {
+    if (!saveTimer) return;
+    cancelScheduledSaveVolume();
+    saveVolume(scheduledVolume);
+  }
+
+  return { getSavedVolume, readSteppedSliderValue, saveVolume, scheduleSaveVolume, cancelScheduledSaveVolume, flushScheduledSaveVolume };
 }
