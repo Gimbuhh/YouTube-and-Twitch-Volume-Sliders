@@ -60,8 +60,9 @@ try {
       throw error;
     });
     const stopContinuity = await startAudioContinuityMonitor(page, '__outputs');
+    const observationEnd = await page.evaluate(() => Math.max(3.5, document.querySelector('video').currentTime + 1.5));
     const levels = [], playbackDeadline = Date.now() + 10000;
-    while (await page.evaluate(() => document.querySelector('video').currentTime < 3.5)) {
+    while (await page.evaluate(end => document.querySelector('video').currentTime < end, observationEnd)) {
       assert.ok(Date.now() < playbackDeadline, `${platform}: playback stopped advancing`);
       levels.push(await page.evaluate(() => ({ peak: window.__peak(), status: JSON.parse(document.documentElement.dataset.tmAudioNormalization).status })));
       await page.waitForTimeout(30);
@@ -90,7 +91,7 @@ try {
     await page.evaluate(() => { document.querySelector('video').muted = false; });
     await page.waitForFunction(() => window.__peak() > .001);
     const mutedControl = await stopMuteControl();
-    assert.ok(mutedControl.maxZeroRun >= rate * .05, 'the continuity monitor must detect an actual audio interruption');
+    assert.ok(mutedControl.maxZeroRun >= mutedControl.sampleRate * .05, 'the continuity monitor must detect an actual audio interruption');
     result.mutedControl = mutedControl;
     await page.evaluate(() => document.querySelector('video').pause());
     await page.waitForFunction(() => window.__contexts[0].state === 'suspended');
@@ -118,7 +119,7 @@ try {
     assert.equal(result.before.status.status, 'Active');
     assert.ok(result.before.peak > .001, `${result.platform}: processed output was silent`);
     assert.deepEqual(result.statuses, ['Active'], `${result.platform}: continuous audio lost processing`);
-    assert.ok(result.continuity.samples >= 128, `${result.platform}: no rendered continuity evidence`);
+    assert.ok(result.continuity.samples >= result.continuity.sampleRate, `${result.platform}: less than one second of rendered continuity evidence`);
     assert.ok(result.continuity.nonzero > 128, `${result.platform}: no audible continuity evidence`);
     assert.equal(result.continuity.nonfinite, 0, `${result.platform}: invalid rendered samples`);
     assert.ok(result.continuity.maxZeroRun <= 128, `${result.platform}: rendered audio cut out`);

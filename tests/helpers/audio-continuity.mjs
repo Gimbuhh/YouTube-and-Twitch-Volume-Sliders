@@ -6,7 +6,7 @@ export async function startAudioContinuityMonitor(page, outputsKey) {
     if (!window.__continuityModule) {
       const url = URL.createObjectURL(new Blob([`
       registerProcessor('continuity-probe', class extends AudioWorkletProcessor {
-        constructor() { super(); this.stats={samples:0,nonzero:0,maxZeroRun:0,nonfinite:0}; this.run=0;
+        constructor() { super(); this.stats={sampleRate,samples:0,nonzero:0,maxZeroRun:0,nonfinite:0}; this.run=0;
           this.port.onmessage=()=>{this.port.postMessage(this.stats);this.stopped=true}; }
         process(inputs) {
           if(this.stopped)return false;
