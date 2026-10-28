@@ -19,7 +19,15 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            browser: chrome
+          - os: ubuntu-24.04
+            browser: firefox
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -33,16 +41,30 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node node_modules/playwright-core/cli.js install --with-deps firefox
-      - name: Install decoder and start virtual audio output
+      - if: matrix.browser == 'firefox'
+        run: node node_modules/playwright-core/cli.js install --with-deps firefox
+      - name: Install startup waveform decoder
+        if: matrix.browser == 'chrome'
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+          $ffmpegExe = Get-ChildItem "$env:ChocolateyInstall/lib/ffmpeg" -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          if (!$ffmpegExe) { throw 'FFmpeg executable not found' }
+          "VOLUME_SLIDER_FFMPEG=$($ffmpegExe.FullName)" >> $env:GITHUB_ENV
+      - name: Start virtual audio output
+        if: matrix.browser == 'firefox'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes ffmpeg pulseaudio
+          sudo apt-get install --yes pulseaudio
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=ci_audio rate=48000 channels=2
           pactl set-default-sink ci_audio
-      - run: npm run check
+      - if: matrix.browser == 'chrome'
+        run: npm run check:core
+      - run: node scripts/browser-checks.mjs ${{ matrix.browser }}
       - name: Verify tag and archive
+        if: matrix.browser == 'chrome'
         shell: bash
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
@@ -60,6 +82,7 @@ jobs:
           cp "release-notes/$version.md" release-stage/notes.md
           cp release-preflight.json release-stage/manifest.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.browser == 'chrome'
         with:
           name: verified-release
           path: release-stage
