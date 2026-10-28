@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-24.04
+    runs-on: windows-2025
     timeout-minutes: 20
     permissions:
       contents: read
@@ -33,14 +33,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node node_modules/playwright-core/cli.js install --with-deps firefox
-      - name: Install decoder and start virtual audio output
+      - run: npm run browsers:install
+      - name: Install startup waveform decoder
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg pulseaudio
-          pulseaudio --start --exit-idle-time=-1
-          pactl load-module module-null-sink sink_name=ci_audio rate=48000 channels=2
-          pactl set-default-sink ci_audio
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+          $ffmpegExe = Get-ChildItem "$env:ChocolateyInstall/lib/ffmpeg" -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          if (!$ffmpegExe) { throw 'FFmpeg executable not found' }
+          "VOLUME_SLIDER_FFMPEG=$($ffmpegExe.FullName)" >> $env:GITHUB_ENV
       - run: npm run check
       - name: Verify tag and archive
         shell: bash
