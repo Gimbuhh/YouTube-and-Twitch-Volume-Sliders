@@ -11,7 +11,7 @@
 8. Commit the source, release notes, changelog, README, archive, and generated `dist` files; tag the commit (for example, `v2.4.4`).
 9. Push the tag and let the GitHub Release workflow publish dot-named userscript assets, such as `YouTube.Volume.Slider.<version>.user.js`, with digests verified against `archive/releases/<version>/SHA256.json`.
 
-The release workflow runs the complete Chrome and Firefox check on Windows, using the same Chrome environment as pull-request verification. The regular verification workflow also requires Firefox on Linux. Publishing remains on Linux and accepts only the verified artifacts.
+The release workflow uses the same browser environments as pull-request verification: core checks and Chrome on Windows, and Firefox with virtual audio output on Linux. Publishing waits for both jobs and accepts only the verified artifacts.
 
 To backfill an existing historical tag, run the Release workflow manually from the current default branch and provide the immutable `v<version>` tag. The workflow validates the current tree's canonical notes, archived scripts, manifest, hashes, and target tag without checking out or executing code from the historical tag. Existing Releases are updated idempotently and assets are replaced only after digest verification.
 
