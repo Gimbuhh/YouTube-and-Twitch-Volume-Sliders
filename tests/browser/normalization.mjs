@@ -26,7 +26,7 @@ for (let i = 0; i < count; i++) monoWav.writeInt16LE(wav.readInt16LE(44 + i * 4)
 const browser = await launchChrome(['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--mute-audio']);
 const results = [];
 try {
-  for (const platform of ['youtube', 'twitch']) for (const mode of ['worklet', 'native', 'compensated', 'csp', 'unavailable', 'activation']) {
+  for (const platform of ['youtube', 'twitch']) for (const mode of ['worklet', 'native', 'source-order', 'priming', 'compensated', 'csp', 'unavailable', 'activation']) {
     const native = mode !== 'worklet';
     const compensation = mode === 'compensated' ? .54 : 1;
     const youtube = platform === 'youtube', origin = youtube ? 'https://www.youtube.com' : 'https://www.twitch.tv', prefix = youtube ? 'yt' : 'twitch';
@@ -41,7 +41,15 @@ try {
     const video=document.querySelector('video'),player=video.parentElement;video.volume=.3;
     const current=()=>document.querySelector('video');
     const capture=HTMLMediaElement.prototype.captureStream;window.__captures=[];
-    HTMLMediaElement.prototype.captureStream=function(){const stream=capture.call(this);window.__captures.push(stream);return stream};
+    window.__prematureTracks=new WeakSet();
+    HTMLMediaElement.prototype.captureStream=function(){const stream=capture.call(this);window.__captures.push(stream);if(!window.__attachedElements?.has(this))for(const track of stream.getAudioTracks())window.__prematureTracks.add(track);return stream};
+    ${mode === 'source-order' ? `const Processor=MediaStreamTrackProcessor;
+    window.MediaStreamTrackProcessor=class{constructor(options){if(window.__prematureTracks.has(options.track))this.readable=new ReadableStream();else return new Processor(options)}};` : ''}
+    ${mode === 'priming' ? `const Processor=MediaStreamTrackProcessor;let firstInput=true;
+    window.MediaStreamTrackProcessor=class{constructor(options){const processor=new Processor(options);if(!firstInput)return processor;firstInput=false;
+      const reader=processor.readable.getReader();let cancelled=false;const primed=new Promise(resolve=>window.__releaseFirstInput=resolve);
+      this.readable=new ReadableStream({async pull(controller){await primed;const {value,done}=await reader.read();if(cancelled){value?.close();return}if(done)controller.close();else controller.enqueue(value)},cancel(){cancelled=true;window.__releaseFirstInput();return reader.cancel().finally(()=>reader.releaseLock())}})}};` : ''}
+    ${['source-order', 'priming'].includes(mode) ? `window.__startupStatuses=[];new MutationObserver(()=>{const info=JSON.parse(document.documentElement.dataset.tmAudioNormalization||'{}');window.__startupStatuses.push(info.status)}).observe(document.documentElement,{attributes:true,attributeFilter:['data-tm-audio-normalization']});` : ''}
     let selectedVolume=.3;window.__volumeWrites=0;
     const api={getVolume:()=>${mode === 'compensated' ? 'selectedVolume' : 'current().volume'}*${youtube ? 100 : 1},setVolume:v=>{
       if(++window.__volumeWrites>80&&${mode === 'compensated'})throw new Error('Volume write feedback loop');
@@ -50,15 +58,15 @@ try {
     ${youtube ? 'Object.assign(player,api)' : 'player.__reactFiber$fixture={return:{memoizedProps:{mediaPlayerInstance:api},return:null}}'};
     localStorage.setItem('tm-${prefix}-volume','30');localStorage.setItem('tm-${prefix}-volume-slider-normalization','true');
     ${mode === 'activation' ? "const BaseContext=AudioContext;window.AudioContext=class extends BaseContext{constructor(options){super(options);this.suspend();this.resume=()=>new Promise(()=>{})}};" : ''}
-    const elementSource=AudioContext.prototype.createMediaElementSource;window.__elementSources=0;
-    AudioContext.prototype.createMediaElementSource=function(video){window.__elementSources++;return elementSource.call(this,video)};
+    const elementSource=AudioContext.prototype.createMediaElementSource;window.__elementSources=0;window.__attachedElements=new WeakSet();
+    AudioContext.prototype.createMediaElementSource=function(video){const source=elementSource.call(this,video);window.__elementSources++;window.__attachedElements.add(video);return source};
     const connect=AudioNode.prototype.connect;
     window.__graphContexts=[];
     AudioNode.prototype.connect=function(destination,...args){const result=connect.call(this,destination,...args);if(destination===this.context.destination){if(!window.__graphContexts.includes(this.context)){window.__graphContexts.push(this.context);const split=this.context.createChannelSplitter(2);window.__split=split;window.__taps=[this.context.createAnalyser(),this.context.createAnalyser()];for(let i=0;i<2;i++){window.__taps[i].fftSize=2048;connect.call(split,window.__taps[i],i)}}connect.call(this,window.__split)}return result};
     window.__peak=()=>{if(!window.__taps)return 0;const data=new Float32Array(2048);let peak=0;for(const tap of window.__taps){tap.getFloatTimeDomainData(data);for(const x of data)peak=Math.max(peak,Math.abs(x))}return peak};
     window.__lateAttackMessages=0;
     ${mode === 'worklet' ? "const MeterNode=AudioWorkletNode;window.AudioWorkletNode=class extends MeterNode{constructor(...args){super(...args);let measured=false;this.port.addEventListener('message',({data})=>{if(data.attackPower!=null){if(measured)window.__lateAttackMessages++}else if(data.rawPower>=1e-9&&data.power>=1e-9)measured=true})}};" : ''}
-    ${mode === 'native' || mode === 'compensated' || mode === 'unavailable' ? 'window.AudioWorkletNode=undefined;' : ''}
+    ${['native', 'source-order', 'priming', 'compensated', 'unavailable'].includes(mode) ? 'window.AudioWorkletNode=undefined;' : ''}
     ${mode === 'worklet' ? 'window.MediaStreamTrackProcessor=undefined;' : ''}
     ${mode === 'unavailable' ? 'window.MediaStreamTrackProcessor=undefined;' : ''}
     </script></body></html>`;
@@ -79,12 +87,28 @@ try {
       console.log(`${platform}/${mode}: ordinary playback restored with unavailable status`);
       await context.close(); continue;
     }
+    if (mode === 'priming') {
+      await page.waitForFunction(() => typeof window.__releaseFirstInput === 'function');
+      await page.waitForTimeout(1700);
+      assert.equal(await page.evaluate(() => window.__peak()), 0, 'priming must not release unmeasured audio');
+      assert.equal(await page.evaluate(() => window.__captures.length), 1, 'priming must retain its first input');
+      assert.ok(await page.evaluate(() => window.__startupStatuses.every(status => !status?.includes('unavailable'))));
+      await page.evaluate(() => window.__releaseFirstInput());
+    }
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status?.startsWith('Active'), { timeout: 10000 });
     await page.waitForFunction(() => window.__peak() > .001);
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').metrics?.gain > .001);
     const active = await page.evaluate(() => ({ ...JSON.parse(document.documentElement.dataset.tmAudioNormalization), nativeVolume: document.querySelector('video').volume,
       preferred: document.querySelector('#tm-volume-slider-value')?.textContent, peak: window.__peak() }));
     assert.equal(active.selected, 30); assert.equal(active.nativeVolume, compensation); assert.ok(active.peak > 0);
+    if (['source-order', 'priming'].includes(mode)) {
+      const startup = await page.evaluate(() => ({ captures: window.__captures.length, statuses: window.__startupStatuses,
+        premature: window.__captures.some(stream => stream.getAudioTracks().some(track => window.__prematureTracks.has(track))) }));
+      assert.equal(startup.captures, 1, 'startup must not require a replacement capture');
+      assert.equal(startup.premature, false, 'capture must follow the stable protected source attachment');
+      assert.ok(startup.statuses.every(status => !status?.includes('unavailable')), 'startup must not enter ordinary-volume backoff');
+      console.log(`${platform}/${mode}: first capture retained protected output without backoff`);
+    }
     if (mode === 'compensated') {
       assert.ok(await page.evaluate(() => window.__volumeWrites) <= 6, 'site compensation flooded volume writes');
       const writes = await page.evaluate(() => window.__volumeWrites);

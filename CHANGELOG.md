@@ -2,7 +2,7 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
-## 3.0 - 2026-10-27
+## 3.0 - 2026-10-28
 
 ### Added
 
@@ -11,7 +11,7 @@ All notable changes to the maintained userscripts are documented here. Historica
   - Audio settings show adjusted output separately from the selected level. Stream restarts preserve the selection and mute choice, including after blocked Twitch ads. Player volume arrows adjust the selection in five-point steps. Native volume controls still work.
   - Normalization keeps speech steady between words, remembers the usual listening level through quiet passages and silent gaps, and recovers smoothly after brief peaks and sustained loud passages.
   - Normalization reduces background work during playback and suspends audio processing while paused.
-  - Audio stays quiet until protection is ready on page loads, video changes, and stream restarts, with a smooth fade when the source changes.
+  - Audio stays quiet until protection is ready on page loads, video changes, and stream restarts, including while Twitch finishes loading audio. Source changes fade smoothly.
   - Temporary audio access failures retry automatically.
   - A waveform icon shows normalization is on, including during pause and mute, and hides if analysis is blocked or unavailable.
   - Turning the option or slider mode off restores the chosen volume; inaccessible audio falls back to ordinary playback.

@@ -17,6 +17,7 @@ test('generated worklet stops startup messages within the first measured block a
     onMetrics() {}, onFailure: error => assert.fail(error) });
   t.after(async () => { await playback.dispose(); runtime.close(); });
   await playback.ready;
+  await playback.startAnalysis();
   const code = await module.text();
 
   for (const sampleRate of [44100, 48000, 96000]) for (const size of [128, 4096]) {
@@ -50,6 +51,7 @@ test('pausing during initial activation retains protected output and resumes the
   audio.paused = true;
   playback.setState({ selected: .3, muted: false, paused: true });
   finish(); await playback.ready;
+  await playback.startAnalysis();
   assert.deepEqual(failures, []);
   assert.equal(playback.connected, true);
   assert.equal(playback.context.state, 'suspended');

@@ -5,9 +5,9 @@ import { acquireMediaOutput, mediaTransitionTime, waitForMediaRender } from './n
 
 // Native nodes process the player's own audio. Captured AudioData and worklets
 // are interchangeable analysis inputs, never playback renderers.
-export function createAudiblePlayback({ window, video, track, selected, onMetrics, onFailure }) {
+export function createAudiblePlayback({ window, video, selected, onMetrics, onFailure }) {
   const output = acquireMediaOutput(window, video), { context } = output;
-  let gate, graph, disposal;
+  let gate, graph, disposal, analysis;
   const programme = createProgrammeState(selected);
   let stopped = false, connected = false, node = null, reader = null, muted = true, paused = video.paused;
   let meterBackend = 'starting', rate = 0, samples = 0, hasFrame = false, lastReport = -Infinity;
@@ -31,7 +31,19 @@ export function createAudiblePlayback({ window, video, track, selected, onMetric
     context,
     backend: 'native graph',
     get connected() { return connected; },
-    get running() { return !stopped && context.state === 'running'; },
+    get analyzing() { return !!analysis; },
+    get running() { return !stopped && !!analysis && context.state === 'running'; },
+    startAnalysis(track) {
+      if (stopped) return Promise.resolve();
+      return analysis ||= (async () => {
+        let native = false;
+        if (window.MediaStreamTrackProcessor) {
+          try { nativeAnalysis(track); native = true; }
+          catch { /* Some browsers expose video-only native processors. */ }
+        }
+        if (!native) await workletAnalysis();
+      })().catch(fail);
+    },
     setState(next) {
       if (stopped) return;
       if (selected !== next.selected) {
@@ -76,7 +88,7 @@ export function createAudiblePlayback({ window, video, track, selected, onMetric
   };
   function fail(error) { if (!stopped) { owned.dispose(); onFailure(error); } }
 
-  function nativeAnalysis() {
+  function nativeAnalysis(track) {
     reader = new window.MediaStreamTrackProcessor({ track, maxBufferSize: 8 }).readable.getReader();
     meterBackend = 'native frames';
     (async () => {
@@ -146,12 +158,6 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
     graph = createNativeGainGraph(context, { selected });
     graph.output.connect(gate);
     output.connect(graph.input); connected = true;
-    let native = false;
-    if (window.MediaStreamTrackProcessor) {
-      try { nativeAnalysis(); native = true; }
-      catch { /* Some browsers expose video-only native processors. */ }
-    }
-    if (!native) await workletAnalysis();
   })().catch(fail);
   return owned;
 }

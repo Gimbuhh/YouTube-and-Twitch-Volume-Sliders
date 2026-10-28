@@ -29,7 +29,7 @@ try {
       for (let i = 0; i < frames; i++) view.setInt16(44 + i * 2, Math.round(.08 * 32767 * Math.sin(2 * Math.PI * 997 * i / rate)), true);
       video.src = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' })); video.volume = 0;
       await video.play();
-      const stream = (video.captureStream || video.mozCaptureStream).call(video), track = stream.getAudioTracks()[0];
+      const streams = [];
       const connect = AudioNode.prototype.connect, blocks = [];
       const BaseContext = AudioContext, context = new BaseContext({ sampleRate });
       await context.audioWorklet.addModule(URL.createObjectURL(new Blob([`registerProcessor('recorder',class extends AudioWorkletProcessor {
@@ -46,9 +46,11 @@ try {
       };
       const failures = [];
       async function start() {
-        const playback = playbackTest.createAudiblePlayback({ window, video, track, selected: .3,
+        const playback = playbackTest.createAudiblePlayback({ window, video, selected: .3,
           onMetrics() { playback.setState({ selected: .3, muted: false, paused: false }); }, onFailure: error => failures.push(`${error.name}: ${error.message}`) });
-        await playback.ready; video.volume = 1; return playback;
+        await playback.ready; video.volume = 1;
+        const stream = (video.captureStream || video.mozCaptureStream).call(video); streams.push(stream);
+        await playback.startAnalysis(stream.getAudioTracks()[0]); return playback;
       }
       let playback = await start();
       await new Promise(resolve => setTimeout(resolve, 900));
@@ -71,7 +73,7 @@ try {
       const tailRms = Math.sqrt(tail.reduce((sum, value) => sum + value * value, 0) / tail.length);
       AudioNode.prototype.connect = connect; window.AudioContext = BaseContext;
       playback.dispose(); video.pause(); collector.disconnect();
-      for (const item of stream.getTracks()) item.stop();
+      for (const stream of streams) for (const item of stream.getTracks()) item.stop();
       return { transition, residual, residualAt, peak, tailRms, failures, samples: values.length, rate: context.sampleRate };
     }, { transition, sampleRate });
     console.log(JSON.stringify({ trial, ...result }));

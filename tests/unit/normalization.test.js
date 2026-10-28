@@ -122,6 +122,74 @@ test('paused startup stays protected without capturing before playback',async t=
   f.audio.paused=false;f.video.dispatchEvent(new f.window.Event('playing'));await f.advance();assert.equal(f.normalizer.getStatus(),'Active');
 });
 
+test('capture starts after the protected output route and native volume are ready', async t => {
+  const f = fixture(t), capture = f.video.captureStream;
+  f.video.captureStream = () => {
+    const context = f.audio.contexts[0], source = context?.sources.get(f.video);
+    assert.ok(source?.connections.size, 'capture must not precede the protected media route');
+    assert.equal(f.raw, 100, 'capture must see the initialized player audio output');
+    return capture();
+  };
+  await f.start();
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.equal(f.audio.captures, 1);
+});
+
+test('source restart finishes retiring the old route before capturing the new one', async t => {
+  const f = fixture(t); await f.start();
+  const previous = f.audio.streams[0], capture = f.video.captureStream;
+  f.video.captureStream = () => {
+    assert.ok(previous.getTracks().every(track => track.readyState === 'ended'), 'the old capture must finish retiring first');
+    return capture();
+  };
+  f.video.dispatchEvent(new f.window.Event('loadstart'));
+  await f.advance(.3);
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.equal(f.audio.captures, 2);
+  assert.equal(f.audio.contexts[0].sources.size, 1);
+});
+
+test('a late audio track starts on the protected route without recapturing', async t => {
+  const f = fixture(t), capture = f.video.captureStream;
+  let pending;
+  f.video.captureStream = () => {
+    const stream = capture();
+    pending = stream.getAudioTracks()[0];
+    stream.tracks = stream.tracks.filter(track => track !== pending);
+    return stream;
+  };
+  await f.start();
+  assert.equal(f.audio.captures, 1);
+  assert.equal(f.audio.nodes.length, 0);
+  assert.equal(f.raw, 100);
+  f.audio.streams[0].tracks.push(pending);
+  await f.advance(.2);
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.equal(f.audio.captures, 1);
+});
+
+test('initial audio priming retains protection and its first capture beyond the running watchdog', async t => {
+  const f = fixture(t); f.audio.stalled = true;
+  await f.start(); await f.advance(1.8);
+  assert.equal(f.audio.captures, 1);
+  assert.equal(f.audio.streams[0].getAudioTracks()[0].readyState, 'live');
+  assert.doesNotMatch(f.normalizer.getStatus(), /unavailable/);
+  assert.equal(f.output, 0, 'unmeasured audio remains protected');
+  f.audio.stalled = false; await f.advance(.15);
+  assert.equal(f.normalizer.getStatus(), 'Active');
+  assert.equal(f.audio.captures, 1, 'priming must not require an input restart');
+});
+
+test('missing first measurements still fail within the bounded startup allowance', async t => {
+  const f = fixture(t); f.audio.stalled = true;
+  await f.start(); await f.advance(3.1);
+  assert.match(f.normalizer.getStatus(), /unavailable/);
+  await f.advance(.15);
+  assert.equal(f.raw, 50);
+  assert.equal(f.audio.captures, 1);
+  assert.ok(f.audio.streams[0].getTracks().every(track => track.readyState === 'ended'));
+});
+
 test('capture failures back off and recover without toggling the option',async t=>{
   const f=fixture(t);f.audio.captureError=Error('Not ready');await f.start();assert.match(f.normalizer.getStatus(),/unavailable/);assert.equal(f.raw,50);
   const count=f.audio.captures;await f.advance(.5);assert.equal(f.audio.captures,count);

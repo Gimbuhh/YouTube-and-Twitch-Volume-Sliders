@@ -95,18 +95,12 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
     report(owned.sourceConflict ? 'Another audio processor is active — normal volume' : 'Audio unavailable — normal volume');
   }
   async function connect(owned) {
-    if (owned.connecting || owned.playback || owned.blocked) return;
+    if (owned.connecting || owned.playback?.analyzing || owned.blocked) return;
     owned.connecting = true; const generation = owned.generation;
     try {
       const capture = owned.video.captureStream || owned.video.mozCaptureStream;
       if (!capture || owned.video.mediaKeys) throw new Error('Audio capture is unavailable');
-      owned.stream ||= capture.call(owned.video);
-      for (const track of owned.stream.getVideoTracks()) track.stop();
-      const track = owned.stream.getAudioTracks().find(item => item.readyState === 'live');
-      if (!track) { owned.connecting = false; return; }
-      if (track.muted) throw new Error('Captured audio is inaccessible');
-      owned.track = track;
-      owned.playback = createAudiblePlayback({ window, video: owned.video, track, selected: owned.preferred / 100,
+      owned.playback ||= createAudiblePlayback({ window, video: owned.video, selected: owned.preferred / 100,
         onMetrics(metrics) {
           if (session !== owned || owned.generation !== generation || owned.blocked) return;
           owned.metrics = metrics; owned.lastFrame = now();
@@ -119,6 +113,20 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         onFailure: error => { if (session === owned && owned.generation === generation) unavailable(owned, error); }
       });
       await owned.playback.ready;
+      if (session !== owned || owned.generation !== generation || owned.blocked) return;
+      // Changing the audible route can invalidate a capture made during player
+      // initialization. Attach the protected graph and initialize native volume
+      // first, then capture this stable output for analysis.
+      silence(owned); sync(owned);
+      if (owned.video.paused || owned.video.ended || owned.video.readyState < 2) { owned.connecting = false; return; }
+      owned.stream ||= capture.call(owned.video);
+      for (const track of owned.stream.getVideoTracks()) track.stop();
+      const track = owned.stream.getAudioTracks().find(item => item.readyState === 'live');
+      if (!track) { owned.connecting = false; return; }
+      if (track.muted) throw new Error('Captured audio is inaccessible');
+      owned.track = track;
+      owned.started = now();
+      await owned.playback.startAnalysis(track);
       if (session !== owned || owned.generation !== generation || owned.blocked) return;
       owned.connecting = false; silence(owned); sync(owned);
     } catch (error) { if (session === owned && owned.generation === generation) unavailable(owned, error); }
@@ -160,7 +168,11 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
         else report(owned.playback?.connected && owned.playback.context.state === 'suspended' ? 'Click the player to activate' : 'Starting audio analysis');
         return;
       }
-      if (now() - (owned.lastFrame || owned.started) > 1500) unavailable(owned, new Error('Live audio processing stalled'));
+      // The first decoded audio can trail Twitch's video readiness. Keep the
+      // startup guard through that priming, then use the shorter live watchdog.
+      if (now() - (owned.lastFrame || owned.started) > (owned.metrics ? 1500 : 3000)) {
+        unavailable(owned, new Error(owned.metrics ? 'Live audio processing stalled' : 'Audio analysis did not start'));
+      }
     } catch (error) { unavailable(owned, error); }
   }
   function bind(video, preferredVolume) {

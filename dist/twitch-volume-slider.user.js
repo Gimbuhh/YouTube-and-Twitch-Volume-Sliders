@@ -875,9 +875,9 @@
   }
 
   // src/shared/normalization-playback.js
-  function createAudiblePlayback({ window: window2, video, track, selected, onMetrics, onFailure }) {
+  function createAudiblePlayback({ window: window2, video, selected, onMetrics, onFailure }) {
     const output = acquireMediaOutput(window2, video), { context } = output;
-    let gate, graph, disposal;
+    let gate, graph, disposal, analysis;
     const programme = createProgrammeState(selected);
     let stopped = false, connected = false, node = null, reader = null, muted = true, paused = video.paused;
     let meterBackend = "starting", rate = 0, samples = 0, hasFrame = false, lastReport = -Infinity;
@@ -913,8 +913,25 @@
       get connected() {
         return connected;
       },
+      get analyzing() {
+        return !!analysis;
+      },
       get running() {
-        return !stopped && context.state === "running";
+        return !stopped && !!analysis && context.state === "running";
+      },
+      startAnalysis(track) {
+        if (stopped) return Promise.resolve();
+        return analysis || (analysis = (async () => {
+          let native = false;
+          if (window2.MediaStreamTrackProcessor) {
+            try {
+              nativeAnalysis(track);
+              native = true;
+            } catch {
+            }
+          }
+          if (!native) await workletAnalysis();
+        })().catch(fail));
       },
       setState(next) {
         if (stopped) return;
@@ -973,7 +990,7 @@
         onFailure(error);
       }
     }
-    function nativeAnalysis() {
+    function nativeAnalysis(track) {
       reader = new window2.MediaStreamTrackProcessor({ track, maxBufferSize: 8 }).readable.getReader();
       meterBackend = "native frames";
       (async () => {
@@ -1060,15 +1077,6 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
       graph.output.connect(gate);
       output.connect(graph.input);
       connected = true;
-      let native = false;
-      if (window2.MediaStreamTrackProcessor) {
-        try {
-          nativeAnalysis();
-          native = true;
-        } catch {
-        }
-      }
-      if (!native) await workletAnalysis();
     })().catch(fail);
     return owned;
   }
@@ -1187,25 +1195,15 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
       report(owned.sourceConflict ? "Another audio processor is active \u2014 normal volume" : "Audio unavailable \u2014 normal volume");
     }
     async function connect(owned) {
-      if (owned.connecting || owned.playback || owned.blocked) return;
+      if (owned.connecting || owned.playback?.analyzing || owned.blocked) return;
       owned.connecting = true;
       const generation = owned.generation;
       try {
         const capture = owned.video.captureStream || owned.video.mozCaptureStream;
         if (!capture || owned.video.mediaKeys) throw new Error("Audio capture is unavailable");
-        owned.stream || (owned.stream = capture.call(owned.video));
-        for (const track2 of owned.stream.getVideoTracks()) track2.stop();
-        const track = owned.stream.getAudioTracks().find((item) => item.readyState === "live");
-        if (!track) {
-          owned.connecting = false;
-          return;
-        }
-        if (track.muted) throw new Error("Captured audio is inaccessible");
-        owned.track = track;
-        owned.playback = createAudiblePlayback({
+        owned.playback || (owned.playback = createAudiblePlayback({
           window: window2,
           video: owned.video,
-          track,
           selected: owned.preferred / 100,
           onMetrics(metrics) {
             if (session !== owned || owned.generation !== generation || owned.blocked) return;
@@ -1219,8 +1217,26 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
           onFailure: (error) => {
             if (session === owned && owned.generation === generation) unavailable(owned, error);
           }
-        });
+        }));
         await owned.playback.ready;
+        if (session !== owned || owned.generation !== generation || owned.blocked) return;
+        silence(owned);
+        sync(owned);
+        if (owned.video.paused || owned.video.ended || owned.video.readyState < 2) {
+          owned.connecting = false;
+          return;
+        }
+        owned.stream || (owned.stream = capture.call(owned.video));
+        for (const track2 of owned.stream.getVideoTracks()) track2.stop();
+        const track = owned.stream.getAudioTracks().find((item) => item.readyState === "live");
+        if (!track) {
+          owned.connecting = false;
+          return;
+        }
+        if (track.muted) throw new Error("Captured audio is inaccessible");
+        owned.track = track;
+        owned.started = now();
+        await owned.playback.startAnalysis(track);
         if (session !== owned || owned.generation !== generation || owned.blocked) return;
         owned.connecting = false;
         silence(owned);
@@ -1286,7 +1302,9 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
           else report(owned.playback?.connected && owned.playback.context.state === "suspended" ? "Click the player to activate" : "Starting audio analysis");
           return;
         }
-        if (now() - (owned.lastFrame || owned.started) > 1500) unavailable(owned, new Error("Live audio processing stalled"));
+        if (now() - (owned.lastFrame || owned.started) > (owned.metrics ? 1500 : 3e3)) {
+          unavailable(owned, new Error(owned.metrics ? "Live audio processing stalled" : "Audio analysis did not start"));
+        }
       } catch (error) {
         unavailable(owned, error);
       }
