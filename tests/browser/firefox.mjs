@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { launchFirefox } from '../helpers/browser.js';
 import { checkIdleResumeRace } from '../helpers/resume-race.mjs';
+import { startAudioContinuityMonitor } from '../helpers/audio-continuity.mjs';
 
 const directory = process.env.VOLUME_SLIDER_FIREFOX_RESULTS || join(tmpdir(), 'volume-slider-firefox-checks');
 await mkdir(directory, { recursive: true });
@@ -18,7 +19,7 @@ for (let i = 0; i < samples; i++) {
 const browser = await launchFirefox();
 const results = [];
 try {
-  for (const platform of ['youtube', 'twitch']) {
+  for (const platform of ['youtube', 'twitch']) for (const lateStart of [false, true]) {
     const youtube = platform === 'youtube', prefix = youtube ? 'yt' : 'twitch';
     const context = await browser.newContext({ viewport: { width: 1100, height: 760 } }), page = await context.newPage();
     const errors = new Set();
@@ -36,13 +37,17 @@ try {
       ${youtube ? 'Object.assign(player,api)' : 'player.__reactFiber$fixture={return:{memoizedProps:{mediaPlayerInstance:api},return:null}}'};
       localStorage.setItem('tm-${prefix}-volume','20');localStorage.setItem('tm-${prefix}-muted','false');localStorage.setItem('tm-${prefix}-volume-slider-normalization','true');
       localStorage.setItem('tm-${prefix}-volume-slider-step','5');
-      const connect=AudioNode.prototype.connect;window.__contexts=[];window.__taps=[];
-      AudioNode.prototype.connect=function(destination,...args){const result=connect.call(this,destination,...args);if(destination===this.context.destination){if(!window.__contexts.includes(this.context)){window.__contexts.push(this.context);window.__tap=this.context.createAnalyser();window.__tap.fftSize=2048;window.__taps.push(window.__tap)}connect.call(this,window.__tap)}return result};
+      const connect=AudioNode.prototype.connect;window.__contexts=[];window.__taps=[];window.__outputs=[];
+      AudioNode.prototype.connect=function(destination,...args){const result=connect.call(this,destination,...args);if(destination===this.context.destination){window.__outputs.push(this);if(!window.__contexts.includes(this.context)){window.__contexts.push(this.context);window.__tap=this.context.createAnalyser();window.__tap.fftSize=2048;window.__taps.push(window.__tap)}connect.call(this,window.__tap)}return result};
       window.__peak=()=>{let peak=0;const data=new Float32Array(2048);for(const tap of window.__taps){tap.getFloatTimeDomainData(data);for(const sample of data)peak=Math.max(peak,Math.abs(sample))}return peak};
       </script>`;
     await page.route('**/*', route => route.fulfill(route.request().url().endsWith('.wav')
       ? { contentType: 'audio/wav', body: audio } : { contentType: 'text/html', body: html }));
     await page.goto(youtube ? 'https://www.youtube.com/watch?v=firefox-fixture' : 'https://www.twitch.tv/firefox-fixture');
+    if (lateStart) {
+      await page.evaluate(() => document.querySelector('video').play());
+      await page.waitForFunction(() => document.querySelector('video').currentTime >= 1.9);
+    }
     await page.addScriptTag({ content: await readFile(new URL(`../../dist/${platform}-volume-slider.user.js`, import.meta.url), 'utf8') });
     await page.evaluate(() => document.querySelector('video').play());
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').status === 'Active' && window.__peak() > .001).catch(async error => {
@@ -54,12 +59,14 @@ try {
       }) }));
       throw error;
     });
+    const stopContinuity = await startAudioContinuityMonitor(page, '__outputs');
     const levels = [], playbackDeadline = Date.now() + 10000;
     while (await page.evaluate(() => document.querySelector('video').currentTime < 3.5)) {
       assert.ok(Date.now() < playbackDeadline, `${platform}: playback stopped advancing`);
       levels.push(await page.evaluate(() => ({ peak: window.__peak(), status: JSON.parse(document.documentElement.dataset.tmAudioNormalization).status })));
       await page.waitForTimeout(30);
     }
+    const continuity = await stopContinuity();
     const before = await page.evaluate(() => ({ status: JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}'),
       peak: window.__peak(), volume: document.querySelector('video').volume,
       slider: document.querySelector('#tm-volume-slider-range').value, label: document.querySelector('#tm-volume-slider-value').textContent,
@@ -72,13 +79,19 @@ try {
       label: document.querySelector('#tm-volume-slider-value').textContent, gradient: document.querySelector('.tm-slider-track').style.background }));
     const overlay = page.locator('#tm-volume-slider-overlay');
     await overlay.screenshot({ path: join(directory, `${platform}.png`) });
-    const result = { platform, firefox: browser.version(), before, after, minPeak: Math.min(...levels.map(x => x.peak)),
+    const result = { platform, lateStart, firefox: browser.version(), before, after, continuity, minPeak: Math.min(...levels.map(x => x.peak)),
       maxPeak: Math.max(...levels.map(x => x.peak)), statuses: [...new Set(levels.map(x => x.status))] };
     results.push(result);
+    const stopMuteControl = await startAudioContinuityMonitor(page, '__outputs');
+    await page.waitForTimeout(80);
     await page.evaluate(() => { document.querySelector('video').muted = true; });
     await page.waitForFunction(() => window.__peak() < 1e-7);
+    await page.waitForTimeout(100);
     await page.evaluate(() => { document.querySelector('video').muted = false; });
     await page.waitForFunction(() => window.__peak() > .001);
+    const mutedControl = await stopMuteControl();
+    assert.ok(mutedControl.maxZeroRun >= rate * .05, 'the continuity monitor must detect an actual audio interruption');
+    result.mutedControl = mutedControl;
     await page.evaluate(() => document.querySelector('video').pause());
     await page.waitForFunction(() => window.__contexts[0].state === 'suspended');
     const pausedTime = await page.evaluate(() => window.__contexts[0].currentTime);
@@ -105,7 +118,10 @@ try {
     assert.equal(result.before.status.status, 'Active');
     assert.ok(result.before.peak > .001, `${result.platform}: processed output was silent`);
     assert.deepEqual(result.statuses, ['Active'], `${result.platform}: continuous audio lost processing`);
-    assert.ok(result.minPeak > .001, `${result.platform}: output cut out`);
+    assert.ok(result.continuity.samples >= 128, `${result.platform}: no rendered continuity evidence`);
+    assert.ok(result.continuity.nonzero > 128, `${result.platform}: no audible continuity evidence`);
+    assert.equal(result.continuity.nonfinite, 0, `${result.platform}: invalid rendered samples`);
+    assert.ok(result.continuity.maxZeroRun <= 128, `${result.platform}: rendered audio cut out`);
     assert.ok(result.maxPeak <= .2 * 10 ** (-10 / 20) + .001, `${result.platform}: sample ceiling exceeded`);
     assert.equal(result.after.slider, '25');
     assert.equal(result.after.label, '25%');
