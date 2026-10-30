@@ -135,9 +135,24 @@ try {
     const pausedTime = await page.evaluate(() => window.__graphContexts[0].currentTime);
     await page.waitForTimeout(150);
     assert.equal(await page.evaluate(() => window.__graphContexts[0].currentTime), pausedTime, 'paused DSP kept rendering');
+    await page.evaluate(() => {
+      const context = window.__graphContexts[0], resume = context.resume.bind(context), icon = document.querySelector('.tm-normalization-icon');
+      window.__resumeIcon = { hidden: [], context, resume, observer: new MutationObserver(records => {
+        for (const record of records) if (record.attributeName === 'hidden') window.__resumeIcon.hidden.push(icon.hidden);
+      }) };
+      window.__resumeIcon.observer.observe(icon, { attributes: true, attributeFilter: ['hidden'] });
+      context.resume = async () => { await new Promise(resolve => setTimeout(resolve, 150)); return resume(); };
+    });
     await page.evaluate(() => document.querySelector('video').play());
     await page.waitForFunction(() => window.__graphContexts[0].state === 'running');
     await page.waitForFunction(() => window.__peak() > .001);
+    const iconHidden = await page.evaluate(() => {
+      const probe = window.__resumeIcon;
+      probe.observer.disconnect(); probe.context.resume = probe.resume;
+      delete window.__resumeIcon;
+      return probe.hidden;
+    });
+    assert.ok(iconHidden.every(hidden => !hidden), `${platform}/${mode}: normalization icon blinked during resume`);
     await page.evaluate(() => { const slider=document.querySelector('#tm-volume-slider-range');slider.value='40';slider.dispatchEvent(new Event('input',{bubbles:true}));slider.dispatchEvent(new Event('change',{bubbles:true})); });
     await page.waitForFunction(() => JSON.parse(document.documentElement.dataset.tmAudioNormalization || '{}').selected === 40);
     await page.evaluate(twitch => {

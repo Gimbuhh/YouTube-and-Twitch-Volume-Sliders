@@ -6,8 +6,10 @@ import { acquireMediaOutput, mediaTransitionTime, waitForMediaRender } from './n
 // Native nodes process the player's own audio. Captured AudioData and worklets
 // are interchangeable analysis inputs, never playback renderers.
 export function createAudiblePlayback({ window, video, selected, onMetrics, onFailure }) {
-  const output = acquireMediaOutput(window, video), { context } = output;
-  let gate, graph, disposal, analysis;
+  const output = acquireMediaOutput(window, video, {
+    onPause: () => owned.setState({ selected, muted: video.muted, paused: true })
+  }), { context } = output;
+  let gate, graph, disposal, analysis, silenced;
   const programme = createProgrammeState(selected);
   let stopped = false, connected = false, node = null, reader = null, muted = true, paused = video.paused;
   let meterBackend = 'starting', rate = 0, samples = 0, hasFrame = false, lastReport = -Infinity;
@@ -53,11 +55,25 @@ export function createAudiblePlayback({ window, video, selected, onMetrics, onFa
       const silent = next.muted || paused || selected === 0;
       if (gate && muted !== silent) {
         muted = silent;
-        const at = silent ? context.currentTime : mediaTransitionTime(context);
-        gate.gain.cancelScheduledValues(context.currentTime); gate.gain.setValueAtTime(0, at);
-        if (!silent) gate.gain.linearRampToValueAtTime(1, at + .005);
+        const now = context.currentTime;
+        const value = gate.gain.value;
+        gate.gain.cancelScheduledValues(now);
+        if (silent) {
+          gate.gain.setValueAtTime(value, now);
+          gate.gain.linearRampToValueAtTime(0, now + .005);
+          // Render the closed gate before freezing the context. Otherwise its
+          // last nonzero block can reappear at the beginning of the next play.
+          silenced = waitForMediaRender(window, context, mediaTransitionTime(context) + .005 + 128 / context.sampleRate);
+        } else {
+          // A quick play can cancel an unrendered pause: keep its zero now as
+          // well as at the future opening fade, without releasing retained PCM.
+          silenced = null;
+          const at = mediaTransitionTime(context);
+          gate.gain.setValueAtTime(0, now); gate.gain.setValueAtTime(0, at);
+          gate.gain.linearRampToValueAtTime(1, at + .005);
+        }
       }
-      output.setPaused(paused);
+      output.setPaused(paused, silenced);
     },
     resume() { return output.resume(); },
     dispose() {

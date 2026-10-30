@@ -122,6 +122,20 @@ test('paused startup stays protected without capturing before playback',async t=
   f.audio.paused=false;f.video.dispatchEvent(new f.window.Event('playing'));await f.advance();assert.equal(f.normalizer.getStatus(),'Active');
 });
 
+test('resuming an established session waits for its context without asking for activation', async t => {
+  const f = fixture(t); await f.start();
+  const context = f.audio.contexts[0], resume = context.resume;
+  f.audio.paused = true; f.video.dispatchEvent(new f.window.Event('pause'));
+  await f.advance(.2);
+  let finish;
+  context.resume = () => new Promise(resolve => { finish = () => { resume.call(context); resolve(); }; });
+  f.audio.paused = false; f.video.dispatchEvent(new f.window.Event('play'));
+  await f.advance(.05);
+  assert.equal(f.normalizer.getStatus(), 'Waiting for playback', 'a pending resume must not look like blocked activation');
+  context.resume = resume; finish(); await f.advance(.2);
+  assert.equal(f.normalizer.getStatus(), 'Active');
+});
+
 test('capture starts after the protected output route and native volume are ready', async t => {
   const f = fixture(t), capture = f.video.captureStream;
   f.video.captureStream = () => {

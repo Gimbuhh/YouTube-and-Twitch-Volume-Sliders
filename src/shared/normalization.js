@@ -165,7 +165,8 @@ export function createVolumeNormalizer({ window, getVolume, setVolume, isMuted, 
       owned.trackMutedAt = 0;
       if (!owned.playback?.running) {
         if (now() - owned.started > 3000) unavailable(owned, new Error('Click the player to activate audio processing'));
-        else report(owned.playback?.connected && owned.playback.context.state === 'suspended' ? 'Click the player to activate' : 'Starting audio analysis');
+        else report(owned.metrics ? 'Waiting for playback'
+          : owned.playback?.connected && owned.playback.context.state === 'suspended' ? 'Click the player to activate' : 'Starting audio analysis');
         return;
       }
       // The first decoded audio can trail Twitch's video readiness. Keep the

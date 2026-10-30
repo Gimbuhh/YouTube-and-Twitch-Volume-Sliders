@@ -141,7 +141,7 @@ function activity(document, route, paused) {
   return reconcile(document);
 }
 
-export function acquireMediaOutput(window, video) {
+export function acquireMediaOutput(window, video, { onPause } = {}) {
   installMediaOutputGuard(window);
   assertMediaOutputAvailable(window, video);
   const url = video.currentSrc && new URL(video.currentSrc, window.location.href);
@@ -162,10 +162,18 @@ export function acquireMediaOutput(window, video) {
     route = { video, pending: false };
     document.routes.set(video, route);
     for (const type of ['play', 'playing', 'pause', 'ended']) {
-      video.addEventListener(type, () => { activity(document, route, video.paused || video.ended).catch(() => {}); });
+      video.addEventListener(type, () => {
+        const paused = video.paused || video.ended;
+        // Close the owned gate before this listener can freeze rendering,
+        // regardless of the order of the player's other pause listeners.
+        if (paused && route.pending) route.onPause?.();
+        if (!paused) route.pausing = null;
+        if (!route.pausing) activity(document, route, paused).catch(() => {});
+      });
     }
   }
   route.pending = true;
+  route.onPause = onPause;
   let source = document.sources.get(video);
   function restoreRoute() {
     route.pending = false;
@@ -181,7 +189,20 @@ export function acquireMediaOutput(window, video) {
   }
   return { context: document.context,
     get source() { return source; },
-    setPaused(paused) { activity(document, route, paused).catch(() => {}); },
+    setPaused(paused, after) {
+      if (paused && after && document.context.state === 'running') {
+        if (route.pausing === after) return;
+        route.pausing = after;
+        after.then(() => {
+          if (route.pausing !== after) return;
+          route.pausing = null;
+          activity(document, route, video.paused || video.ended).catch(() => {});
+        });
+      } else {
+        route.pausing = null;
+        activity(document, route, paused).catch(() => {});
+      }
+    },
     resume() {
       // A replacement graph must not cut short the outgoing graph's fade or
       // be disconnected by its deferred restoration of ordinary playback.
@@ -212,6 +233,7 @@ export function acquireMediaOutput(window, video) {
       source.disconnect(); source.connect(input);
     },
     restore(after) {
+      if (route.onPause === onPause) route.onPause = null;
       if (after) {
         route.pending = false;
         route.restoring = after.then(() => {

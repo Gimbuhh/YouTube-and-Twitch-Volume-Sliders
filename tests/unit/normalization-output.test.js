@@ -4,11 +4,11 @@ import { acquireMediaOutput, fadeInMediaOutput } from '../../src/shared/normaliz
 import { createRuntime } from '../helpers/runtime.js';
 import { mockAudioCapture } from '../helpers/audio.js';
 
-function fixture(t) {
+function fixture(t, options) {
   const runtime = createRuntime(), video = runtime.document.createElement('video');
   runtime.document.body.append(video);
   const audio = mockAudioCapture(runtime.window, video);
-  const output = acquireMediaOutput(runtime.window, video);
+  const output = acquireMediaOutput(runtime.window, video, options);
   t.after(() => runtime.close());
   return { ...runtime, video, audio, output, context: output.context };
 }
@@ -39,6 +39,19 @@ test('paused routes suspend, resume without gestures and retain their original s
   f.audio.paused = false; f.video.dispatchEvent(new f.window.Event('play'));
   await f.output.resume();
   assert.equal(f.context.state, 'running', 'ordinary playback must wake the retained context');
+});
+
+for (const resumeEarly of [false, true]) test(`protected pause waits for rendered silence${resumeEarly ? ' and an early play cancels suspension' : ''}`, async t => {
+  let finish, f;
+  const silenced = new Promise(resolve => { finish = resolve; });
+  f = fixture(t, { onPause: () => f.output.setPaused(true, silenced) });
+  await f.output.resume(); f.output.connect(f.context.createGain());
+  f.audio.paused = true; f.video.dispatchEvent(new f.window.Event('pause'));
+  assert.equal(f.context.state, 'running', 'the gate must finish rendering before suspension');
+  if (resumeEarly) { f.audio.paused = false; f.video.dispatchEvent(new f.window.Event('play')); }
+  finish(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.context.state, resumeEarly ? 'running' : 'suspended');
+  assert.equal(f.context.sources.size, 1);
 });
 
 test('a second ordinary playing route prevents shared-context suspension', async t => {
