@@ -1,6 +1,6 @@
 {
   "name": "youtube-twitch-volume-sliders",
-  "version": "3.0",
+  "version": "3.0.1",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -15,7 +15,7 @@
     "test:browser": "node scripts/build.mjs && node tests/browser/smoke.mjs && node tests/browser/volume-numbers.mjs && node tests/browser/normalization-icon.mjs",
     "test:browsers": "node scripts/build.mjs && node scripts/browser-checks.mjs",
     "test:chrome": "node scripts/build.mjs && node scripts/browser-checks.mjs chrome",
-    "test:normalization-browser": "node scripts/build.mjs && node tests/browser/normalization.mjs && node tests/browser/native-audio-startup.mjs && node tests/browser/native-audio-transitions.mjs && node tests/browser/native-gain-graph.mjs",
+    "test:normalization-browser": "node scripts/build.mjs && node tests/browser/normalization.mjs && node tests/browser/native-audio-startup.mjs && node tests/browser/native-audio-transitions.mjs && node tests/browser/native-audio-resume.mjs && node tests/browser/native-gain-graph.mjs",
     "test:firefox": "node scripts/build.mjs && node scripts/browser-checks.mjs firefox",
     "browsers:install": "node node_modules/playwright-core/cli.js install firefox",
     "test:normalization-compare": "node scripts/compare-normalization.mjs",

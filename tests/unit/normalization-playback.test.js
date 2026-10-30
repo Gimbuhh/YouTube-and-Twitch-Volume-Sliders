@@ -87,3 +87,44 @@ test('opening and retiring output survive a renderer batch when baseLatency is z
   assert.ok(playback.context.sources.get(video).connections.size>0,'routing must survive until the fade renders');
   await disposed;
 });
+
+test('resuming keeps output silent until its opening fade despite an unrendered pause', async t => {
+  const runtime = createRuntime(), video = runtime.document.createElement('video'); runtime.document.body.append(video);
+  const audio = mockAudioCapture(runtime.window, video), BaseContext = runtime.window.AudioContext, gains = [];
+  runtime.window.AudioContext = class extends BaseContext {
+    constructor() { super(); this.outputLatency = .04; }
+    createGain() { const node = super.createGain(); gains.push(node); return node; }
+  };
+  const playback = createAudiblePlayback({ window: runtime.window, video, selected: .3,
+    onMetrics() {}, onFailure: error => assert.fail(error) });
+  t.after(async () => { await playback.dispose(); runtime.close(); });
+  await playback.ready;
+  playback.setState({ selected: .3, muted: false, paused: false });
+  // A frozen audio clock and pending zero model pause reaching the page before
+  // the audio renderer. Cancelling that zero must not leave the old open gate.
+  const parameter = gains[0].gain;
+  let events = [];
+  parameter.cancelScheduledValues = at => { events = events.filter(event => event.at < at); };
+  parameter.setValueAtTime = (value, at) => { events.push({ value, at }); };
+  parameter.linearRampToValueAtTime = (value, at) => { events.push({ value, at, ramp: true }); };
+  function renderedGain(at) {
+    let previous = { value: 1, at: 1 };
+    for (const event of events) {
+      if (event.at > at) return event.ramp
+        ? previous.value + (event.value - previous.value) * (at - previous.at) / (event.at - previous.at)
+        : previous.value;
+      previous = event;
+    }
+    return previous.value;
+  }
+  Object.defineProperty(playback.context, 'currentTime', { configurable: true, value: 1 });
+  audio.paused = true;
+  playback.setState({ selected: .3, muted: false, paused: true });
+  assert.equal(playback.context.state, 'suspended');
+  audio.paused = false;
+  playback.setState({ selected: .3, muted: false, paused: false });
+  assert.equal(renderedGain(1.02), 0, 'retained PCM must stay silent before the opening fade');
+  assert.ok(Math.abs(renderedGain(1.0425) - .5) < 1e-9, 'output must fade in smoothly');
+  assert.equal(renderedGain(1.05), 1, 'the fade must restore audible output');
+  delete playback.context.currentTime;
+});

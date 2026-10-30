@@ -2,6 +2,12 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
+## 3.0.1 - 2026-10-30
+
+### Fixed
+
+- **Both:** Resuming a paused video with Auto-normalize volume enabled no longer briefly distorts the audio.
+
 ## 3.0 - 2026-10-28
 
 ### Added

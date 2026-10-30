@@ -54,7 +54,11 @@ export function createAudiblePlayback({ window, video, selected, onMetrics, onFa
       if (gate && muted !== silent) {
         muted = silent;
         const at = silent ? context.currentTime : mediaTransitionTime(context);
-        gate.gain.cancelScheduledValues(context.currentTime); gate.gain.setValueAtTime(0, at);
+        // Resume can cancel a pause's zero before the suspended renderer has
+        // applied it. Re-anchor silence now so retained PCM cannot leak out
+        // before the scheduled opening fade and then be cut abruptly.
+        gate.gain.cancelScheduledValues(context.currentTime); gate.gain.setValueAtTime(0, context.currentTime);
+        if (!silent) gate.gain.setValueAtTime(0, at);
         if (!silent) gate.gain.linearRampToValueAtTime(1, at + .005);
       }
       output.setPaused(paused);

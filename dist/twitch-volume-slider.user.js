@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      3.0
+// @version      3.0.1
 // @description  Compact Twitch volume controls with optional automatic volume normalization.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png
@@ -947,7 +947,8 @@
           muted = silent;
           const at = silent ? context.currentTime : mediaTransitionTime(context);
           gate.gain.cancelScheduledValues(context.currentTime);
-          gate.gain.setValueAtTime(0, at);
+          gate.gain.setValueAtTime(0, context.currentTime);
+          if (!silent) gate.gain.setValueAtTime(0, at);
           if (!silent) gate.gain.linearRampToValueAtTime(1, at + 5e-3);
         }
         output.setPaused(paused);
