@@ -44,7 +44,7 @@ Both scripts replace or complement the sites' native controls with a small indic
 </table>
 </details>
 
-The control and settings screenshots come from the built 3.0 scripts in local player fixtures, with normalization enabled. The feature is off by default. See [testing](docs/testing.md) to regenerate them.
+The control and settings screenshots come from the built userscripts in local player fixtures, with normalization enabled. The feature is off by default. See [testing](docs/testing.md) to regenerate them.
 
 ## Install
 
@@ -52,10 +52,6 @@ The control and settings screenshots come from the built 3.0 scripts in local pl
 
 - A modern browser
 - A current userscript manager, such as [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/)
-
-### Version 3.0
-
-Version 3.0 introduces opt-in **Auto-normalize volume**. Enable it in **Volume Slider Options → General → Audio**. See the [3.0 release notes](release-notes/3.0.md) for changes and limitations.
 
 ### GitHub Releases
 
@@ -113,7 +109,7 @@ With the 1% or 2% setting, pressing on or close to a taller mark selects that 10
 
 The Twitch script also runs a small keyboard relay in Twitch's official extension frames (`*.ext-twitch.tv`). This keeps Space and volume arrows working when an extension overlay has focus. Text fields, buttons, and keys handled by the extension keep their normal behavior; audio analysis runs only in the player page.
 
-## Loudness normalization (3.0)
+## Loudness normalization
 
 Open **Volume Slider Options → General → Audio → Auto-normalize volume** to enable it. It starts off and is saved separately for YouTube and Twitch. On later page loads, analysis can start from the playing video before the player controls finish loading. Startup audio comes in softly under protection as soon as samples arrive, then moves to the measured level; source restarts and switching YouTube videos on the same page use the same protection. The slider continues to set your preferred listening level; automatic corrections do not move it or replace the saved percentage.
 
