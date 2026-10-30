@@ -117,14 +117,16 @@ test('resuming keeps output silent until its opening fade despite an unrendered 
     }
     return previous.value;
   }
-  Object.defineProperty(playback.context, 'currentTime', { configurable: true, value: 1 });
+  Object.defineProperty(playback.context, 'currentTime', { configurable: true, writable: true, value: 1 });
   audio.paused = true;
   playback.setState({ selected: .3, muted: false, paused: true });
-  assert.equal(playback.context.state, 'suspended');
+  assert.equal(playback.context.state, 'running', 'the closing fade must render before suspension');
   audio.paused = false;
   playback.setState({ selected: .3, muted: false, paused: false });
   assert.equal(renderedGain(1.02), 0, 'retained PCM must stay silent before the opening fade');
   assert.ok(Math.abs(renderedGain(1.0425) - .5) < 1e-9, 'output must fade in smoothly');
   assert.equal(renderedGain(1.05), 1, 'the fade must restore audible output');
+  playback.context.currentTime = 2;
+  await new Promise(resolve => setTimeout(resolve, 5));
   delete playback.context.currentTime;
 });

@@ -22,9 +22,9 @@ export function createNormalizationIcon(document) {
 export function updateNormalizationIcon(overlay, status) {
   if (!overlay) return;
   // Pausing, buffering, startup and mute are normal enabled states. Hide the
-  // indicator for Off or a status requiring accessible audio/user activation.
+  // indicator for Off, blocked activation or a confirmed audio failure.
   const visible = status.startsWith('Active') || status === 'Waiting for playback'
-    || status === 'Starting audio analysis' || status === 'Waiting for audio';
+    || status === 'Starting audio analysis' || status === 'Waiting for audio' || status === 'Waiting for accessible audio';
   const icon = overlay.querySelector('.tm-normalization-icon');
   const description = overlay.querySelector('.tm-normalization-description');
   if (!icon || !description || icon.hidden === !visible) return;

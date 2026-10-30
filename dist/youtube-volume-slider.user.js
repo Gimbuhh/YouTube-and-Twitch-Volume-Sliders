@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      3.0.1
+// @version      3.0.2
 // @description  Compact YouTube volume controls with optional automatic volume normalization.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://www.youtube.com/favicon.ico
@@ -761,7 +761,7 @@
     else document2.active.delete(route);
     return reconcile(document2);
   }
-  function acquireMediaOutput(window2, video) {
+  function acquireMediaOutput(window2, video, { onPause } = {}) {
     installMediaOutputGuard(window2);
     assertMediaOutputAvailable(window2, video);
     const url = video.currentSrc && new URL(video.currentSrc, window2.location.href);
@@ -786,12 +786,16 @@
       document2.routes.set(video, route);
       for (const type of ["play", "playing", "pause", "ended"]) {
         video.addEventListener(type, () => {
-          activity(document2, route, video.paused || video.ended).catch(() => {
+          const paused = video.paused || video.ended;
+          if (paused && route.pending) route.onPause?.();
+          if (!paused) route.pausing = null;
+          if (!route.pausing) activity(document2, route, paused).catch(() => {
           });
         });
       }
     }
     route.pending = true;
+    route.onPause = onPause;
     let source = document2.sources.get(video);
     function restoreRoute() {
       route.pending = false;
@@ -814,9 +818,21 @@
       get source() {
         return source;
       },
-      setPaused(paused) {
-        activity(document2, route, paused).catch(() => {
-        });
+      setPaused(paused, after) {
+        if (paused && after && document2.context.state === "running") {
+          if (route.pausing === after) return;
+          route.pausing = after;
+          after.then(() => {
+            if (route.pausing !== after) return;
+            route.pausing = null;
+            activity(document2, route, video.paused || video.ended).catch(() => {
+            });
+          });
+        } else {
+          route.pausing = null;
+          activity(document2, route, paused).catch(() => {
+          });
+        }
       },
       resume() {
         return route.restoring ? route.restoring.then(() => activity(document2, route, video.paused || video.ended)) : activity(document2, route, video.paused || video.ended);
@@ -843,6 +859,7 @@
         source.connect(input);
       },
       restore(after) {
+        if (route.onPause === onPause) route.onPause = null;
         if (after) {
           route.pending = false;
           route.restoring = after.then(() => {
@@ -866,8 +883,10 @@
 
   // src/shared/normalization-playback.js
   function createAudiblePlayback({ window: window2, video, selected, onMetrics, onFailure }) {
-    const output = acquireMediaOutput(window2, video), { context } = output;
-    let gate, graph, disposal, analysis;
+    const output = acquireMediaOutput(window2, video, {
+      onPause: () => owned.setState({ selected, muted: video.muted, paused: true })
+    }), { context } = output;
+    let gate, graph, disposal, analysis, silenced;
     const programme = createProgrammeState(selected);
     let stopped = false, connected = false, node = null, reader = null, muted = true, paused = video.paused;
     let meterBackend = "starting", rate = 0, samples = 0, hasFrame = false, lastReport = -Infinity;
@@ -935,13 +954,22 @@
         const silent = next.muted || paused || selected === 0;
         if (gate && muted !== silent) {
           muted = silent;
-          const at = silent ? context.currentTime : mediaTransitionTime(context);
-          gate.gain.cancelScheduledValues(context.currentTime);
-          gate.gain.setValueAtTime(0, context.currentTime);
-          if (!silent) gate.gain.setValueAtTime(0, at);
-          if (!silent) gate.gain.linearRampToValueAtTime(1, at + 5e-3);
+          const now = context.currentTime;
+          const value = gate.gain.value;
+          gate.gain.cancelScheduledValues(now);
+          if (silent) {
+            gate.gain.setValueAtTime(value, now);
+            gate.gain.linearRampToValueAtTime(0, now + 5e-3);
+            silenced = waitForMediaRender(window2, context, mediaTransitionTime(context) + 5e-3 + 128 / context.sampleRate);
+          } else {
+            silenced = null;
+            const at = mediaTransitionTime(context);
+            gate.gain.setValueAtTime(0, now);
+            gate.gain.setValueAtTime(0, at);
+            gate.gain.linearRampToValueAtTime(1, at + 5e-3);
+          }
         }
-        output.setPaused(paused);
+        output.setPaused(paused, silenced);
       },
       resume() {
         return output.resume();
@@ -965,11 +993,11 @@
           node.disconnect();
           node.port.close();
         }
-        const silenced = waitForMediaRender(window2, context, at + 5e-3 + 128 / context.sampleRate).then(() => {
+        const silenced2 = waitForMediaRender(window2, context, at + 5e-3 + 128 / context.sampleRate).then(() => {
           video.volume = 0;
           return waitForMediaRender(window2, context, context.currentTime + (context.baseLatency || 0) + 256 / context.sampleRate);
         });
-        return disposal = output.restore(silenced).then(() => {
+        return disposal = output.restore(silenced2).then(() => {
           graph?.dispose();
           gate.disconnect();
         });
@@ -1290,7 +1318,7 @@ registerProcessor('tm-native-graph-meter',class extends AudioWorkletProcessor {
         owned.trackMutedAt = 0;
         if (!owned.playback?.running) {
           if (now() - owned.started > 3e3) unavailable(owned, new Error("Click the player to activate audio processing"));
-          else report(owned.playback?.connected && owned.playback.context.state === "suspended" ? "Click the player to activate" : "Starting audio analysis");
+          else report(owned.metrics ? "Waiting for playback" : owned.playback?.connected && owned.playback.context.state === "suspended" ? "Click the player to activate" : "Starting audio analysis");
           return;
         }
         if (now() - (owned.lastFrame || owned.started) > (owned.metrics ? 1500 : 3e3)) {
@@ -1586,7 +1614,7 @@ Output ${output}% \xB7 Selected ${session.preferred}%`;
   }
   function updateNormalizationIcon(overlay, status) {
     if (!overlay) return;
-    const visible = status.startsWith("Active") || status === "Waiting for playback" || status === "Starting audio analysis" || status === "Waiting for audio";
+    const visible = status.startsWith("Active") || status === "Waiting for playback" || status === "Starting audio analysis" || status === "Waiting for audio" || status === "Waiting for accessible audio";
     const icon = overlay.querySelector(".tm-normalization-icon");
     const description = overlay.querySelector(".tm-normalization-description");
     if (!icon || !description || icon.hidden === !visible) return;

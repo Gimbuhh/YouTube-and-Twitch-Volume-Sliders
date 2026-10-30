@@ -604,20 +604,24 @@ for (const config of platforms) {
     // Ordinary suspension resumes automatically. Model a browser that refuses
     // activation until a gesture, rather than just changing the state string.
     context.resume = () => Promise.resolve();
-    context.state = 'suspended'; await f.advance(.6);
-    assert.equal(indicator.hidden, true, 'activation is required before analysis can resume');
+    context.state = 'suspended'; f.video.dispatchEvent(new f.window.Event('play')); await f.advance(.6);
+    assert.equal(indicator.hidden, false, 'a pending resume retains the enabled indication');
+    assert.equal(f.document.getElementById('tm-volume-options-normalization-status').textContent, 'Waiting for playback');
+    await f.advance(2.5);
+    assert.equal(indicator.hidden, true, 'confirmed blocked activation hides the indication');
     context.resume = resume;
     f.document.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
     await f.advance(.2); assert.equal(indicator.hidden, false);
     f.audio.captureMuted = true;
-    f.audio.streams[0].getAudioTracks()[0].muted = true;
-    await f.advance(); assert.equal(indicator.innerHTML, artwork);
+    f.audio.streams.at(-1).getAudioTracks()[0].muted = true;
+    await f.advance(.2); assert.equal(indicator.hidden, false, 'a transient capture wait is not a confirmed failure');
+    await f.advance(1.6); assert.equal(indicator.innerHTML, artwork);
     assert.equal(indicator.hidden, true);
     assert.equal(indicator.title, '');
     assert.equal(indicator.dataset.tmTooltip, 'Auto-normalize volume is on');
     assert.match(f.document.getElementById('tm-volume-options-normalization-status').textContent, /unavailable|accessible audio/);
     f.audio.captureMuted = false;
-    f.audio.streams[0].getAudioTracks()[0].muted = false;
+    f.audio.streams.at(-1).getAudioTracks()[0].muted = false;
     f.document.dispatchEvent(new f.window.Event('pointerdown', { bubbles: true }));
     await f.advance(.2); assert.equal(indicator.hidden, false);
     await f.advance(3.2); // Healthy processing resets the earlier retry backoff.

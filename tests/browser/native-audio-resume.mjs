@@ -25,11 +25,16 @@ try {
       video.src = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' })); video.volume = 0;
       await video.play();
       const BaseContext = AudioContext, context = new BaseContext({ sampleRate }), blocks = [], failures = [];
+      // Count samples in processing order: repeated renderer timestamps must
+      // not overwrite earlier PCM or manufacture a gap in the recording.
       await context.audioWorklet.addModule(URL.createObjectURL(new Blob([`registerProcessor('recorder',class extends AudioWorkletProcessor {
-        process(inputs){this.port.postMessage({at:currentFrame,values:new Float32Array(inputs[0]?.[0]||128),raw:new Float32Array(inputs[1]?.[0]||128)});return true}
+        constructor(){super();this.blocks=[];this.port.onmessage=()=>this.flush(true)}
+        flush(flushed=false){this.port.postMessage({blocks:this.blocks,flushed});this.blocks=[]}
+        process(inputs){this.frame??=currentFrame;this.blocks.push({at:this.frame,values:new Float32Array(inputs[0]?.[0]||128),raw:new Float32Array(inputs[1]?.[0]||128)});this.frame+=128;if(this.blocks.length===32)this.flush();return true}
       })`], { type: 'application/javascript' })));
       const collector = new AudioWorkletNode(context, 'recorder', { numberOfInputs: 2, channelCount: 1, channelCountMode: 'explicit' });
-      collector.port.onmessage = ({ data }) => blocks.push(data);
+      let flushed;
+      collector.port.onmessage = ({ data }) => { blocks.push(...data.blocks); if (data.flushed) flushed?.(); };
       collector.connect(context.destination);
       window.AudioContext = class extends BaseContext { constructor() { return context; } };
       const connect = AudioNode.prototype.connect;
@@ -58,17 +63,20 @@ try {
         resumes.push({ state, at: pausedAt, media: video.currentTime });
         await sleep(650);
       }
+      await new Promise(resolve => { flushed = resolve; collector.port.postMessage('flush'); });
       const values = new Float32Array(blocks.at(-1).at + 128), raw = new Float32Array(values.length);
+      const recordingGaps = blocks.flatMap((block, i) => i && block.at !== blocks[i - 1].at + 128
+        ? [{ at: blocks[i - 1].at + 128, end: block.at }] : []);
       for (const block of blocks) { values.set(block.values, block.at); raw.set(block.raw, block.at); }
       const coefficient = 2 * Math.cos(2 * Math.PI * 997 / context.sampleRate);
       const windows = resumes.map(resume => {
+        const boundary = Math.round(resume.at * context.sampleRate);
+        const openingPeak = Math.max(...values.subarray(boundary, boundary + 128).map(Math.abs));
+        const closingPeak = Math.max(...values.subarray(boundary - 128, boundary).map(Math.abs));
         const bins = [];
         for (let ms = 0; ms < 400; ms += 10) {
           let residual = 0, rawResidual = 0, addedResidual = 0, energy = 0, peak = 0;
-          // Suspended audio clocks concatenate the two sides of the real
-          // wall-clock pause. Do not treat that boundary as adjacent PCM.
-          const begin = Math.max(Math.round(resume.at * context.sampleRate) + 128,
-            Math.round((resume.at + ms / 1000) * context.sampleRate));
+          const begin = Math.round((resume.at + ms / 1000) * context.sampleRate);
           const end = Math.round((resume.at + (ms + 10) / 1000) * context.sampleRate);
           for (let i = begin; i < end; i++) {
             const error = Math.abs(values[i] - coefficient * values[i - 1] + values[i - 2]);
@@ -83,12 +91,12 @@ try {
           }
           bins.push({ ms, residual, rawResidual, addedResidual, peak, rms: Math.sqrt(energy / (end - begin)) });
         }
-        return { ...resume, bins };
+        return { ...resume, openingPeak, closingPeak, bins };
       });
       AudioNode.prototype.connect = connect; window.AudioContext = BaseContext;
       video.pause(); await playback.dispose(); collector.disconnect();
       for (const track of stream.getTracks()) track.stop();
-      return { rate: context.sampleRate, failures, windows };
+      return { rate: context.sampleRate, failures, recordingGaps, windows };
     }, sampleRate);
     console.log(JSON.stringify({ ...result, windows: result.windows.map(({ bins, ...window }) => ({ ...window,
       residual: Math.max(...bins.map(bin => bin.residual)), inputResidual: Math.max(...bins.map(bin => bin.rawResidual)),
@@ -96,8 +104,11 @@ try {
       distortedBins: bins.filter(bin => bin.addedResidual >= .001),
       gaps: bins.filter(bin => bin.rms < .005).map(bin => bin.ms) })) }));
     assert.deepEqual(result.failures, []);
+    assert.deepEqual(result.recordingGaps, [], 'recorder sample clock was discontinuous');
     for (const window of result.windows) {
       assert.equal(window.state, 'suspended');
+      assert.ok(window.closingPeak < 1e-7, 'the context froze before the closed gate rendered');
+      assert.ok(window.openingPeak < 1e-7, 'retained PCM leaked into the first resumed block');
       assert.ok(window.bins.every(bin => bin.addedResidual < .001), 'normalizer distorted the resumed tone');
       assert.ok(window.bins.every(bin => bin.peak < .1), 'resumed output bypassed normal gain protection');
       assert.ok(window.bins.slice(5).every(bin => bin.rms > .005), 'resumed tone had gaps');

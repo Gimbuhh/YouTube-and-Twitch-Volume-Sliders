@@ -245,6 +245,8 @@ try {
       await page.evaluate(() => { window.__iconAudio.paused = false; });
       await page.evaluate(() => { window.__iconAudio.amplitude = 0.02; window.__iconAudio.streams.at(-1).getAudioTracks()[0].muted = true; });
       await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent.includes('Waiting for accessible audio'));
+      assert.equal(await indicator.isVisible(), true, 'a brief capture wait keeps the enabled indication');
+      await page.waitForFunction(() => document.querySelector('#tm-volume-options-normalization-status').textContent.includes('Audio unavailable'));
       assert.equal(await indicator.isVisible(), false);
       assert.equal(await indicator.innerHTML(), artwork);
       await page.locator('#tm-volume-options-normalization').click();

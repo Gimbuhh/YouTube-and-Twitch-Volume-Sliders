@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Volume Slider
 // @namespace    https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders
-// @version      3.0.1
+// @version      3.0.2
 // @description  Compact YouTube volume controls with optional automatic volume normalization.
 // @author       Gimbuhh (Made using AI)
 // @icon         https://www.youtube.com/favicon.ico
