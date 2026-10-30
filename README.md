@@ -111,17 +111,13 @@ The Twitch script also runs a small keyboard relay in Twitch's official extensio
 
 ## Loudness normalization
 
-Open **Volume Slider Options → General → Audio → Auto-normalize volume** to enable it. It starts off and is saved separately for YouTube and Twitch. On later page loads, analysis can start from the playing video before the player controls finish loading. Startup audio comes in softly under protection as soon as samples arrive, then moves to the measured level; source restarts and switching YouTube videos on the same page use the same protection. The slider continues to set your preferred listening level; automatic corrections do not move it or replace the saved percentage.
+**Auto-normalize volume** keeps videos and streams closer in loudness and reduces loud spikes. Your slider stays at the volume you choose.
 
-Stream restarts keep that selected level. Player Up/Down keys change it in five-point steps, rather than stepping from the automatically adjusted output. Native volume controls can still change your listening level.
+Enable it in **Volume Slider Options → General → Audio → Auto-normalize volume**. It starts off and saves separately for YouTube and Twitch.
 
-The mode uses LUFS-based analysis to match listening levels and processes the player's audio directly to reduce loud spikes before playback. Quieter sources rise gradually, silence and very low background levels are ignored, and volume recovers smoothly after brief loud sounds. Automatic boost is limited, so especially quiet recordings may remain below target. Stereo channels stay linked without cancelling each other's measurements.
-
-Audio stays quiet until protection is ready on page loads and video changes. Normalization adds a small audio delay and cannot guarantee identical loudness for every recording. Browser activation and source restrictions still apply; if processing is unavailable, ordinary playback continues at your selected volume with a status warning. Normalization takes priority over Twitch's 7TV compressor when enabled; switching processors requires a reload. See [normalization](docs/normalization.md) for details and [testing](docs/testing.md#audio-normalization) for verification.
-
-The status below the toggle shows whether normalization is active, waiting, or unavailable. While active, it also shows whether audio is being raised or reduced. **Output** is the volume currently applied to the player; **Selected** is your chosen slider percentage. Browser audio capture support and stream restrictions vary. If capture fails or becomes inaccessible, ordinary playback continues at your chosen volume. You may need to click the player to activate analysis after a reload. Turning normalization off, or setting the slider mode to **Off**, releases analysis and restores your chosen volume while preserving mute. The opt-in remains saved when slider mode is Off.
-
-A small, static waveform icon tucked into the volume ring's upper-right edge shows normalization is on. It stays visible during normal startup, pause, buffering, mute, and zero volume. It hides if audio analysis is blocked or unavailable, or the option is off. It slightly overlaps the outer arc while leaving the volume number clear and keeps the control's original size and round background. The main number remains your chosen volume; current status and adjusted output are available under Audio in Volume Slider Options. Temporary audio access failures retry automatically.
+- **Status:** A waveform icon shows it’s on. Under Audio, **Selected** is your chosen volume and **Output** is the adjusted level.
+- **Limits:** It adds a small audio delay and won’t make every source equally loud. If unavailable, ordinary playback continues at your chosen volume.
+- **Privacy:** Audio stays on your device, with no microphone access, recording, or uploads.
 
 <table>
   <tr>
@@ -130,9 +126,7 @@ A small, static waveform icon tucked into the volume ring's upper-right edge sho
   </tr>
 </table>
 
-**Active** means normalization is processing the audio. Quiet passages and silence keep the source connected.
-
-Analysis stays on your device and uses only the playing media element. It does not request microphone access, record audio, send audio anywhere, or route a second copy to your speakers. For implementation and test details, see [normalization](docs/normalization.md).
+See the [normalization guide](docs/normalization.md) for compatibility and troubleshooting.
 
 ## Development
 
