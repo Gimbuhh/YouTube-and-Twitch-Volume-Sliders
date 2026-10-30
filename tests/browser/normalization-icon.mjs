@@ -21,10 +21,14 @@ try {
       ? '<div id="movie_player" tabindex="0"><video></video><div class="ytp-left-controls"><div class="ytp-volume-area"><button class="ytp-mute-button"><svg><path d="M8 15h4l5-5v16l-5-5H8z"/></svg></button></div></div><div class="ytp-right-controls"><button class="ytp-settings-button">Settings</button></div><div data-layer="4" style="display:none" class="ytp-bezel-text-hide"><div class="ytp-bezel-text-wrapper"><div class="ytp-bezel-text"></div></div><div class="ytp-bezel" role="status" aria-label="Play"><div class="ytp-bezel-icon"></div></div></div></div>'
       : '<div class="video-player" tabindex="0" data-a-target="player-overlay-click-handler"><video></video><div data-a-target="player-controls"><div class="player-controls__left-control-group"><div data-a-target="player-volume-slider"></div></div><div class="player-controls__right-control-group"><button data-a-target="player-settings-button">Settings</button></div></div></div>';
     await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><style>
-      body{margin:24px;background:#111;color:white;font-family:Arial}#movie_player,.video-player{position:relative;width:900px;height:330px;overflow:hidden;background:#222}
+      body{margin:24px;background:#111;color:white;font-family:Arial}#movie_player,.video-player{position:relative;width:900px;height:330px;overflow:hidden;background:#222;outline:none}
       video{display:block;width:900px;height:290px}.ytp-left-controls,.ytp-right-controls{position:absolute;bottom:0;height:40px;display:flex;align-items:center}.ytp-left-controls{left:0}.ytp-right-controls{right:0}
       [data-a-target="player-controls"]{height:40px;display:flex;align-items:center;justify-content:space-between}.player-controls__left-control-group,.player-controls__right-control-group{display:flex;align-items:center}
       .ytp-volume-area,[data-a-target="player-volume-slider"]{width:60px;height:32px}
+      /* Match YouTube's transparent native control instead of the browser's
+         default button and oversized intrinsic SVG spilling under the pill. */
+      .ytp-mute-button{width:40px;height:32px;padding:0;border:0;background:transparent;color:white}
+      .ytp-mute-button svg{display:block;width:100%;height:100%;fill:currentColor}
       .ytp-bezel-text-wrapper,.ytp-bezel{animation:1s forwards native-bezel-fade}
       @keyframes native-bezel-fade{0%{opacity:0}25%,75%{opacity:1}100%{opacity:0}}
     </style></head><body>${host}</body></html>` }));
