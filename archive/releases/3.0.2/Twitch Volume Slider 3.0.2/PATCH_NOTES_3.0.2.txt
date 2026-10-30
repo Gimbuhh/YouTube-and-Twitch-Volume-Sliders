@@ -1,4 +1,0 @@
-## Fixed
-
-- **Both:** Audio resumes smoothly with **Auto-normalize volume** enabled, preventing the robotic burst and occasional short pop when playing a paused video.
-- **Both:** The normalization waveform stays visible through pause and resume, including brief waits for the audio stream. Confirmed audio failures still hide it.

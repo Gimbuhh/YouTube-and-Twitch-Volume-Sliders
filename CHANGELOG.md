@@ -2,18 +2,12 @@
 
 All notable changes to the maintained userscripts are documented here. Historical release notes from before the source project was established are preserved under `archive/legacy/`.
 
-## 3.0.2 - 2026-10-30
+## 3.0.1 - 2026-10-30
 
 ### Fixed
 
 - **Both:** Resuming a paused video with Auto-normalize volume enabled no longer produces a robotic burst or a short pop.
 - **Both:** The normalization icon stays visible while playback and captured audio resume, instead of briefly disappearing.
-
-## 3.0.1 - 2026-10-30
-
-### Fixed
-
-- **Both:** Resuming a paused video with Auto-normalize volume enabled no longer briefly distorts the audio.
 
 ## 3.0 - 2026-10-28
 

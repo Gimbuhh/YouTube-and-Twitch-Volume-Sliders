@@ -61,7 +61,7 @@ Version 3.0 introduces opt-in **Auto-normalize volume**. Enable it in **Volume S
 
 Download: [GitHub Releases](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases)
 
-Install version **3.0.2**: [YouTube userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v3.0.2/YouTube.Volume.Slider.3.0.2.user.js) or [Twitch userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v3.0.2/Twitch.Volume.Slider.3.0.2.user.js). Approve the install prompt in your userscript manager, then reload the video page.
+Install version **3.0.1**: [YouTube userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v3.0.1/YouTube.Volume.Slider.3.0.1.user.js) or [Twitch userscript](https://github.com/Gimbuhh/YouTube-and-Twitch-Volume-Sliders/releases/download/v3.0.1/Twitch.Volume.Slider.3.0.1.user.js). Approve the install prompt in your userscript manager, then reload the video page.
 
 ### Tampermonkey Setup
 
